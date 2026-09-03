@@ -2,7 +2,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { addWorktree, git, initRepo } from "@sdlc/adapter-git";
+import { addWorktree, commitWritePlan, git, initRepo, readTree } from "@sdlc/adapter-git";
+import { deriveChange, liftFreeze, loadRepo } from "@sdlc/core";
 import { PO, writeSeed } from "@sdlc/fixtures";
 import { installHooks, runHook, type HookInput } from "../src/index.js";
 
@@ -46,6 +47,23 @@ describe("test-freeze (acceptance k)", () => {
     expect(lines).toHaveLength(before + 1);
     const last = JSON.parse(lines.at(-1) ?? "{}") as { event: string; actor: { type: string; session: string }; data: { hook: string; path: string } };
     expect(last).toMatchObject({ event: "hook.blocked", actor: { type: "agent", session: "sess-t" }, data: { hook: "test-freeze", path: "test/export/csv.test.ts" } });
+  });
+  it("honours a freeze lift the engineer recorded on the default branch (2.7): once, for that file, from the console's ledger", async () => {
+    const { root, wt } = await seededWorktree();
+    expect((await runHook("test-freeze", edit(wt, "test/export/csv.test.ts"))).exitCode).toBe(2);
+    // the lift is a console decision committed on main; the task branch never merged it
+    const repo = loadRepo(await readTree(root, "HEAD"));
+    const files = repo.changes.get("CHG-0018");
+    if (!files) throw new Error("CHG-0018");
+    const r = liftFreeze(repo, deriveChange(repo, files), { path: "test/export/csv.test.ts", reason: "fixture needs a zero-total row" }, { now: "2026-09-04T09:00:00Z", newId: () => "01J8Z6Q7Y2K3M4N5P6Q7R8S9TM", actor: { id: "eng@veri.example" } });
+    if (!r.ok) throw new Error(JSON.stringify(r.diagnostics));
+    await commitWritePlan(root, r.plan, { identity: { id: "eng@veri.example", name: "Eli Ng" } });
+    const lifted = await runHook("test-freeze", edit(wt, "test/export/csv.test.ts"));
+    expect(lifted.exitCode).toBe(0);
+    expect(lifted.reason).toContain("freeze lifted once for test/export/csv.test.ts");
+    // other test files stay frozen; the repro test itself too
+    expect((await runHook("test-freeze", edit(wt, "test/export/other.test.ts"))).exitCode).toBe(2);
+    expect((await runHook("test-freeze", edit(wt, "test/export/zero-total.test.ts"))).exitCode).toBe(2);
   });
   it("does nothing for non-edit tools or outside a change branch", async () => {
     const { root, wt } = await seededWorktree();

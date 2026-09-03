@@ -39,9 +39,14 @@ Task: read the accepted intent.md and spec.md and this codebase (read-only), the
         : v.warning
           ? `\nVisual check: ${v.warning}. UI changes cannot be verified visually in this session; keep them minimal and describe them in your notes.`
           : "";
+      const repro = p.view.kind === "fix" && p.view.repro?.state !== "committed"
+        ? `\nRepro first (this is a fix): ${p.view.reproRejection ? `the engineer sent your last repro test back — "${p.view.reproRejection.reason}". ` : ""}write the failing test under the test globs from CLAUDE.md before touching any code, run it, and call mcp__sdlc__report_repro with testPath, failureReason and the verbatim failing output (it commits the test alone). Then stop: the engineer confirms it fails for the right reason (the test freeze begins) or sends it back, and your session is resumed either way. Do not fix the code before that.`
+        : p.view.kind === "fix"
+          ? `\nTest freeze: the repro test ${p.view.repro?.testPath ?? ""} is committed at ${p.view.repro?.sha?.slice(0, 7) ?? ""} and must stay unchanged; no edits under the test globs (the test-freeze hook blocks them) — make the repro test pass by fixing the code, and propose any test change to the engineer with mcp__sdlc__request_input.`
+          : "";
       return `${COMMON(p)}
 
-Task: implement the accepted plan.md in this worktree on the current branch. Target (done criterion): ${p.target ?? "see plan.md acceptance line"}.${visual}
+Task: implement the accepted plan.md in this worktree on the current branch. Target (done criterion): ${p.target ?? "see plan.md acceptance line"}.${repro}${visual}
 Rules: stay within the files listed in plan.md (the plan-sync hook blocks commits outside it — update plan.md in the same commit if the plan must change); never edit tests under a test freeze (the test-freeze hook blocks it — use mcp__sdlc__request_input to propose test changes); run the verification commands from CLAUDE.md after every meaningful step and record each run with mcp__sdlc__report_round (one result per command, verbatim output excerpt); commit your work on this branch with messages like "sdlc(${p.view.id}): <what>"; when the last round is all green, call mcp__sdlc__report_done. Done is only accepted when the latest round is green with output.${guidance}`;
     }
     case "review":

@@ -1,5 +1,6 @@
 import { deriveChange, proposeTasks, confirmTasks, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
 import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, type GitIdentity } from "@sdlc/adapter-git";
+import { readReproDraft } from "@sdlc/mcp";
 import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
@@ -414,6 +415,12 @@ export class Engine {
     const files = repo.changes.get(session.changeId);
     if (!files) return null;
     const view = deriveChange(repo, files);
+    // repro first (spec 5B.3): a fix whose failing test awaits the engineer's judgment is not run — the red would only resume the agent into fixing before the confirmation
+    if (view.kind === "fix" && view.repro?.state !== "committed" && readReproDraft(session.worktreePath, session.id)) {
+      this.log(`${view.id}: repro test reported by ${session.id} — waiting on you: confirm or send back; no per-change run`);
+      this.opts.store.rebuild();
+      return null;
+    }
     // one run per (session, worktree head): a replayed exit cannot double-run, new code can
     const head = await headSha(session.worktreePath, "HEAD").catch(() => "nohead");
     const key = `${session.changeId}:${view.cycle}:4:run:${session.id}:r${session.resumeCount ?? 0}:${head.slice(0, 12)}${trigger ? `:${trigger}` : ""}`;

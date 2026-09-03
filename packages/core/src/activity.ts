@@ -59,6 +59,8 @@ export function describeEvent(e: Event): string {
       return `repro test fails: ${e.data.failureReason}`;
     case "repro.confirmed":
       return `confirmed repro test ${e.data.testPath} @ ${e.data.sha.slice(0, 7)}`;
+    case "repro.rejected":
+      return `sent back repro test ${e.data.testPath}: ${e.data.reason}`;
     case "freeze.lifted":
       return `lifted test freeze for ${e.data.path}: ${e.data.reason}`;
     case "evals.green":

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Repo } from "@sdlc/core";
 import { eventsNamed } from "@sdlc/core";
-import { loopState, readRounds, type StoredRound } from "@sdlc/mcp";
+import { loopState, readReproDraft, readRounds, type ReproDraft, type StoredRound } from "@sdlc/mcp";
 import type { RoundResult } from "@sdlc/schemas";
 import type { SessionRecord } from "../snapshot.js";
 
@@ -18,6 +18,8 @@ export interface SessionLoop {
 
 export interface StoredSession extends SessionRecord {
   loop: SessionLoop;
+  /** The repro test this build session reported and the engineer has not yet judged (fix changes, spec 5B.3). */
+  repro?: ReproDraft | null;
   waitingOnYou: { reason: string } | null;
   verifier: { ran: boolean; saw: boolean; mismatch: boolean } | null;
   testEditAttempts: number;
@@ -112,10 +114,22 @@ export function enrich(s: StoredSession, repo: Repo | null): StoredSession {
   const testEditAttempts = eventsNamed(mine, "hook.blocked").filter((e) => e.data.hook === "test-freeze").length;
   const verifier = eventsNamed(mine, "verifier.result").at(-1)?.data ?? null;
   const state = loopState(rounds, max);
-  const waitingOnYou = waiting ? { reason: waiting.reason } : state === "stalled" ? { reason: "loop not converging" } : s.status === "awaiting_engineer" ? { reason: "run the session command in your terminal" } : null;
+  const draft = s.kind === "build" && existsSync(s.worktreePath) ? readReproDraft(s.worktreePath, s.id) : null;
+  const committed = files?.change?.repro?.state === "committed";
+  const repro = draft && !committed ? draft : null;
+  const waitingOnYou = waiting
+    ? { reason: waiting.reason }
+    : repro && !repro.rejected
+      ? { reason: "confirm the repro test — fails for the right reason?" }
+      : state === "stalled"
+        ? { reason: "loop not converging" }
+        : s.status === "awaiting_engineer"
+          ? { reason: "run the session command in your terminal" }
+          : null;
   return {
     ...s,
     loop: { state, rounds: rounds.map((r) => ({ n: r.n, ts: r.ts, results: r.results, ...(r.screenshotRef ? { screenshotRef: r.screenshotRef } : {}), ...(r.diffPct !== undefined ? { diffPct: r.diffPct } : {}) })) },
+    repro,
     waitingOnYou,
     testEditAttempts,
     verifier,

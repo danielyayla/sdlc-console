@@ -9,6 +9,9 @@ import { WebSocketServer, type WebSocket } from "ws";
 import {
   acceptGate,
   confirmReproTest,
+  dismissPrAutoFinding,
+  liftTestFreeze,
+  rejectReproTest,
   confirmTaskSplit,
   findingDismiss,
   findingEscalate,
@@ -25,10 +28,16 @@ import {
 } from "./actions.js";
 import type { Engine, JobStore } from "./engine/index.js";
 import { receiveWebhook, type DeliveryLog } from "./github/webhooks.js";
-import { downgradeSession, launchSession, stopSession, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
+import { clearRepro, downgradeSession, launchSession, markReproRejected, reproDraftFor, resumeAfterRepro, stopSession, verifyReproCommit, type LaunchDeps, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { ActionError, type StateStore } from "./store.js";
 
 type Body = Record<string, unknown>;
+
+/** Launcher dependencies from the app options; null when sessions cannot be launched here. */
+function launchDeps(options: AppOptions, store: StateStore, registry: SessionRegistry | null): LaunchDeps | null {
+  if (!registry || !options.sdlcBin) return null;
+  return { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) };
+}
 
 function json(res: ServerResponse, status: number, value: unknown): void {
   const text = JSON.stringify(value);
@@ -265,8 +274,45 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         case "tasks/confirm":
           reply(res, await confirmTaskSplit(store, id, Array.isArray(body["tasks"]) ? (body["tasks"] as never) : undefined));
           return;
-        case "repro/confirm":
-          reply(res, await confirmReproTest(store, id, { testPath: str(body, "testPath"), failureReason: str(body, "failureReason"), sha: str(body, "sha"), output: str(body, "output", false) }));
+        case "repro/confirm": {
+          // the session's draft is the default; explicit fields (CLI, a manual repro) override it — the commit is verified by sha either way
+          const owner = options.registry ? reproDraftFor(options.registry, id) : null;
+          const input = { testPath: str(body, "testPath", false) || owner?.draft.testPath || "", failureReason: str(body, "failureReason", false) || owner?.draft.failureReason || "", sha: str(body, "sha", false) || owner?.draft.sha || "", output: str(body, "output", false) || owner?.draft.output || "" };
+          if (!input.testPath || !input.failureReason || !input.sha) throw new ActionError(400, "repro confirm needs testPath, failureReason and sha — or a session that reported the repro test");
+          await verifyReproCommit(store.root, input.sha, input.testPath);
+          const r = await confirmReproTest(store, id, input);
+          let resumed: string | null = null;
+          if (owner) {
+            clearRepro(owner);
+            const s = await resumeAfterRepro(owner, `The engineer confirmed the repro test ${input.testPath} at ${input.sha.slice(0, 7)}: it fails for the right reason. The test freeze is active — fix the code without editing files under the test globs (propose test changes with mcp__sdlc__request_input), run the verification commands, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when the repro test and everything else are green.`, launchDeps(options, store, options.registry ?? null));
+            resumed = s?.id ?? null;
+            store.rebuild();
+          }
+          reply(res, { ...r, toast: `${r.toast}${resumed ? ` · ${resumed} resumed to fix` : ""}` });
+          return;
+        }
+        case "repro/reject": {
+          const owner = options.registry ? reproDraftFor(options.registry, id) : null;
+          const testPath = str(body, "testPath", false) || owner?.draft.testPath || "";
+          if (!testPath) throw new ActionError(400, "repro reject needs testPath — or a session that reported the repro test");
+          const reason = str(body, "reason");
+          const r = await rejectReproTest(store, id, { testPath, reason });
+          let resumed: string | null = null;
+          if (owner) {
+            markReproRejected(owner, reason, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
+            const s = await resumeAfterRepro(owner, `The engineer sent the repro test ${testPath} back — wrong failure: ${reason}. Rewrite the test so it fails for the right reason, run it, and call mcp__sdlc__report_repro again with the verbatim output. Do not fix the code yet.`, launchDeps(options, store, options.registry ?? null));
+            resumed = s?.id ?? null;
+            store.rebuild();
+          }
+          reply(res, { ...r, toast: `${r.toast}${resumed ? ` · ${resumed} resumed to rewrite it` : ""}` });
+          return;
+        }
+        case "freeze/lift":
+          reply(res, await liftTestFreeze(store, id, { path: str(body, "path"), reason: str(body, "reason") }));
+          return;
+        case "auto-findings/dismiss":
+          reply(res, await dismissPrAutoFinding(store, id, { path: str(body, "path"), reason: str(body, "reason") }));
+          return;
           return;
         default:
           throw new ActionError(404, `unknown action ${action}`);

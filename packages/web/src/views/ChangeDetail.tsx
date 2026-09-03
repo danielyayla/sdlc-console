@@ -16,6 +16,22 @@ export interface ChangeDetailProps {
   onSendBack: (gate: number, feedback: string) => void;
   /** Post-merge "Add as eval": drafts a case for the platform owner. */
   onHarvest: () => void;
+  /** Repro-first (2.7): the build session's reported test awaiting the engineer, from the session registry. */
+  reproDraft?: ReproDraftView | null;
+  onReproConfirm?: () => void;
+  onReproReject?: (reason: string) => void;
+  onLiftFreeze?: (path: string, reason: string) => void;
+  onDismissAutoFinding?: (path: string, reason: string) => void;
+  prompt?: (text: string) => string | null;
+}
+
+export interface ReproDraftView {
+  session: string;
+  testPath: string;
+  failureReason: string;
+  sha: string;
+  output: string;
+  rejected?: { reason: string; at: string };
 }
 
 const STAGE_INDEX = [0, 1, 2, 3, 4, 5];
@@ -28,6 +44,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const load = p.loadArtifact ?? fetchArtifact;
+  const prompt = p.prompt ?? ((text: string) => window.prompt(text));
   useEffect(() => {
     let alive = true;
     setArtifact(null);
@@ -130,16 +147,59 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="who">{view.waitingOnYou ? `waiting on you: ${view.waitingOnYou}` : "The next human gate opens when the artifact is committed."}</div>
             </div>
           )}
+          {view.kind === "fix" && (view.stage === 3 || view.stage === 4 || view.repro) ? (
+            <div className="panel repro">
+              <div className="eyebrow">Repro first · {view.repro?.state === "committed" ? "freeze active" : p.reproDraft ? (p.reproDraft.rejected ? "sent back" : "waiting on you") : "agent writing the failing test"}</div>
+              {view.repro?.state === "committed" ? (
+                <>
+                  <div className="who">repro test <span className="mono">{view.repro.testPath}</span> committed <span className="mono">{view.repro.sha?.slice(0, 7)}</span> · fails: {view.repro.failureReason}</div>
+                  <div className="who">no edits under the test globs until merge{view.freezeLifts.length > 0 ? ` · lifted once for ${view.freezeLifts.map((l) => l.path).join(", ")}` : ""}</div>
+                  {role === "eng" && view.stage <= 4 && p.onLiftFreeze ? (
+                    <div className="actions">
+                      <button className="btn" disabled={busy} title="one lift per file per change; logged on the ledger" onClick={() => { const path = prompt("Lift the test freeze for which file? (path)"); if (!path || path.trim() === "") return; const reason = prompt(`Reason for lifting the freeze on ${path.trim()} (required):`); if (!reason || reason.trim() === "") return; setBusy(true); p.onLiftFreeze?.(path.trim(), reason.trim()); }}>Lift freeze once</button>
+                    </div>
+                  ) : null}
+                </>
+              ) : p.reproDraft ? (
+                <>
+                  <div className="who"><span className="mono">{p.reproDraft.testPath}</span> · commit <span className="mono">{p.reproDraft.sha.slice(0, 7)}</span> (the test alone) · session {p.reproDraft.session}</div>
+                  <div className="who">fails: {p.reproDraft.failureReason}</div>
+                  <pre className="viewer-body cmd">{p.reproDraft.output}</pre>
+                  {p.reproDraft.rejected ? <div className="chip amber">sent back: {p.reproDraft.rejected.reason} — the session rewrites the test</div> : role === "eng" ? (
+                    <div className="actions">
+                      <button className="btn primary" disabled={busy} title="commits the repro block and the proof verbatim; the test freeze begins" onClick={() => { setBusy(true); p.onReproConfirm?.(); }}>Fails for the right reason → commit</button>
+                      <button className="btn" disabled={busy} onClick={() => { const reason = prompt("Wrong failure — why? (required, goes to the session)"); if (!reason || reason.trim() === "") return; setBusy(true); p.onReproReject?.(reason.trim()); }}>Wrong failure — send back</button>
+                    </div>
+                  ) : <div className="waiting">The engineer decides whether this failure is the right one.</div>}
+                </>
+              ) : (
+                <div className="who">{view.reproRejection ? `last verdict: wrong failure — ${view.reproRejection.reason}` : "The build session writes the failing test first and reports it; you confirm it fails for the right reason before any code changes."}</div>
+              )}
+            </div>
+          ) : null}
           {view.pr ? (
             <div className="panel pr">
               <div className="eyebrow">Pull request · {view.pr.provider}</div>
               <h3>{view.pr.url ? <a href={view.pr.url} target="_blank" rel="noreferrer">#{view.pr.number} {view.pr.branch}</a> : view.pr.branch}</h3>
               <div className="who">→ {view.pr.baseBranch} · head {view.pr.headSha.slice(0, 7)}{view.pr.mergeSha ? ` · merged ${view.pr.mergeSha.slice(0, 7)}` : ""}</div>
               <ul className="activity">
-                {view.pr.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.verdict}</span></li>)}
+                {view.pr.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.summary ? `${c.verdict} · ${c.summary}` : c.verdict}</span></li>)}
                 <li><span className={`glyph ${view.pr.planMatches === false ? "system" : "human"}`}>{view.pr.planMatches === null ? "?" : view.pr.planMatches ? "✓" : "✗"}</span><span>plan matches</span><span className="when">{view.pr.planMatches === null ? "unknown" : view.pr.planMatches ? "yes" : "reviewer judgment"}</span></li>
                 {view.pr.findings ? <li><span className="glyph system">·</span><span>findings</span><span className="when">{view.pr.findings.high} high · {view.pr.findings.medium} medium · {view.pr.findings.low} low</span></li> : null}
               </ul>
+              {(view.pr.autoFindings ?? []).length > 0 ? (
+                <ul className="findings">
+                  {(view.pr.autoFindings ?? []).map((f) => (
+                    <li key={`${f.rule}:${f.path}`}>
+                      <span className={`chip ${f.dismissal ? "gray" : "red"}`}>{f.dismissal ? "dismissed" : "blocks merge"}</span>
+                      <span className="title">{f.title}</span>
+                      <span className="when">{f.path}</span>
+                      <pre className="detail">{f.detail}{f.dismissal ? `\ndismissed by ${f.dismissal.by}: ${f.dismissal.reason}` : ""}</pre>
+                      {!f.dismissal && role === "eng" && !view.pr?.mergedAt && p.onDismissAutoFinding ? <div className="actions"><button className="btn" disabled={busy} onClick={() => { const reason = prompt(`Dismiss the finding on ${f.path} — reason (required):`); if (!reason || reason.trim() === "") return; setBusy(true); p.onDismissAutoFinding?.(f.path, reason.trim()); }}>Dismiss with reason</button></div> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {view.pr.reviewers.length > 0 ? <div className="who">reviewers: {view.pr.reviewers.join(", ")}</div> : null}
               <div className="who">
                 {view.pr.review

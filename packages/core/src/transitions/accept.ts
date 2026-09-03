@@ -52,6 +52,13 @@ export function accept(repo: Repo, view: ChangeView, gate: GateNumber, ctx: Tran
     if (!files.pr) return refuse("pr.missing", "pr.yaml is missing", `${dir}/pr.yaml`);
     if (!ctx.mergeSha) return refuse("merge.sha-missing", "gate 5 needs the merge commit sha (the adapter merges first)");
     if (repo.config.codeHost === "github" && ctx.source !== "pr.merge") return refuse("gate.via-code-host", "in github mode gate 5 is the pull request merge (source pr.merge)");
+    // spec 5B.3 / stage 05 validation: the console's merge waits on the repro proof and on undismissed auto-findings; a merge already done on the code host is recorded as it happened
+    if (ctx.source !== "pr.merge") {
+      const open = (files.pr.autoFindings ?? []).filter((f) => !f.dismissal);
+      if (open.length > 0) return refuse("merge.auto-finding", `${open.length} auto-finding${open.length === 1 ? "" : "s"} block${open.length === 1 ? "s" : ""} the merge (${open.map((f) => `${f.title}: ${f.path}`).join("; ")}) — dismiss with a reason first`, `${dir}/pr.yaml`);
+      const reproCheck = files.pr.checks.find((c) => c.name === "repro");
+      if (view.kind === "fix" && reproCheck && reproCheck.verdict !== "pass") return refuse("merge.repro-red", `the repro proof is ${reproCheck.verdict}${reproCheck.summary ? ` (${reproCheck.summary})` : ""} — a fix merges only with its repro test committed before the fix, unchanged and passing`, `${dir}/pr.yaml`);
+    }
     const merged = { ...files.pr, mergedAt: ctx.now, mergeSha: ctx.mergeSha };
     writes.push({ path: `${dir}/pr.yaml`, content: stringifyYaml(merged) });
     const number = files.pr.number;

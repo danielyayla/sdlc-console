@@ -122,6 +122,10 @@ export interface ChangeView {
   harvested: { id: string; status: "draft" | "active" | "retired" } | null;
   /** Visual check inputs (spec 5B): UI paths in the plan, the CLAUDE.md visual tool, the design mock, and the warning when UI work has no visual check. */
   visual: VisualView;
+  /** Test-freeze lifts this cycle (one per file per change, FR-22); the hook and the runner honour them. */
+  freezeLifts: { path: string; reason: string; by: string; at: string }[];
+  /** The engineer's last "wrong failure" verdict on a repro test that is not yet committed. */
+  reproRejection: { testPath: string; reason: string; at: string } | null;
   waitingOnYou: string | null;
   activity: ActivityEntry[];
   tasks: NonNullable<ChangeFiles["tasks"]>["tasks"];
@@ -369,6 +373,16 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     pr: files.pr,
     findings,
     visual: deriveVisual(files, planFiles, repo.verification),
+    freezeLifts: eventsNamed(events, "freeze.lifted").map((e) => ({ path: e.data.path, reason: e.data.reason, by: e.actor.id, at: e.ts })),
+    reproRejection: (() => {
+      if (change.repro?.state === "committed") return null;
+      const rejected = lastEvent(events, "repro.rejected");
+      const failed = lastEvent(events, "repro.failed");
+      if (!rejected) return null;
+      // a newer repro.failed means the session already answered the rejection
+      if (failed && indexOf(events, failed) > indexOf(events, rejected)) return null;
+      return { testPath: rejected.data.testPath, reason: rejected.data.reason, at: rejected.ts };
+    })(),
     harvested: (() => {
       const c = repo.evalCases.find((x) => x.source.type === "change" && x.source.ref === change.id);
       return c ? { id: c.id, status: c.status } : null;
@@ -419,6 +433,8 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     findings: [],
     harvested: null,
     visual: { uiPaths: [], tool: null, mock: null, warning: null },
+    freezeLifts: [],
+    reproRejection: null,
     waitingOnYou: null,
     activity: activityFeed(files.events),
     tasks: [],

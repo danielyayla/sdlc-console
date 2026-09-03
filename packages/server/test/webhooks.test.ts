@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, initRepo, isAncestor, readTree } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo } from "@sdlc/core";
-import { PO, writeSeed } from "@sdlc/fixtures";
+import { PO, realizeSeedRepro, writeSeed } from "@sdlc/fixtures";
 import { appendFinding } from "@sdlc/mcp";
 import { ActionError, DeliveryLog, Engine, JobStore, SessionRegistry, StateStore, acceptGate, createApp, launchSession, receiveWebhook, type Exec } from "../src/index.js";
 import { startFakeGitHub, type FakeGitHub } from "../../adapters/github/test/fake-github.js";
@@ -91,6 +91,7 @@ async function buildAndRun(h: ReturnType<typeof harness>, dir: string) {
   await h.store.refresh();
   const launched = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
   const wt = launched.session.worktreePath;
+  await realizeSeedRepro(dir, wt); // 2.7: the fix's repro proof
   mkdirSync(join(wt, "src/export"), { recursive: true });
   writeFileSync(join(wt, "src/export/csv.ts"), "export const fixed = true;\n");
   await git(wt, ["add", "-A"]);
@@ -220,7 +221,7 @@ describe("pull_request.synchronize: the code PR follows its tested head (2.4)", 
     expect((await git(worktree, ["rev-parse", "HEAD"])).trim()).toBe(h2);
     view = await viewOf(dir, "CHG-0018");
     expect(view.stage).toBe(5);
-    expect(view.pr).toMatchObject({ number: 1, headSha: h2, checks: [{ name: "evidence", verdict: "pass" }, { name: "evals", verdict: "pass" }] });
+    expect(view.pr).toMatchObject({ number: 1, headSha: h2, checks: [expect.objectContaining({ name: "evidence", verdict: "pass" }), expect.objectContaining({ name: "evals", verdict: "pass" }), expect.objectContaining({ name: "repro", verdict: "pass" })] });
     expect(view.pr?.review).toBeUndefined();
     expect(view.pr?.findings).toBeUndefined();
     expect(view.findings).toEqual([]);
@@ -229,7 +230,7 @@ describe("pull_request.synchronize: the code PR follows its tested head (2.4)", 
     expect(synced?.text).toBe(`PR #1 head moved to ${h2.slice(0, 7)} — run green on the new head`);
     expect(synced?.actor).toBe("system");
     expect(gh.state.pulls).toHaveLength(1);
-    expect(gh.state.statuses.filter((s) => s.sha === h2).map((s) => s.body["context"])).toEqual(["sdlc/evidence", "sdlc/evals"]);
+    expect(gh.state.statuses.filter((s) => s.sha === h2).map((s) => s.body["context"])).toEqual(["sdlc/evidence", "sdlc/evals", "sdlc/repro"]);
     expect((await git(dir, ["log", "-1", "--format=%s"])).trim()).toBe(`sdlc(CHG-0018): PR #1 head → ${h2.slice(0, 7)}`);
     expect(h.jobs.list().filter((j) => j.kind === "per-change-run").map((j) => j.key)).toContainEqual(expect.stringContaining(`${h2.slice(0, 12)}:webhook`));
     // the same head again: nothing to run

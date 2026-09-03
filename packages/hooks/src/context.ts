@@ -29,5 +29,30 @@ export async function hookContext(input: HookInput, env: Record<string, string |
   const repo = loadRepo(await readTree(root, "HEAD"));
   const files = repo.changes.get(changeId);
   if (!files) return null;
-  return { root, branch, changeId, repo, files, view: deriveChange(repo, files) };
+  const merged = await withDefaultBranchLedger(root, branch, repo, files);
+  return { root, branch, changeId, repo, files: merged, view: deriveChange(repo, merged) };
+}
+
+/**
+ * Human decisions about a session (a freeze lift, a repro confirmation) are
+ * committed on the default branch by the console; the task branch only
+ * receives them at merge time. The hook reads both ledgers so a lift recorded
+ * in the console is honoured in the worktree it was granted for.
+ */
+async function withDefaultBranchLedger(root: string, branch: string, repo: Repo, files: ChangeFiles): Promise<ChangeFiles> {
+  const base = repo.config.defaultBranch;
+  if (branch === base) return files;
+  try {
+    const baseRepo = loadRepo(await readTree(root, base, { prefixes: [`sdlc/changes/${files.id}`, "sdlc/config.yaml"] }));
+    const baseFiles = baseRepo.changes.get(files.id);
+    if (!baseFiles) return files;
+    const known = new Set(files.events.map((e) => e.id));
+    const extra = baseFiles.events.filter((e) => !known.has(e.id));
+    if (extra.length === 0 && !baseFiles.change) return files;
+    // the console's change.yaml (repro committed, freeze active) is the newer truth for a task branch cut before it
+    const change = files.change && baseFiles.change && baseFiles.change.repro?.state === "committed" && files.change.repro?.state !== "committed" ? { ...files.change, repro: baseFiles.change.repro } : files.change;
+    return { ...files, change, events: [...files.events, ...extra] };
+  } catch {
+    return files;
+  }
 }

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, initRepo, readTree } from "@sdlc/adapter-git";
 import { deriveChange, evalGate, loadRepo } from "@sdlc/core";
-import { PO, writeSeed } from "@sdlc/fixtures";
+import { PO, realizeSeedRepro, writeSeed } from "@sdlc/fixtures";
 import { Engine, JobStore, SessionRegistry, StateStore, acceptGate, createApp, launchSession, runSuite, type Exec } from "../src/index.js";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.sh", import.meta.url));
@@ -163,6 +163,7 @@ describe("engine job, console endpoints and harvest (2.5)", () => {
     // build → run → PR → merge, then harvest
     const launched = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE });
     const wt = launched.session.worktreePath;
+    await realizeSeedRepro(dir, wt); // 2.7: the merge needs the repro proof
     mkdirSync(join(wt, "src/export"), { recursive: true });
     writeFileSync(join(wt, "src/export/csv.ts"), "export const fixed = true;\n");
     await git(wt, ["add", "-A"]);

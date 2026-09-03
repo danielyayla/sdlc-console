@@ -113,6 +113,17 @@ export function changeRules(repo: Repo, files: ChangeFiles, view: ChangeView): R
     if (files.tasks.changeId !== id) out.push(block(id, `${dir}/tasks.yaml`, "tasks.change-id", `tasks.yaml belongs to ${files.tasks.changeId}`));
   }
 
+  // a lift is single-use per file per change (FR-22): a second freeze.lifted on the same path is not a decision the ledger accepts
+  {
+    const seenLift = new Map<string, string>();
+    for (const e of eventsNamed(files.events, "freeze.lifted")) {
+      const key = `${e.cycle}:${e.data.path}`;
+      const first = seenLift.get(key);
+      if (first) out.push(block(id, `${dir}/log.jsonl`, "freeze.lifted-twice", `${e.actor.id} lifted the test freeze on ${e.data.path} again (first by ${first}); a lift is once per file per change`));
+      else seenLift.set(key, e.actor.id);
+    }
+  }
+
   // repro consistency
   if (change.repro?.state === "committed") {
     if (!change.repro.sha) out.push(block(id, `${dir}/change.yaml`, "repro.sha.missing", "repro state is committed but no sha is recorded"));

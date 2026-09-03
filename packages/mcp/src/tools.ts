@@ -1,14 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { blobSha, commitWritePlan, currentBranch, defaultBranch, isRepo, newUlid, readTree, repoRoot } from "@sdlc/adapter-git";
+import { blobSha, commitWritePlan, currentBranch, defaultBranch, git, isRepo, newUlid, readTree, repoRoot } from "@sdlc/adapter-git";
 import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
 import { appendHookEvent } from "@sdlc/hooks";
-import { changeId as changeIdSchema, parseArtifact, parsePlan, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
+import { changeId as changeIdSchema, compileGlobs, parseArtifact, parsePlan, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
 import { z } from "zod";
 import { buildContext } from "./context-bundle.js";
 import { agentIdentity, sessionIdFrom } from "./identity.js";
-import { appendFinding, appendRound, clearWaiting, dirtyHash, loopState, readFindings, readRounds, setWaiting, type StoredFinding, type StoredRound } from "./sessions.js";
+import { appendFinding, appendRound, clearWaiting, dirtyHash, loopState, readFindings, readReproDraft, readRounds, setWaiting, writeReproDraft, type StoredFinding, type StoredRound } from "./sessions.js";
 
 export interface ServerOptions {
   cwd: string;
@@ -43,7 +43,7 @@ class Refusal extends Error {
   }
 }
 
-/** The ten agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
+/** The eleven agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
 export function createSdlcServer(opts: ServerOptions): McpServer {
   const env = opts.env ?? process.env;
   const now = () => (opts.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -212,6 +212,39 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
   );
 
   server.registerTool(
+    "report_repro",
+    {
+      description: "Fix changes, repro first (spec 5B.3): report the failing test you wrote. Commits that one file alone on the task branch, records repro.failed and keeps the draft for the engineer, who confirms it fails for the right reason (freeze begins) or sends it back. Then stop: the fix continues once the engineer has decided. Never confirms anything itself.",
+      inputSchema: { changeId: changeIdSchema.optional(), sessionId: z.string().optional(), testPath: z.string().min(1), failureReason: z.string().min(1), output: z.string().min(1) },
+    },
+    (args) =>
+      guard(async () => {
+        const l = await load();
+        const id = args.changeId ?? /^(CHG-\d{4})/.exec(l.branch)?.[1] ?? null;
+        if (!id) throw new Refusal("no change context on this branch; pass changeId or work on a CHG-NNNN/<task> branch");
+        requireChangeBranch(l, id);
+        const { files, view } = viewOf(l.repo, id);
+        if (view.kind !== "fix") throw new Refusal(`${id} is a ${view.kind} change; repro-first applies to fixes`);
+        if (view.stage !== 4) throw new Refusal(`repro tests are written during Build/Test (stage 4); ${id} is at stage ${view.stage}`);
+        if (view.repro?.state === "committed") throw new Refusal(`${id} already has its repro test committed (${view.repro.testPath ?? ""}); the freeze is active — fix the code`);
+        const testPath = args.testPath.replace(/^\.\//, "");
+        if (!existsSync(join(l.root, testPath))) throw new Refusal(`${testPath} does not exist in this worktree`);
+        const globs = l.repo.verification?.testGlobs ?? [];
+        if (globs.length > 0 && !compileGlobs(globs)(testPath)) throw new Refusal(`${testPath} is not under the test globs (${globs.join(", ")}) from CLAUDE.md`);
+        // the repro commit carries the test alone: the console verifies that by sha before the freeze begins
+        await git(l.root, ["add", "--", testPath]);
+        await git(l.root, ["commit", "-q", "-m", `sdlc(${id}): repro test ${testPath}`, "--", testPath]);
+        const sha = (await git(l.root, ["rev-parse", "HEAD"])).trim();
+        const touched = (await git(l.root, ["diff-tree", "--no-commit-id", "--name-only", "-r", sha])).split("\n").map((s) => s.trim()).filter(Boolean);
+        if (touched.length !== 1 || touched[0] !== testPath) throw new Refusal(`the repro commit ${sha.slice(0, 7)} touches ${touched.join(", ")}; it must contain ${testPath} alone`);
+        const session = sessionIdFrom(env, args.sessionId);
+        appendHookEvent(l.root, id, files.change?.cycle ?? 1, session, "repro.failed", { testPath, failureReason: args.failureReason }, new Date(now()));
+        writeReproDraft(l.root, session, { testPath, failureReason: args.failureReason, sha, output: args.output, ts: now() });
+        return ok({ changeId: id, testPath, sha, previous: readReproDraft(l.root, session)?.rejected ?? null, note: "reported — stop here; the engineer confirms the failure is the right one (freeze begins) or sends it back with a reason, and your session is resumed either way" });
+      }),
+  );
+
+  server.registerTool(
     "report_round",
     {
       description: "Record one feedback-loop round (named command results with verbatim excerpts). Returns the loop state: iterating, green, stalled or flaky.",
@@ -319,4 +352,4 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
   return server;
 }
 
-export const AGENT_TOOL_NAMES = ["list_work", "get_change", "get_context", "propose_artifact", "submit_plan_revision", "report_round", "report_done", "report_finding", "request_input", "log_note"] as const;
+export const AGENT_TOOL_NAMES = ["list_work", "get_change", "get_context", "propose_artifact", "submit_plan_revision", "report_repro", "report_round", "report_done", "report_finding", "request_input", "log_note"] as const;

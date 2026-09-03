@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -58,6 +58,15 @@ describe("per-change run → PR → stage 5 → merge → stage 6 → loop (acce
     // a build session on CHG-0018's task branch with a code change
     const launched = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, { root: dir, registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE });
     const wt = launched.session.worktreePath;
+    // 2.7: the seed's repro sha is a placeholder; a fix merges only with a real repro commit before the fix, so make one and point change.yaml + repro.json at it
+    mkdirSync(join(wt, "test/export"), { recursive: true });
+    writeFileSync(join(wt, "test/export/zero-total.test.ts"), "it('exports zero-total rows', () => { expect(rows).toHaveLength(4); });\n");
+    await git(wt, ["add", "--", "test/export/zero-total.test.ts"]);
+    await git(wt, ["commit", "-q", "-m", "sdlc(CHG-0018): repro test test/export/zero-total.test.ts", "--", "test/export/zero-total.test.ts"]);
+    const reproSha = (await git(wt, ["rev-parse", "HEAD"])).trim();
+    for (const rel of ["sdlc/changes/CHG-0018/change.yaml", "sdlc/changes/CHG-0018/evals/repro.json"]) writeFileSync(join(dir, rel), readFileSync(join(dir, rel), "utf8").replaceAll("e4a6f2d5a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5", reproSha));
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "sdlc(CHG-0018): repro sha"]);
     mkdirSync(join(wt, "src/export"), { recursive: true });
     writeFileSync(join(wt, "src/export/csv.ts"), "export const fixed = true;\n");
     await git(wt, ["add", "-A"]);
@@ -73,7 +82,8 @@ describe("per-change run → PR → stage 5 → merge → stage 6 → loop (acce
     expect(view.gate).toMatchObject({ s: 5, acceptLabel: "Merge" });
     expect(view.pr).toMatchObject({ provider: "local", branch: "CHG-0018/export-fix", baseBranch: "main" });
     expect(view.latestRun?.n).toBe(2);
-    expect(view.latestRun?.fileSet).toEqual(["src/export/csv.ts"]);
+    expect(view.latestRun?.fileSet).toEqual(["src/export/csv.ts", "test/export/zero-total.test.ts"]);
+    expect(view.pr?.checks.find((c) => c.name === "repro")).toEqual({ name: "repro", verdict: "pass", summary: `repro test test/export/zero-total.test.ts committed ${reproSha.slice(0, 7)} before fix · unchanged in diff · passing now` });
     expect(view.activity.slice(0, 3).map((a) => a.event)).toEqual(["stage.entered", "pr.opened", "evals.green"]);
     expect(jobs.list().map((j) => j.kind)).toEqual(["per-change-run"]);
     // idempotent: the same session exit again claims nothing

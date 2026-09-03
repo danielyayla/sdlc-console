@@ -7,6 +7,7 @@ import { init } from "./commands/init.js";
 import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
 import { evalsGate, evalsHarvest, evalsRun, renderGate, renderRun } from "./commands/evals.js";
+import { freezeCommand, reproCommand } from "./commands/repro.js";
 import { sessionCommand } from "./commands/session.js";
 import { syncCommand } from "./commands/sync.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
@@ -36,6 +37,10 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc mcp                                              (agent tools over stdio)
   sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose)
   sdlc session list | stop <id> | downgrade <id> [--reason r]   (downgrade: AUTO → SUPERVISED, never upward)
+  sdlc repro confirm <CHG> [--file t --reason r --sha s]   (fix: the reported test fails for the right reason → freeze)
+  sdlc repro reject <CHG> --reason r                    (wrong failure — send back to the session)
+  sdlc freeze lift <CHG> --file p --reason r            (once per file per change; logged)
+  sdlc freeze dismiss <CHG> --file p --reason r         (dismiss the test-freeze auto-finding blocking the merge)
   sdlc run <CHG>                                        (per-change run: verification + intersecting evals; green opens the PR)
   sdlc serve --engine                                   (launch sessions and runs automatically on transitions)
   sdlc sync                                             (GitHub mode: open artifact PRs, record merges done on GitHub, refresh the records PR)
@@ -68,6 +73,9 @@ const OPTIONS = {
   trigger: { type: "string" },
   run: { type: "string" },
   reason: { type: "string" },
+  file: { type: "string" },
+  sha: { type: "string" },
+  output: { type: "string" },
   task: { type: "string" },
   target: { type: "string" },
   mode: { type: "string" },
@@ -201,6 +209,16 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const r = await runCommand(io, sub);
         emit(io, json, r, () => `${sub}: ${r.note ?? r.state}${r.error ? ` — ${r.error}` : ""}`);
         return r.state === "failed" ? 1 : 0;
+      }
+      case "repro": {
+        const r = await reproCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
+        return 0;
+      }
+      case "freeze": {
+        const r = await freezeCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
+        return 0;
       }
       case "session": {
         const r = await sessionCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);

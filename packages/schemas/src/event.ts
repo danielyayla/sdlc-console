@@ -142,6 +142,12 @@ export const events = {
     z.strictObject({ testPath: relPath, sha: gitSha }),
     humanActor,
   ),
+  /** The engineer judged the failure wrong ("Wrong failure — send back"); the session rewrites the repro test. */
+  "repro.rejected": ev(
+    "repro.rejected",
+    z.strictObject({ testPath: relPath, reason: nonEmpty }),
+    humanActor,
+  ),
   "freeze.lifted": ev("freeze.lifted", z.strictObject({ path: relPath, reason: nonEmpty }), humanActor),
   "evals.green": ev(
     "evals.green",
@@ -251,6 +257,7 @@ export const event = z.discriminatedUnion("event", [
   events["verifier.result"],
   events["repro.failed"],
   events["repro.confirmed"],
+  events["repro.rejected"],
   events["freeze.lifted"],
   events["evals.green"],
   events["evals.red"],

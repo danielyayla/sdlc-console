@@ -87,3 +87,40 @@ export function appendFinding(root: string, session: string, finding: StoredFind
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, `${JSON.stringify(finding)}\n`, "utf8");
 }
+
+/** The repro test a build session reported (spec 5B.3): kept beside the session until the engineer confirms or sends it back. */
+export interface ReproDraft {
+  testPath: string;
+  failureReason: string;
+  /** Commit on the task branch containing the test alone. */
+  sha: string;
+  /** Verbatim failing output. */
+  output: string;
+  ts: string;
+  rejected?: { reason: string; at: string };
+}
+
+export function reproFile(root: string, session: string): string {
+  return join(root, ".sdlc-state", "sessions", session, "repro.json");
+}
+
+export function readReproDraft(root: string, session: string): ReproDraft | null {
+  const file = reproFile(root, session);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as ReproDraft;
+  } catch {
+    return null;
+  }
+}
+
+export function writeReproDraft(root: string, session: string, draft: ReproDraft): void {
+  const file = reproFile(root, session);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
+}
+
+export function clearReproDraft(root: string, session: string): void {
+  const file = reproFile(root, session);
+  if (existsSync(file)) rmSync(file);
+}

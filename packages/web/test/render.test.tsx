@@ -67,6 +67,15 @@ describe("Change detail (spec §4)", () => {
     expect(html).toContain("Auto mode");
     // 2.6: the design mock is named beside the rationale; CLAUDE.md has no Visual: line
     expect(html).toContain("mock export-dialog.svg · no visual tool in CLAUDE.md");
+    // 2.7: the fix shows its committed repro test and the freeze; only an engineer can lift it once
+    expect(html).toContain("Repro first · freeze active");
+    expect(html).toContain("test/export/zero-total.test.ts");
+    expect(html).toContain("e4a6f2d");
+    expect(html).toContain("expected 4 rows, received 3");
+    expect(html).toContain("Lift freeze once");
+    const po = render({ ...initialState("po"), view: "detail", sel: "CHG-0018" });
+    expect(po).toContain("Repro first · freeze active");
+    expect(po).not.toContain("Lift freeze once");
   });
 });
 

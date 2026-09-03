@@ -364,3 +364,23 @@ describe("session downgrade (2.6)", () => {
     expect(help.err).toContain("downgrade <id> [--reason r]   (downgrade: AUTO → SUPERVISED, never upward)");
   });
 });
+
+describe("repro and freeze commands (2.7)", () => {
+  it("are wired: usage lines, human-only, and a change without a reported repro test is refused with the hand-written form", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    expect((await sdlc(dir, ["repro"])).err).toContain("usage: sdlc repro confirm <CHG>");
+    expect((await sdlc(dir, ["freeze", "lift", "CHG-0001"])).err).toContain("usage: sdlc freeze lift <CHG> --file <path> --reason <text>");
+    put(dir, "intent-body.md", FULL_INTENT);
+    const created = await sdlc(dir, ["change", "new", "--title", "Zero rows", "--kind", "fix", "--intent", "intent-body.md", "--json"]);
+    expect(created.code).toBe(0);
+    const agent = await sdlc(dir, ["repro", "reject", "CHG-0001", "--reason", "x"], { SDLC_ACTOR_TYPE: "agent" });
+    expect(agent.code).toBe(2);
+    const none = await sdlc(dir, ["repro", "confirm", "CHG-0001"]);
+    expect(none.code).toBe(2);
+    expect(none.err).toContain("has no reported repro test; pass --file, --reason and --sha");
+    const help = await sdlc(dir, ["nope"]);
+    expect(help.err).toContain("sdlc repro confirm <CHG>");
+    expect(help.err).toContain("sdlc freeze lift <CHG> --file p --reason r");
+  });
+});
