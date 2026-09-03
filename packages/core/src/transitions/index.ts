@@ -9,3 +9,4 @@ export * from "./triage.js";
 export * from "./finding.js";
 export * from "./proposal.js";
 export * from "./artifact-pr.js";
+export * from "./review.js";

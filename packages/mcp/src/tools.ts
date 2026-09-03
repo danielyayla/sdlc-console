@@ -4,11 +4,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { blobSha, commitWritePlan, currentBranch, defaultBranch, isRepo, newUlid, readTree, repoRoot } from "@sdlc/adapter-git";
 import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
 import { appendHookEvent } from "@sdlc/hooks";
-import { changeId as changeIdSchema, parseArtifact, parsePlan, roundResult, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
+import { changeId as changeIdSchema, parseArtifact, parsePlan, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
 import { z } from "zod";
 import { buildContext } from "./context-bundle.js";
 import { agentIdentity, sessionIdFrom } from "./identity.js";
-import { appendRound, clearWaiting, dirtyHash, loopState, readRounds, setWaiting, type StoredRound } from "./sessions.js";
+import { appendFinding, appendRound, clearWaiting, dirtyHash, loopState, readFindings, readRounds, setWaiting, type StoredFinding, type StoredRound } from "./sessions.js";
 
 export interface ServerOptions {
   cwd: string;
@@ -43,7 +43,7 @@ class Refusal extends Error {
   }
 }
 
-/** The nine agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
+/** The ten agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
 export function createSdlcServer(opts: ServerOptions): McpServer {
   const env = opts.env ?? process.env;
   const now = () => (opts.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -281,6 +281,27 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
   );
 
   server.registerTool(
+    "report_finding",
+    {
+      description: "Report one review finding against the change's pull request (severity high|medium|low, title, optional path and detail). Findings are kept with the session and mirrored into the change by the system; they inform the code owner and never approve, request changes or block on their own.",
+      inputSchema: { changeId: changeIdSchema, severity, title: z.string().min(1), path: z.string().optional(), detail: z.string().optional(), sessionId: z.string().optional() },
+    },
+    (args) =>
+      guard(async () => {
+        const l = await load();
+        const { view } = viewOf(l.repo, args.changeId);
+        if (!view.pr) throw new Refusal(`${view.id} has no pull request yet (stage ${view.stage}: ${view.stageName}); findings belong to the PR review`);
+        if (view.pr.mergedAt !== undefined) throw new Refusal(`${view.id}'s PR is already merged`);
+        const session = sessionIdFrom(env, args.sessionId);
+        const previous = readFindings(l.root, session);
+        const finding: StoredFinding = { n: previous.length + 1, ts: now(), severity: args.severity, title: args.title, ...(args.path ? { path: args.path } : {}), ...(args.detail ? { detail: args.detail } : {}) };
+        appendFinding(l.root, session, finding);
+        const all = [...previous, finding];
+        return ok({ n: finding.n, changeId: view.id, headSha: view.pr.headSha, tally: { high: all.filter((f) => f.severity === "high").length, medium: all.filter((f) => f.severity === "medium").length, low: all.filter((f) => f.severity === "low").length }, note: "mirrored into pr.yaml and the ledger when the session ends" });
+      }),
+  );
+
+  server.registerTool(
     "log_note",
     { description: "Append a note event to the change ledger (committed on the current branch).", inputSchema: { changeId: changeIdSchema, text: z.string().min(1), sessionId: z.string().optional() } },
     (args) =>
@@ -298,4 +319,4 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
   return server;
 }
 
-export const AGENT_TOOL_NAMES = ["list_work", "get_change", "get_context", "propose_artifact", "submit_plan_revision", "report_round", "report_done", "request_input", "log_note"] as const;
+export const AGENT_TOOL_NAMES = ["list_work", "get_change", "get_context", "propose_artifact", "submit_plan_revision", "report_round", "report_done", "report_finding", "request_input", "log_note"] as const;

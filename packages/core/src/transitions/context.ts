@@ -64,6 +64,11 @@ export class EventBuilder {
     return { ...this.base(cycle, SYSTEM_ACTOR), event: name, data } as unknown as Event;
   }
 
+  /** An event the agent produced (reported through a session); the system commits it, the actor stays the agent. */
+  agent<N extends EventName>(name: N, cycle: number, data: EventOf<N>["data"], agent: { id: string; session: string }): Event {
+    return { ...this.base(cycle, { type: "agent" as const, id: agent.id, session: agent.session }), event: name, data } as unknown as Event;
+  }
+
   write(event: Event) {
     return { changeId: this.changeId, event };
   }

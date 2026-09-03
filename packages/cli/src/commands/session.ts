@@ -63,7 +63,7 @@ export async function sessionCommand(io: Io, sub: string | undefined, rest: stri
   const ctx = await repoContext(io, json);
   if (sub === "start") {
     const id = rest[0];
-    if (!id) throw new CliError("usage: sdlc session start <CHG> [--kind intent|design|plan|build|diagnose] [--task <id>] [--target <text>] [--mode AUTO|PLAN|SUPERVISED|HEADLESS] [--detach]");
+    if (!id) throw new CliError("usage: sdlc session start <CHG> [--kind intent|design|plan|build|review|diagnose] [--task <id>] [--target <text>] [--mode AUTO|PLAN|SUPERVISED|HEADLESS] [--detach]");
     const r = await sessionStart(ctx, id, {
       ...(typeof values["kind"] === "string" ? { kind: values["kind"] as LaunchInput["kind"] } : {}),
       ...(typeof values["task"] === "string" ? { taskId: values["task"] } : {}),

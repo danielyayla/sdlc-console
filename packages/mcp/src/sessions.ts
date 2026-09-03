@@ -4,7 +4,8 @@ import { dirname, join } from "node:path";
 import { git } from "@sdlc/adapter-git";
 import type { RoundLike } from "@sdlc/core";
 import { readRounds, roundsFile } from "@sdlc/hooks";
-import type { RoundResult } from "@sdlc/schemas";
+import { readFileSync } from "node:fs";
+import type { RoundResult, Severity } from "@sdlc/schemas";
 
 export type LoopState = "not-run" | "iterating" | "green" | "stalled" | "flaky";
 
@@ -59,4 +60,30 @@ export function setWaiting(root: string, session: string, reason: string, now: s
 export function clearWaiting(root: string, session: string): void {
   const file = waitingFile(root, session);
   if (existsSync(file)) rmSync(file);
+}
+
+/** A finding reported by a review session; kept beside its rounds until the system mirrors it into the change (2.3). */
+export interface StoredFinding {
+  n: number;
+  ts: string;
+  severity: Severity;
+  title: string;
+  path?: string;
+  detail?: string;
+}
+
+export function findingsFile(root: string, session: string): string {
+  return join(root, ".sdlc-state", "sessions", session, "findings.jsonl");
+}
+
+export function readFindings(root: string, session: string): StoredFinding[] {
+  const file = findingsFile(root, session);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8").split(/\r?\n/).filter(Boolean).map((l) => JSON.parse(l) as StoredFinding);
+}
+
+export function appendFinding(root: string, session: string, finding: StoredFinding): void {
+  const file = findingsFile(root, session);
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${JSON.stringify(finding)}\n`, "utf8");
 }

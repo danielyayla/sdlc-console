@@ -1,9 +1,10 @@
 import { deriveChange, proposeTasks, confirmTasks, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
 import { blobSha, commitWritePlan, headSha, newUlid, type GitIdentity } from "@sdlc/adapter-git";
-import { launchSession, worktreePathFor, type SessionRegistry, type StoredSession } from "../sessions/index.js";
+import { launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
+import { mirrorReview } from "./review.js";
 import { gitHubCodeHostFrom } from "@sdlc/adapter-github";
 import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
 
@@ -29,7 +30,8 @@ export interface EngineOptions {
  * Local lifecycle engine (§4.1, build-order 1.7): observes derived state and
  * turns transitions into keyed jobs — design pass after gate 1, plan session
  * after gate 2, task split + build session after gate 3, per-change run when
- * a build session finishes, PR on green, resume on the first red.
+ * a build session finishes, PR on green, resume on the first red, one review
+ * session per PR head at stage 5 and its findings mirrored when it ends.
  */
 export class Engine {
   private ticking = false;
@@ -122,9 +124,14 @@ export class Engine {
       const runs = repo.changes.get(view.id)?.runs.filter((r) => r.cycle === view.cycle).length ?? 0;
       if (!live && (view.evalsState === "running" || sessions.length === 0)) await this.launch(view, `${view.id}:${view.cycle}:4:${sha(2)}:build:run-${runs}`, "build-session", "build");
     }
+    // stage 5: one review per PR head; `pr.review.headSha` (in git) is what makes this idempotent across restarts
+    if (view.stage === 5 && view.pr && view.pr.mergedAt === undefined && view.pr.review?.headSha !== view.pr.headSha) {
+      const live = this.opts.registry.list().some((s) => s.changeId === view.id && s.kind === "review" && (s.status === "running" || s.status === "waiting" || s.status === "awaiting_engineer"));
+      if (!live) await this.launch(view, `${view.id}:${view.cycle}:5:review:${view.pr.headSha.slice(0, 12)}`, "review", "review");
+    }
   }
 
-  private async launch(view: ChangeView, key: string, kind: Job["kind"], sessionKind: "design" | "plan" | "build"): Promise<void> {
+  private async launch(view: ChangeView, key: string, kind: Job["kind"], sessionKind: Exclude<SessionKind, "intent" | "diagnose">): Promise<void> {
     const job = this.opts.jobs.claim({ key, kind, changeId: view.id, cycle: view.cycle, stage: view.stage }, this.now());
     if (!job) return;
     try {
@@ -168,11 +175,39 @@ export class Engine {
         this.opts.jobs.update(job.key, { state: session.status === "done" ? "done" : "failed", ...(session.error ? { error: session.error } : {}) }, this.now());
       }
     }
+    if (session.kind === "review" && session.status === "done") {
+      await this.mirrorForSession(session);
+      return;
+    }
     if (session.kind !== "build" || session.status !== "done") {
       this.opts.store.rebuild();
       return;
     }
     await this.runForSession(session);
+  }
+
+  /** A review session finished: mirror its findings into the change and onto the PR (once per session). */
+  async mirrorForSession(session: StoredSession): Promise<Job | null> {
+    await this.opts.store.refresh(true);
+    const repo = this.opts.store.currentRepo;
+    const files = repo?.changes.get(session.changeId);
+    if (!repo || !files) return null;
+    const view = deriveChange(repo, files);
+    const key = `${session.changeId}:${view.cycle}:5:review-mirror:${session.id}`;
+    const job = this.opts.jobs.claim({ key, kind: "review-mirror", changeId: session.changeId, cycle: view.cycle, stage: 5 }, this.now());
+    if (!job) return null;
+    try {
+      const outcome = await mirrorReview({ root: this.opts.store.root, view, session, ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}) }, repo);
+      this.opts.jobs.update(key, { state: "done", note: `review of ${outcome.headSha.slice(0, 7)}: ${outcome.tally.high} high · ${outcome.tally.medium} medium · ${outcome.tally.low} low` }, this.now());
+      this.log(`${view.id}: review of ${outcome.headSha.slice(0, 7)} mirrored (${outcome.count} findings, ${outcome.verdict})`);
+      this.opts.registry.patch(session.id, { reviewed: true });
+      await this.opts.store.refresh(true);
+    } catch (e) {
+      this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+      this.log(`${view.id}: review mirror failed: ${(e as Error).message}`);
+      this.opts.store.rebuild();
+    }
+    return this.opts.jobs.get(key);
   }
 
   async runForSession(session: StoredSession, manual = false): Promise<Job | null> {

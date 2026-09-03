@@ -172,7 +172,7 @@ export const events = {
   ),
   "review.finding": ev(
     "review.finding",
-    z.strictObject({ severity, title: nonEmpty, path: z.string().optional() }),
+    z.strictObject({ severity, title: nonEmpty, path: z.string().optional(), detail: z.string().optional() }),
     actor,
   ),
   "deploy.authorized": ev(

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { addWorktree, commitWritePlan, currentBranch, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
+import { addWorktree, branchExists, commitWritePlan, currentBranch, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo, logPath, stageDef, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
 import { buildContext, type ContextBundle } from "@sdlc/mcp";
 import type { Event } from "@sdlc/schemas";
@@ -53,6 +53,8 @@ function kindForStage(view: ChangeView): SessionKind {
 
 function branchFor(kind: SessionKind, view: ChangeView, taskId: string | null): string {
   if (kind === "build") return `${view.id}/${taskId ?? "work"}`;
+  // the review reads the PR branch as pushed; it never commits there (the PR head stays the tested head)
+  if (kind === "review") return view.pr?.branch ?? `${view.id}/work`;
   const artifact = { intent: "intent", design: "spec", plan: "plan", diagnose: "incident" }[kind];
   return `sdlc/${view.id}/${artifact}`;
 }
@@ -67,7 +69,7 @@ export function worktreePathFor(root: string, branch: string): string {
  * bundle's read-only allowedTools list is what keeps them from editing files.
  */
 function permissionMode(mode: Mode, kind: SessionKind): string {
-  if (kind === "plan" || mode === "PLAN") return "default";
+  if (kind === "plan" || kind === "review" || mode === "PLAN") return "default";
   return "acceptEdits";
 }
 
@@ -116,6 +118,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   if ((kind === "intent" && view.stage !== 1) || (kind === "design" && view.stage !== 2) || (kind === "diagnose" && view.stage !== 6)) {
     throw new ActionError(409, `${kind} session does not match stage ${view.stage}`);
   }
+  if (kind === "review" && (view.stage !== 5 || !view.pr || view.pr.mergedAt !== undefined)) throw new ActionError(409, `review sessions belong to stage 5 with an open pull request; ${view.id} is at stage ${view.stage}`);
   const taskId = input.taskId ?? (kind === "build" ? (view.tasks.find((t) => t.state !== "done")?.id ?? null) : null);
   const task = taskId ? view.tasks.find((t) => t.id === taskId) : undefined;
   const target = input.target ?? task?.target ?? (kind === "build" ? view.acceptanceLine : null);
@@ -131,7 +134,10 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   if (backlog > ceiling) throw new ActionError(409, `review backlog ${backlog} exceeds the ceiling ${ceiling} — review finished sessions before starting another`);
 
   const branch = branchFor(kind, view, taskId);
+  if (kind === "review" && !(await branchExists(deps.root, branch))) throw new ActionError(409, `the PR branch ${branch} is not in this clone; the review reads the pushed head, it never recreates it`);
   const worktree = worktreePathFor(deps.root, branch);
+  // a review session's own ledger lines are lifecycle records: they commit on the default branch, not on the PR branch
+  const ledgerDir = kind === "review" ? deps.root : worktree;
   if (!existsSync(worktree)) {
     mkdirSync(join(deps.root, ".sdlc-state", "worktrees"), { recursive: true });
     const base = repo.config.defaultBranch;
@@ -148,7 +154,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   const mcpConfig = join(stateDir, "mcp.json");
   writeFileSync(mcpConfig, `${JSON.stringify({ mcpServers: { sdlc: { command: "node", args: [deps.sdlcBin, "mcp"], env: { SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent" } } } }, null, 2)}\n`);
   const bundle: ContextBundle = buildContext(repo, view);
-  const prompt = resuming ? resuming.guidance : promptFor(kind, { view, bundle, sessionId: id, target });
+  const prompt = resuming ? resuming.guidance : promptFor(kind, { view, bundle, sessionId: id, target, reviewPolicy: repo.reviewPolicy?.text ?? null });
   writeFileSync(join(stateDir, "prompt.md"), prompt);
   writeFileSync(join(stateDir, "context.json"), `${JSON.stringify(bundle, null, 2)}\n`);
 
@@ -210,8 +216,8 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   deps.registry.upsert(record);
 
   if (!resuming) {
-    const started: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(repo, view.id, worktree), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.started", data: { session: id, mode, ...(taskId ? { task: taskId } : {}), worktree: branch, ...(target ? { target } : {}) } } as Event;
-    await systemEventCommit(worktree, view.id, started, `sdlc(${view.id}): session ${id} started (${mode})`, SYSTEM);
+    const started: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(repo, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.started", data: { session: id, mode, ...(taskId ? { task: taskId } : {}), worktree: branch, ...(target ? { target } : {}) } } as Event;
+    await systemEventCommit(ledgerDir, view.id, started, `sdlc(${view.id}): session ${id} started (${mode})`, SYSTEM);
   }
 
   if (mode === "SUPERVISED") {
@@ -230,13 +236,13 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     transcriptPath,
     ...(deps.now ? { now: deps.now } : {}),
     onExit: async (_code, { status }) => {
-      const after = loadRepo(await readTree(worktree, "HEAD").catch(() => repo.tree));
+      const after = loadRepo(await readTree(ledgerDir, "HEAD").catch(() => repo.tree));
       const files2 = after.changes.get(view.id);
       const alreadyStopped = files2?.events.some((e) => e.event === "session.stopped" && e.data.session === id) ?? false;
       if (!alreadyStopped) {
         const reason = status === "done" ? "done" : status === "taken_over" ? "taken_over" : status === "stopped" ? "stopped" : "error";
-        const stopped: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(after, view.id, worktree), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.stopped", data: { session: id, reason } } as Event;
-        await systemEventCommit(worktree, view.id, stopped, `sdlc(${view.id}): session ${id} ${reason}`, SYSTEM).catch(() => undefined);
+        const stopped: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(after, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.stopped", data: { session: id, reason } } as Event;
+        await systemEventCommit(ledgerDir, view.id, stopped, `sdlc(${view.id}): session ${id} ${reason}`, SYSTEM).catch(() => undefined);
       }
       const final = deps.registry.get(id);
       if (final) deps.onExit?.(final);

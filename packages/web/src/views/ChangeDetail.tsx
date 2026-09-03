@@ -139,6 +139,25 @@ export function ChangeDetail(p: ChangeDetailProps) {
                 {view.pr.findings ? <li><span className="glyph system">·</span><span>findings</span><span className="when">{view.pr.findings.high} high · {view.pr.findings.medium} medium · {view.pr.findings.low} low</span></li> : null}
               </ul>
               {view.pr.reviewers.length > 0 ? <div className="who">reviewers: {view.pr.reviewers.join(", ")}</div> : null}
+              <div className="who">
+                {view.pr.review
+                  ? `review of ${view.pr.review.headSha.slice(0, 7)} · session ${view.pr.review.session}${view.pr.review.headSha !== view.pr.headSha ? " · head moved since — review pending" : ""}`
+                  : view.pr.mergedAt
+                    ? "not reviewed by an agent"
+                    : "review pending"}
+              </div>
+              {view.findings.length > 0 ? (
+                <ul className="findings">
+                  {view.findings.map((f) => (
+                    <li key={f.id}>
+                      <span className={`chip ${f.severity === "high" ? "red" : f.severity === "medium" ? "amber" : "gray"}`}>{f.severity}</span>
+                      <span className="title">{f.title}</span>
+                      {f.path ? <span className="when">{f.path}</span> : null}
+                      {f.detail ? <pre className="detail">{f.detail}</pre> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           ) : null}
           {!view.valid ? (

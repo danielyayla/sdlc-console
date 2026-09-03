@@ -116,7 +116,11 @@ describe("per-change run → PR → stage 5 → merge → stage 6 → loop (acce
     expect(first.stage).toBe(4);
     expect(first.evalsState).toBe("waiting");
     expect(first.status).toBe("waiting on you: evals red twice");
-    expect(h.jobs.list().map((j) => j.kind).sort()).toEqual(["build-session", "per-change-run"]);
+    expect(h.jobs.list().filter((j) => j.changeId === "CHG-0018").map((j) => j.kind).sort()).toEqual(["build-session", "per-change-run"]);
+    // the seed's Deploy change (CHG-0017) gets a review attempt; its PR branch is not in this clone, so the launch refuses and nothing is created
+    const review = h.jobs.list().filter((j) => j.kind === "review");
+    expect(review.map((j) => [j.changeId, j.state])).toEqual([["CHG-0017", "failed"]]);
+    expect(review[0]?.error).toContain("not in this clone");
 
     // without the seed's red run: first red resumes the session with the failing output; the resumed fake run is red again → waiting
     const dir2 = await seeded();
@@ -144,7 +148,7 @@ describe("per-change run → PR → stage 5 → merge → stage 6 → loop (acce
     await engine.tick();
     await new Promise((r) => setTimeout(r, 1500));
     // CHG-0018 (stage 4, red, no session) gets a build session + run; CHG-0021 (gate open) and CHG-0023 (intent is human-started) get nothing
-    const kinds = jobs.list().map((j) => [j.changeId, j.kind]);
+    const kinds = jobs.list().filter((j) => j.kind !== "review").map((j) => [j.changeId, j.kind]);
     expect(kinds.every(([id]) => id === "CHG-0018")).toBe(true);
     expect(kinds.map(([, k]) => k)).toEqual(expect.arrayContaining(["build-session"]));
     // accept gate 1 on CHG-0022 → design pass launches; a second tick does not launch again
