@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { bands } from "./bands.js";
 import { change } from "./change.js";
 import { config } from "./config.js";
 import { deploy } from "./deploy.js";
@@ -36,6 +37,7 @@ export const registry = {
   "spec-frontmatter": specFrontMatter,
   "plan-frontmatter": planFrontMatter,
   "incident-frontmatter": incidentFrontMatter,
+  bands,
 } as const;
 
 export type SchemaName = keyof typeof registry;

@@ -1,0 +1,118 @@
+{
+  "$id": "https://sdlc.local/schemas/bands.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "baselineWindow": {
+      "type": "string"
+    },
+    "metrics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "metric": {
+            "type": "string",
+            "minLength": 1
+          },
+          "baseline": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "tiers": {
+            "type": "object",
+            "properties": {
+              "1sigma": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "log"
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "additionalProperties": false
+              },
+              "2sigma": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "diagnose"
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "action",
+                  "tools"
+                ],
+                "additionalProperties": false
+              },
+              "3sigma": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "const": "propose"
+                  },
+                  "routes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": [
+                  "action",
+                  "routes"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "1sigma",
+              "2sigma",
+              "3sigma"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "metric",
+          "baseline",
+          "tiers"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "runbooks": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "required": [
+    "metrics"
+  ],
+  "additionalProperties": false
+}

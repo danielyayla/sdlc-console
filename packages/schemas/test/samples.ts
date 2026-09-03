@@ -193,6 +193,22 @@ export const samples: { [K in SchemaName]: EntityOf<K> } = {
     accepted_at: null,
     acceptance_line: "GET /export returns CSV for 3 fixture invoices",
   },
+  bands: {
+    baselineWindow: "30d",
+    metrics: [
+      {
+        metric: "p95_latency_ms",
+        baseline: 310,
+        rules: ["western-electric"],
+        tiers: {
+          "1sigma": { action: "log" },
+          "2sigma": { action: "diagnose", tools: ["Read", "Grep", "Bash(gh run view *)"] },
+          "3sigma": { action: "propose", routes: ["pr", "runbook:rollback"] },
+        },
+      },
+    ],
+    runbooks: ["rollback"],
+  },
   "incident-frontmatter": {
     schema: 1,
     id: "CHG-0012",
