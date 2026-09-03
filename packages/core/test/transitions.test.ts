@@ -61,9 +61,11 @@ describe("createChange", () => {
     const { view } = viewOf(after, "CHG-0008");
     expect(view.valid).toBe(true);
     expect(view.stage).toBe(1);
-    expect(view.gate?.s).toBe(1);
+    // the template intent still has placeholders, so gate 1 stays closed until it is completed
+    expect(view.gate).toBeNull();
+    expect(view.status).toMatch(/^Agent producing intent.md · draft incomplete/);
     expect(view.title).toBe("Invoice CSV export");
-    expect(view.docs[0].state).toBe("pending-review");
+    expect(view.docs[0].state).toBe("draft");
     expect(after.files.get("sdlc/changes/CHG-0008/intent.md")?.content).toContain("# Intent: Invoice CSV export");
     for (const e of plan.events) expect(validate("event", e.event).ok).toBe(true);
   });
@@ -217,8 +219,11 @@ describe("loop (gate 6, acceptance b)", () => {
     expect(next.view.cycle).toBe(2);
     expect(next.view.kind).toBe("fix");
     expect(next.view.stage).toBe(1);
-    expect(next.view.gate?.s).toBe(1);
-    expect(next.view.docs[0].state).toBe("pending-review");
+    // seeded intent carries a placeholder Constraints section → gate closed, loop status shown
+    expect(next.view.gate).toBeNull();
+    expect(next.view.status).toBe("Loop closed — re-entered Plan from incident");
+    expect(next.view.agent).toBe(true);
+    expect(next.view.docs[0].state).toBe("draft");
     expect(next.view.docs[5].state).toBe("absent");
     expect(next.repo.evalCases.find((c) => c.id === "INC-CHG-0012-1")).toMatchObject({ status: "draft", source: { type: "incident", ref: "CHG-0012" }, paths: ["src/a.ts"] });
     expect(after.files.get("sdlc/changes/CHG-0012/intent.md")?.content).toContain("## Problem\nfilled");

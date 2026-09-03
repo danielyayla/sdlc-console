@@ -176,10 +176,14 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
   let gate: GateView | null = null;
   let sentBackJustNow = false;
   let planIsFinal = true;
+  let incomplete: string[] = [];
   if (stageInfo.gate !== null) {
     const g = stageInfo.gate;
     const idx = ARTIFACT_INDEX_FOR_GATE[g];
-    const present = g === 5 ? files.present.pr : g === 6 ? files.present.incident : g === 3 ? files.present.plan : g === 2 ? files.present.spec : files.present.intent;
+    const parsedArtifact = { 1: files.intent, 2: files.spec, 3: files.plan, 5: null, 6: files.incident }[g];
+    // §11.1: a gate opens only on a complete artifact (required sections present and filled)
+    if (parsedArtifact && !parsedArtifact.complete) incomplete = [...parsedArtifact.missingSections, ...parsedArtifact.emptySections];
+    const present = (g === 5 ? files.present.pr : g === 6 ? files.present.incident : g === 3 ? files.present.plan : g === 2 ? files.present.spec : files.present.intent) && incomplete.length === 0;
     const committed = lastEvent(events, "artifact.committed", (e) => e.data.artifact === idx);
     const sentBack = lastEvent(events, "gate.sent_back", (e) => e.data.gate === g);
     const planFinal = g === 3 ? lastEvent(events, "plan.final") : null;
@@ -260,8 +264,9 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     cases: cases.length,
     present: files.present,
     planRev,
-    fresh: files.archivedCycles.length > 0 && !files.present.intent,
+    fresh: change.cycle > 1 && !accepted.has(1) && !sentBackJustNow,
     incCaseId,
+    incomplete,
   });
 
   const valid = errors.length === 0;
@@ -405,6 +410,8 @@ interface StatusInputs {
   planRev: number;
   fresh: boolean;
   incCaseId: string | null;
+  /** Required sections missing or empty in the current stage's artifact. */
+  incomplete: string[];
 }
 
 /** `agent` flag and status text per spec §5 / §4. */
@@ -418,9 +425,10 @@ function deriveStatus(i: StatusInputs): { agent: boolean; status: string } {
     return { agent: false, status: `${artifact} committed — waiting on the ${i.gate.ownerLabel}` };
   }
   if (i.sentBackJustNow) return { agent: true, status: `Agent revising ${artifact} per feedback` };
+  if (i.stage === 1 && i.fresh) return { agent: true, status: "Loop closed — re-entered Plan from incident" };
+  if (i.incomplete.length > 0) return { agent: true, status: `Agent producing ${artifact} · draft incomplete (${i.incomplete.join(", ")})` };
   switch (i.stage) {
     case 1:
-      if (i.fresh || (i.change.cycle > 1 && !i.present.intent)) return { agent: true, status: "Loop closed — re-entered Plan from incident" };
       return { agent: true, status: "Agent producing intent.md" };
     case 2:
       return { agent: true, status: "Agent producing spec.md" };

@@ -9,7 +9,7 @@ Work one numbered item at a time. Each item is a plan-mode session → `plan.md`
 - [x] 0.4 Core derivation: `Tree` abstraction; `loadRepo(tree)`; `deriveChange(id)` → `ChangeView` (stage, gate, since, agent, status, docs states, planRev/State/Matches, autoEligible); gate queues; badges. Pure.
 - [x] 0.5 Transitions as write-plans: `createChange`, `accept`, `sendBack`, `loop` (cycle+1 + archive + INC draft case), `confirmTasks`, `confirmRepro`. Return `{files, events, commitMessage}`; no I/O.
 - [x] 0.6 Validation engine: blocking rules from blueprint §11.1 that need no adapters (schema, completeness, SHA chaining, gate ownership + human actor, risk/kind immutability, duplicate ids, active-case-has-checks, linked-mode fields).
-- [ ] 0.7 Git adapter: read tree at ref, apply write-plan as commit with identity + trailers, diff files, worktree add/remove/list, `log.jsonl` union across branches, install `.gitattributes` merge=union.
+- [x] 0.7 Git adapter: read tree at ref, apply write-plan as commit with identity + trailers, diff files, worktree add/remove/list, `log.jsonl` union across branches, install `.gitattributes` merge=union.
 - [ ] 0.8 CLI: `sdlc init`, `validate`, `change new|list|show`, `accept`, `send-back`, `loop`, `audit`; all with `--json`; refuse mutations when `SDLC_ACTOR_TYPE=agent`.
 - [ ] 0.9 Fixture repo reproducing the spec seed (8 changes across all stages, 2 triage, 3 findings) + golden tests for acceptance checks (a)–(f) from `docs/source/design-spec.md` §7.
 

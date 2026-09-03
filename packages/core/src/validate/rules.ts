@@ -3,7 +3,7 @@ import { holdsRole } from "../config.js";
 import type { ChangeView } from "../derive.js";
 import { eventsNamed, eventsOfCycle, lastEvent } from "../events.js";
 import type { ChangeFiles, Repo } from "../repo.js";
-import { gateOwner, STAGE_FOR_GATE, STAGES } from "../stages.js";
+import { gateOwner, STAGES } from "../stages.js";
 
 /** A diagnostic with the engine's blocking verdict (blueprint §11.1). */
 export interface RuleDiagnostic extends Diagnostic {
@@ -41,12 +41,14 @@ export function changeRules(repo: Repo, files: ChangeFiles, view: ChangeView): R
   const change = files.change;
   const events = eventsOfCycle(files.events, change.cycle);
 
-  // artifact completeness before its gate can open
-  if (view.gate) {
-    const parsed = { 1: files.intent, 2: files.spec, 3: files.plan, 5: null, 6: files.incident }[view.gate.s];
+  // artifact completeness: derivation keeps the gate closed on an incomplete artifact,
+  // so an accepted gate whose artifact is still incomplete means the ledger was hand-edited
+  for (const s of STAGES) {
+    if (s.gate === null || !view.acceptedGates.includes(s.gate)) continue;
+    const parsed = { intent: files.intent, spec: files.spec, plan: files.plan, incident: files.incident, evals: null, pr: null }[s.artifact];
     if (parsed && !parsed.complete) {
       const which = [...parsed.missingSections, ...parsed.emptySections].join(", ");
-      out.push(block(id, `${dir}/${STAGES[STAGE_FOR_GATE[view.gate.s] - 1]?.file ?? ""}`, "gate.artifact-incomplete", `gate ${view.gate.s} is open but the artifact is incomplete: ${which}`));
+      out.push(block(id, `${dir}/${s.file}`, "gate.accepted-incomplete", `gate ${s.gate} was accepted on an incomplete ${s.file}: ${which}`));
     }
   }
 

@@ -25,16 +25,27 @@ describe("validateTree", () => {
     expect(r.diagnostics.some((d) => d.rule === "schema.change" && d.message.includes("stage"))).toBe(true);
   });
 
-  it("an open gate on an incomplete artifact blocks", () => {
+  it("an incomplete artifact keeps its gate closed (draft), so nothing blocks and accept refuses", () => {
     const files = changeFiles(baseTree(), { id: "CHG-0001", intent: true });
     files["sdlc/changes/CHG-0001/intent.md"] = (files["sdlc/changes/CHG-0001/intent.md"] ?? "").replace("## Constraints\nfilled\n", "## Constraints\n<tbd>\n");
     const t = withFiles(baseTree(), files);
-    expect(blockingRules(t)).toContain("gate.artifact-incomplete");
     const repo = loadRepo(t);
-    expect(validateChange(repo, "CHG-0001").blocking).toBe(true);
-    const r = accept(repo, loadView(repo, "CHG-0001"), 1, { now: "2026-09-04T09:00:00Z", newId: () => "01J8Z6Q7Y2K3M4N5P6Q7R8S9TA", actor: { id: "po@example.com" } });
+    const view = loadView(repo, "CHG-0001");
+    expect(view.gate).toBeNull();
+    expect(view.agent).toBe(true);
+    expect(view.status).toBe("Agent producing intent.md · draft incomplete (Constraints)");
+    expect(view.docs[0].state).toBe("draft");
+    expect(validateChange(repo, "CHG-0001").blocking).toBe(false);
+    expect(validateChange(repo, "CHG-0001").diagnostics.map((d) => d.rule)).toContain("artifact.section.empty");
+    const r = accept(repo, view, 1, { now: "2026-09-04T09:00:00Z", newId: () => "01J8Z6Q7Y2K3M4N5P6Q7R8S9TA", actor: { id: "po@example.com" } });
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.diagnostics[0]?.rule).toBe("gate.artifact-incomplete");
+    if (!r.ok) expect(r.diagnostics[0]?.rule).toBe("gate.closed");
+  });
+
+  it("a gate accepted on an incomplete artifact (hand-edited ledger) blocks", () => {
+    const files = changeFiles(baseTree(), { id: "CHG-0001", intent: true, events: acceptedThrough([1]) });
+    files["sdlc/changes/CHG-0001/intent.md"] = (files["sdlc/changes/CHG-0001/intent.md"] ?? "").replace("## Constraints\nfilled\n", "## Constraints\n<tbd>\n");
+    expect(blockingRules(withFiles(baseTree(), files))).toContain("gate.accepted-incomplete");
   });
 
   it("SHA chaining: spec.intent_sha must equal the accepted intent's sha; plan.spec_sha the accepted spec's", () => {
