@@ -61,6 +61,8 @@ describe("launchSession", () => {
     expect(args).toContain("--mcp-config");
     expect(args).toContain("mcp__sdlc__propose_artifact");
     expect(args).toContain("--session-id");
+    expect(args).toContain("git-author=claude-code <claude-code@sdlc.local>");
+
     const final = registry.get(r.session.id);
     expect(final).toMatchObject({ status: "done", modelPin: "fake-model", costUsd: 0.12, numTurns: 3, exitCode: 0, harnessSessionId: "11111111-2222-3333-4444-555555555555" });
     expect(readFileSync(final?.transcriptRef ?? "", "utf8").split("\n").filter(Boolean)).toHaveLength(3);

@@ -167,7 +167,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     ...bundle.allowedTools,
     ...(resuming ? ["--resume", harnessSessionId] : ["--session-id", harnessSessionId]),
   ];
-  const command = `cd ${worktree} && SDLC_SESSION=${id} SDLC_CHANGE=${view.id} ${claudeBin} ${resuming ? `--resume ${harnessSessionId}` : `--session-id ${harnessSessionId}`} --mcp-config ${mcpConfig} --permission-mode ${permissionMode(mode, kind)}`;
+  const command = `cd ${worktree} && SDLC_SESSION=${id} SDLC_CHANGE=${view.id} GIT_AUTHOR_NAME=${AGENT.name} GIT_AUTHOR_EMAIL=${AGENT.id} GIT_COMMITTER_NAME=${AGENT.name} GIT_COMMITTER_EMAIL=${AGENT.id} ${claudeBin} ${resuming ? `--resume ${harnessSessionId}` : `--session-id ${harnessSessionId}`} --mcp-config ${mcpConfig} --permission-mode ${permissionMode(mode, kind)}`;
 
   const record: StoredSession = {
     ...(existing ?? {}),
@@ -220,7 +220,8 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
 
   const child = (deps.spawnImpl ?? spawn)(claudeBin, args, {
     cwd: worktree,
-    env: { ...env, SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent", SDLC_AGENT_ID: AGENT.id },
+    // the harness's own git commits are attributed to the agent identity (§12.4), not to the engineer who launched it
+    env: { ...env, SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent", SDLC_AGENT_ID: AGENT.id, GIT_AUTHOR_NAME: AGENT.name, GIT_AUTHOR_EMAIL: AGENT.id, GIT_COMMITTER_NAME: AGENT.name, GIT_COMMITTER_EMAIL: AGENT.id },
     stdio: ["ignore", "pipe", "pipe"],
   });
   deps.registry.patch(id, { pid: child.pid ?? null });
