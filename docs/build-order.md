@@ -3,7 +3,7 @@
 Work one numbered item at a time. Each item is a plan-mode session → `plan.md` → implement → green → PR. Mark items done here as they merge.
 
 ## Phase 0 — Foundation
-- [ ] 0.1 Monorepo scaffold: pnpm workspaces, TypeScript strict, Vitest, ESLint, `pnpm build/test/lint` at root; packages `schemas`, `core`, `adapters/git`, `cli` (empty shells that build).
+- [x] 0.1 Monorepo scaffold: pnpm workspaces, TypeScript strict, Vitest, ESLint, `pnpm build/test/lint` at root; packages `schemas`, `core`, `adapters/git`, `cli` (empty shells that build).
 - [ ] 0.2 Schemas: `change.yaml`, `log.jsonl` event union, `sdlc/config.yaml`, `tasks.yaml`, eval case/run, triage, finding, proposal; front-matter schemas for intent/spec/plan/incident. Ajv validators + zod-derived types, exported.
 - [ ] 0.3 Parsers: markdown front-matter + required sections (intent/spec/plan/incident); `plan.md` "Files that change" + acceptance line; `CLAUDE.md` commands / "Verifying your work" block / word count; `SKILL.md` front-matter; `.claude/agents/*.md`; `.claude/settings.json` hooks; `bands.yaml`. Structured diagnostics, never throw.
 - [ ] 0.4 Core derivation: `Tree` abstraction; `loadRepo(tree)`; `deriveChange(id)` → `ChangeView` (stage, gate, since, agent, status, docs states, planRev/State/Matches, autoEligible); gate queues; badges. Pure.

@@ -1,0 +1,16 @@
+{
+  "name": "@sdlc/schemas",
+  "version": "0.0.0",
+  "private": true,
+  "description": "JSON Schemas (Ajv) and zod-derived types for every sdlc/ file.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ]
+}
