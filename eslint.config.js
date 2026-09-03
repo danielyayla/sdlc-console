@@ -1,6 +1,7 @@
 import { builtinModules } from "node:module";
 import js from "@eslint/js";
 import { defineConfig, globalIgnores } from "eslint/config";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 
 const NO_IO_MESSAGE =
@@ -12,6 +13,11 @@ export default defineConfig([
   globalIgnores(["**/dist/**", "**/node_modules/**", "**/*.tsbuildinfo"]),
   js.configs.recommended,
   ...tseslint.configs.strict,
+  {
+    // Plain JS/MJS scripts (generators, config) run on Node.
+    files: ["**/*.{js,mjs,cjs}"],
+    languageOptions: { globals: globals.node },
+  },
   {
     // Mechanical form of the CLAUDE.md rule "packages/core has no I/O".
     files: ["packages/core/src/**/*.ts"],

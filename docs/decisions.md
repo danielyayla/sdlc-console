@@ -37,3 +37,16 @@ Resolved defaults from blueprint §2 (principles) and §17 (open questions). Do 
 
 ## Stack (fixed)
 TypeScript, Node ≥ 22, pnpm monorepo. Packages: `schemas`, `core`, `adapters/git`, `adapters/github`, `server`, `cli`, `mcp`, `hooks`, `web`. React + Vite, plain CSS variables. Real `git` CLI via a thin wrapper. JSON Schema (Ajv) + zod types, `gray-matter` for front-matter. better-sqlite3 cache. MCP TypeScript SDK. Vitest.
+
+## Decisions made during build
+Choices the blueprint and the sections above did not settle, recorded as they were made. Each names the item that forced it.
+
+| Item | Decision |
+|---|---|
+| 0.1 | ESM everywhere (`NodeNext`), `tsc -b` project references, tests import workspace packages from source via a Vitest alias. `packages/core` may depend only on `@sdlc/`-scoped packages; ESLint bans every Node builtin in `packages/core/src/**`. |
+| 0.2 | zod is the authoring source of truth; JSON Schema 2020-12 is generated from it (`z.toJSONSchema`) and committed under `packages/schemas/json/` for MCP tool schemas and non-console writers; Ajv compiles the generated schema for runtime validation. A test fails when the committed JSON drifts from the zod source. |
+| 0.2 | Two ledger invariants are encoded in the event schema itself, not only in the rule engine: `gate.accepted` and `gate.sent_back` require a human actor; `stage.entered` and `cycle.archived` require the system actor; agent actors require a `session`. |
+| 0.2 | Stored enum spellings: `risk: routine|high`, `kind: feature|fix`, `sev: high|medium|low`, finding `status: new|patch_pr|escalated|dismissed`, triage `status: open|accepted|dismissed`. Display strings ("high risk", "patch in PR gate") are a UI concern. Session modes keep the Q7 upper-case names. |
+| 0.2 | `change.yaml` carries `record`, `repro`, `closed` as required-but-nullable, matching blueprint §5.2. Threshold defaults live in `CONFIG_DEFAULTS` (schemas) and are applied by core, never written back to `config.yaml`. |
+| 0.2 | `pr.yaml` has `provider: github|local` so local mode can record a branch merge without a code host; `number`/`url` are optional for that reason. |
+| 0.2 | Schemas beyond the 0.2 list (`pr.yaml`, `deploy.yaml`, per-change run, final round, repro proof) were added now because Phase 1 writes those files and every `sdlc/` file must have a schema. |

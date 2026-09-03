@@ -1,0 +1,256 @@
+{
+  "$id": "https://sdlc.local/schemas/config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "number",
+      "const": 1
+    },
+    "defaultRole": {
+      "type": "string",
+      "enum": [
+        "po",
+        "eng"
+      ]
+    },
+    "defaultBranch": {
+      "type": "string"
+    },
+    "identities": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "roles": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            }
+          },
+          "skillsOwned": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "required": [
+          "id",
+          "roles"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "properties": {
+        "autoFilesMax": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "evalPassThreshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maxLoopRounds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "sessionCeiling": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "suiteMinSize": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "noDiscriminationRuns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "brokenCheckRuns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "records": {
+      "type": "object",
+      "properties": {
+        "intent": {
+          "type": "string",
+          "enum": [
+            "repo",
+            "external",
+            "linked"
+          ]
+        },
+        "spec": {
+          "type": "string",
+          "enum": [
+            "repo",
+            "external",
+            "linked"
+          ]
+        },
+        "plan": {
+          "type": "string",
+          "enum": [
+            "repo",
+            "external",
+            "linked"
+          ]
+        },
+        "evals": {
+          "type": "string",
+          "enum": [
+            "repo",
+            "external",
+            "linked"
+          ]
+        },
+        "pr": {
+          "type": "string",
+          "enum": [
+            "repo",
+            "external",
+            "linked"
+          ]
+        },
+        "incident": {
+          "type": "string",
+          "enum": [
+            "repo",
+            "external",
+            "linked"
+          ]
+        },
+        "connector": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evals": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "continuous",
+            "scheduled"
+          ]
+        },
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "budget": {
+          "type": "number",
+          "minimum": 0
+        },
+        "schedule": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "eligibility": {
+      "type": "object",
+      "properties": {
+        "coverage": {
+          "type": "string",
+          "enum": [
+            "strict",
+            "lenient"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "products": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "name",
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "intentHome": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "intent",
+          "spec",
+          "plan",
+          "evals",
+          "pr",
+          "incident"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "defaultRole",
+    "identities"
+  ],
+  "additionalProperties": false
+}

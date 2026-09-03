@@ -1,0 +1,80 @@
+{
+  "$id": "https://sdlc.local/schemas/tasks.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "number",
+      "const": 1
+    },
+    "changeId": {
+      "type": "string",
+      "pattern": "^CHG-\\d{4}$"
+    },
+    "cycle": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "sequential": {
+            "type": "boolean"
+          },
+          "target": {
+            "type": "string"
+          },
+          "worktree": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "confirmed",
+              "running",
+              "done",
+              "reviewed"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "files",
+          "sequential",
+          "state"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema",
+    "changeId",
+    "cycle",
+    "tasks"
+  ],
+  "additionalProperties": false
+}
