@@ -10,6 +10,7 @@ import { sessionCommand } from "./commands/session.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
 import { loopCommand } from "./commands/loop.js";
 import { mcpCommand } from "./commands/mcp.js";
+import { runCommand } from "./commands/run.js";
 import { formatDiagnostic, validateCommand } from "./commands/validate.js";
 import { repoContext } from "./context.js";
 import { CliError, table, type Io } from "./io.js";
@@ -33,6 +34,8 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc mcp                                              (agent tools over stdio)
   sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]
   sdlc session list | stop <id>
+  sdlc run <CHG>                                        (per-change run: verification + intersecting evals; green opens the PR)
+  sdlc serve --engine                                   (launch sessions and runs automatically on transitions)
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
@@ -59,6 +62,7 @@ const OPTIONS = {
   target: { type: "string" },
   mode: { type: "string" },
   detach: { type: "boolean", default: false },
+  engine: { type: "boolean", default: false },
   tune: { type: "string" },
   role: { type: "string" },
   "no-wait": { type: "boolean", default: false },
@@ -182,6 +186,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
         emit(io, json, r, () => (r.changeId ? `${r.id} escalated → ${r.changeId} at the Plan gate · ${r.commit.slice(0, 7)}` : `${r.id} ${sub === "patch" ? "patch in PR gate" : "dismissed"} · ${r.commit.slice(0, 7)}`));
         return 0;
       }
+      case "run": {
+        if (!sub) throw new CliError("usage: sdlc run <CHG>");
+        const r = await runCommand(io, sub);
+        emit(io, json, r, () => `${sub}: ${r.note ?? r.state}${r.error ? ` — ${r.error}` : ""}`);
+        return r.state === "failed" ? 1 : 0;
+      }
       case "session": {
         const r = await sessionCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
@@ -194,7 +204,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await hookCommand(io, sub);
       }
       case "serve": {
-        const server = await serveCommand(io, { ...(values.port ? { port: Number(values.port) } : {}), ...(values.role === "eng" ? { role: "eng" as const } : {}) });
+        const server = await serveCommand(io, { ...(values.port ? { port: Number(values.port) } : {}), ...(values.role === "eng" ? { role: "eng" as const } : {}), engine: values.engine === true });
         if (values["no-wait"]) {
           await server.close();
           return 0;

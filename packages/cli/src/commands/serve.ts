@@ -7,6 +7,7 @@ import { actingIdentity, repoContext } from "../context.js";
 export interface ServeOptions {
   port?: number;
   role?: "po" | "eng";
+  engine?: boolean;
 }
 
 export const DEFAULT_PORT = 7331;
@@ -25,7 +26,7 @@ export async function serveCommand(io: Io, opts: ServeOptions): Promise<RunningS
   const ctx = await repoContext(io, false);
   const who = await actingIdentity(ctx);
   const webDir = findWebDir();
-  const server = await startServer({ cwd: ctx.root, identity: who, port: opts.port ?? DEFAULT_PORT, sdlcBin: fileURLToPath(new URL("../bin.js", import.meta.url)), ...(webDir ? { webDir } : {}) });
-  io.stdout(`${server.url}${webDir ? "" : "  (API only — build @sdlc/web to serve the console)"}\n`);
+  const server = await startServer({ cwd: ctx.root, identity: who, port: opts.port ?? DEFAULT_PORT, sdlcBin: fileURLToPath(new URL("../bin.js", import.meta.url)), ...(webDir ? { webDir } : {}), engine: opts.engine === true, log: (line) => io.stderr(`${line}\n`) });
+  io.stdout(`${server.url}${webDir ? "" : "  (API only — build @sdlc/web to serve the console)"}${opts.engine ? "  engine: on" : ""}\n`);
   return server;
 }

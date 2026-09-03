@@ -1,5 +1,6 @@
 import type { AddressInfo } from "node:net";
 import { identity as gitIdentity, isRepo, repoRoot, type GitIdentity } from "@sdlc/adapter-git";
+import { Engine, JobStore } from "./engine/index.js";
 import { createApp } from "./http.js";
 import { enrich, SessionRegistry } from "./sessions/registry.js";
 import type { SessionRecord } from "./snapshot.js";
@@ -19,6 +20,9 @@ export interface ServeOptions {
   sdlcBin?: string;
   /** Harness executable (default `claude`); tests point it at a fake. */
   claudeBin?: string;
+  /** Run the lifecycle engine: launch sessions and per-change runs on transitions. */
+  engine?: boolean;
+  log?: (line: string) => void;
 }
 
 export interface RunningServer {
@@ -27,6 +31,8 @@ export interface RunningServer {
   root: string;
   store: StateStore;
   registry: SessionRegistry;
+  engine: Engine | null;
+  jobs: JobStore;
   close: () => Promise<void>;
 }
 
@@ -40,7 +46,12 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
   const sessions = opts.sessions ? () => opts.sessions?.() ?? [] : (repo: import("@sdlc/core").Repo | null) => registry.list().map((s) => enrich(s, repo));
   const store = new StateStore({ root, identity: who, sessions });
   await store.refresh();
-  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}) });
+  const jobs = new JobStore(registry.database);
+  const engine = opts.sdlcBin
+    ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, ...(opts.log ? { log: opts.log } : {}) })
+    : null;
+  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(engine ? { engine, jobs } : {}) });
+  if (engine && opts.engine) void engine.tick();
   const watcher = opts.watch === false ? null : watchRepo(root, () => void store.refresh().catch(() => undefined));
   const host = opts.host ?? "127.0.0.1";
   await new Promise<void>((resolve) => app.server.listen(opts.port ?? 0, host, resolve));
@@ -51,8 +62,11 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     root,
     store,
     registry,
+    engine,
+    jobs,
     close: async () => {
       watcher?.close();
+      engine?.close();
       await app.close();
       registry.close();
     },

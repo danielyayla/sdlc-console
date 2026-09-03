@@ -168,6 +168,8 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     ...(existing ?? {}),
     id,
     kind,
+    cycle: view.cycle,
+    resumeCount: resuming ? (existing?.resumeCount ?? 0) + 1 : 0,
     worktree: branch,
     worktreePath: worktree,
     branch,

@@ -19,6 +19,7 @@ import {
   triageDismiss,
   type ActionResult,
 } from "./actions.js";
+import type { Engine, JobStore } from "./engine/index.js";
 import { launchSession, stopSession, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { ActionError, type StateStore } from "./store.js";
 
@@ -97,6 +98,8 @@ export interface AppOptions {
   registry?: SessionRegistry;
   sdlcBin?: string;
   claudeBin?: string;
+  engine?: Engine;
+  jobs?: JobStore;
 }
 
 export interface HttpApp {
@@ -149,6 +152,10 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
       json(res, 200, await store.refresh());
       return;
     }
+    if (method === "GET" && parts[1] === "jobs") {
+      json(res, 200, options.jobs?.list() ?? []);
+      return;
+    }
     if (method === "GET" && parts[1] === "health") {
       json(res, 200, { ok: true, revision: store.current?.revision ?? 0 });
       return;
@@ -189,6 +196,13 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
       const body = await readBody(req);
       const action = parts.slice(3).join("/");
       switch (action) {
+        case "run": {
+          if (!options.engine) throw new ActionError(409, "per-change runs need the engine (start the server with sdlcBin)");
+          const job = await options.engine.runForChange(id);
+          if (!job) throw new ActionError(409, `no build session or task worktree for ${id}`);
+          json(res, 200, { ok: true, job, toast: job.state === "failed" ? `run failed: ${job.error ?? ""}` : `${id}: ${job.note ?? job.state}`, revision: store.current?.revision ?? 0 });
+          return;
+        }
         case "accept":
           reply(res, await acceptGate(store, id, gateOf(body)));
           return;
@@ -215,7 +229,7 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
       const id = parts[2];
       if (!id) {
         const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}) };
-        const r = await launchSession(input, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: () => store.rebuild() });
+        const r = await launchSession(input, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) });
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: r.session.mode === "SUPERVISED" ? `${r.session.id} prepared — run the command from the card` : `${r.session.id} started (${r.session.mode}) on ${r.session.branch}`, revision: store.current?.revision ?? 0 });
         return;
@@ -240,7 +254,7 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         const s = registry.get(id);
         if (!s) throw new ActionError(404, `${id} not found`);
         if (s.status === "running") throw new ActionError(409, "the session is still running; guidance is delivered by resuming a finished or stalled session");
-        const r = await launchSession({ changeId: s.changeId, kind: s.kind, ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: id, guidance: str(body, "text") } }, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: () => store.rebuild() });
+        const r = await launchSession({ changeId: s.changeId, kind: s.kind, ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: id, guidance: str(body, "text") } }, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) });
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: `guidance sent — ${id} resumed`, revision: store.current?.revision ?? 0 });
         return;

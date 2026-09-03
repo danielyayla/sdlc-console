@@ -28,6 +28,9 @@ export interface StoredSession extends SessionRecord {
   contextManifestRef: string | null;
   transcriptRef: string | null;
   kind: SessionKind;
+  cycle: number;
+  /** Times the session was resumed with guidance; part of the run idempotency key. */
+  resumeCount: number;
   worktreePath: string;
   harnessSessionId: string;
   pid: number | null;
@@ -58,6 +61,7 @@ export class SessionRegistry {
   }
 
   upsert(s: StoredSession): StoredSession {
+    if (!this.db.open) return s;
     this.db.prepare("INSERT INTO sessions (id, changeId, startedAt, json) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET changeId = excluded.changeId, startedAt = excluded.startedAt, json = excluded.json").run(s.id, s.changeId, s.startedAt, JSON.stringify(s));
     return s;
   }
@@ -69,13 +73,20 @@ export class SessionRegistry {
   }
 
   get(id: string): StoredSession | null {
+    if (!this.db.open) return null;
     const row = this.db.prepare("SELECT id, json FROM sessions WHERE id = ?").get(id) as Row | undefined;
     return row ? (JSON.parse(row.json) as StoredSession) : null;
   }
 
   list(): StoredSession[] {
+    if (!this.db.open) return [];
     const rows = this.db.prepare("SELECT id, json FROM sessions ORDER BY startedAt DESC").all() as Row[];
     return rows.map((r) => JSON.parse(r.json) as StoredSession);
+  }
+
+  /** Shared handle for the job store (same disposable database). */
+  get database(): Database.Database {
+    return this.db;
   }
 
   close(): void {
