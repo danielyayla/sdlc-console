@@ -1,5 +1,5 @@
 import { deriveChange, proposeTasks, confirmTasks, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
-import { commitWritePlan, headSha, type GitIdentity } from "@sdlc/adapter-git";
+import { blobSha, commitWritePlan, headSha, newUlid, type GitIdentity } from "@sdlc/adapter-git";
 import { launchSession, worktreePathFor, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
@@ -110,9 +110,10 @@ export class Engine {
     if (!job) return;
     try {
       const proposed = proposeTasks(view.planFiles, view.acceptanceLine);
-      const r = confirmTasks(repo, view, proposed, { now: this.now(), newId: () => `01J${Date.now().toString(36).toUpperCase().padStart(23, "0")}`.slice(0, 26), actor: { id: this.opts.identity.id } });
+      const r = confirmTasks(repo, view, proposed, { now: this.now(), newId: newUlid, actor: { id: this.opts.identity.id }, blobSha });
       if (!r.ok) throw new Error(r.diagnostics.map((d) => d.message).join("; "));
-      if (validateWritePlan(repo, r.plan).blocking) throw new Error("task split rejected by validation");
+      const report = validateWritePlan(repo, r.plan);
+      if (report.blocking) throw new Error(`task split rejected by validation: ${report.diagnostics.filter((d) => d.blocking).map((d) => d.message).join("; ")}`);
       await commitWritePlan(this.opts.store.root, r.plan, { identity: this.opts.identity });
       this.opts.jobs.update(key, { state: "done", note: `${proposed.length} tasks confirmed` }, this.now());
       await this.opts.store.refresh(true);
