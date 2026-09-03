@@ -7,3 +7,4 @@ export * from "./tasks.js";
 export * from "./repro.js";
 export * from "./triage.js";
 export * from "./finding.js";
+export * from "./proposal.js";

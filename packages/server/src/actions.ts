@@ -7,6 +7,7 @@ import {
   createChange,
   deriveChange,
   dismissFinding,
+  dismissProposal,
   dismissTriage,
   escalateFinding,
   importFindings,
@@ -154,4 +155,9 @@ export async function findingsImport(store: StateStore, text: string): Promise<A
   const r = await store.act((repo, ctx) => importFindings(repo, rows, ctx));
   const created = r.snapshot.findings.length;
   return { ...r, toast: `imported ${rows.length} finding${rows.length === 1 ? "" : "s"} · ${created} on file`, changeId: null };
+}
+
+export async function proposalDismiss(store: StateStore, id: string, reason: string): Promise<ActionResult> {
+  const r = await store.act((repo, ctx) => dismissProposal(repo, id, reason, ctx));
+  return { ...r, toast: `${id} dismissed`, changeId: null };
 }

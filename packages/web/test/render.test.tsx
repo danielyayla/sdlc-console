@@ -128,3 +128,25 @@ describe("Sessions (spec §4)", () => {
     expect(html).toContain("Sessions run Claude Code headless in a worktree per task");
   });
 });
+
+describe("Config (spec §4)", () => {
+  it("renders CLAUDE.md, subagents, skills, hooks, records, proposals and the evals section from the seed", () => {
+    const html = render({ ...initialState("eng"), view: "config" });
+    expect(html).toContain("under one page");
+    expect(html).toContain("mistake twice rule");
+    expect(html).toContain("pnpm build");
+    expect(html).toContain("reviewer");
+    expect(html).toContain("marketing@veri.example");
+    expect(html).toContain("plan-sync");
+    expect(html).toContain("verify-before-done");
+    expect(html).toContain("Managed hooks are deployed by the platform team");
+    expect(html).toContain("intent: repo");
+    expect(html).toContain("PRP-0007");
+    expect(html).toContain("Never filter invoice rows by truthiness");
+    expect(html).toContain("under-sized (&lt; 20)");
+    expect(html).toContain("pass 100% · threshold 90%");
+    expect(html).toContain("CASE-0003");
+    expect(html).toContain("draft · checks missing");
+    expect(html).toContain("Run suite needs the CI adapter");
+  });
+});

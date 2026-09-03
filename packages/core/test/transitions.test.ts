@@ -8,6 +8,7 @@ import {
   confirmTasks,
   createChange,
   dismissFinding,
+  dismissProposal,
   dismissTriage,
   escalateFinding,
   importFindings,
@@ -364,5 +365,18 @@ describe("importFindings", () => {
     expect(after.findings.map((f) => [f.id, f.scannerId, f.status])).toEqual([["SEC-0118", "cs:1", "dismissed"], ["SEC-0119", "cs:2", "new"]]);
     expect(after.findings[0]?.desc).toBe("still reported");
     expect(importFindings(after, rows, ENG_CTX()).ok).toBe(false);
+  });
+});
+
+describe("dismissProposal", () => {
+  it("needs a reason and an owner; keeps the proposal as history", () => {
+    const tree = withFilesT(baseTree(), { "sdlc/proposals/PRP-0007.yaml": "schema: 1\nid: PRP-0007\ntype: claude-md-line\ntext: Never filter by truthiness.\ncitations: [CHG-0018]\nstatus: open\ncreatedAt: 2026-09-02T09:40:00Z\n" });
+    const repo = loadRepo(tree);
+    expect(dismissProposal(repo, "PRP-0007", "already covered by lint", PO_CTX()).ok).toBe(false);
+    expect(dismissProposal(repo, "PRP-0007", " ", ENG_CTX()).ok).toBe(false);
+    const plan = expectOk(dismissProposal(repo, "PRP-0007", "already covered by lint", ENG_CTX()));
+    const after = loadRepo(applyWritePlan(tree, plan));
+    expect(after.proposals[0]).toMatchObject({ status: "dismissed", dismissal: { by: "eng@example.com", reason: "already covered by lint" } });
+    expect(dismissProposal(after, "PRP-0007", "again", ENG_CTX()).ok).toBe(false);
   });
 });

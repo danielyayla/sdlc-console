@@ -4,13 +4,13 @@ import { act, subscribe, type Artifact } from "./api";
 import type { Role } from "./lib/format";
 import { initialState, reduce, type UIState } from "./state";
 import { ChangeDetail } from "./views/ChangeDetail";
+import { Config } from "./views/Config";
 import { Gates } from "./views/Gates";
 import { Loop } from "./views/Loop";
 import { Metrics } from "./views/Metrics";
 import { Security } from "./views/Security";
 import { Sessions } from "./views/Sessions";
 import { Pipeline } from "./views/Pipeline";
-import { Placeholder } from "./views/Placeholder";
 import { Toast } from "./views/Toast";
 import { TopBar } from "./views/TopBar";
 
@@ -92,7 +92,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );
-  else if (state.view === "config") body = <Placeholder title="Config" item="1.8" />;
+  else if (state.view === "config") body = <Config snapshot={snapshot} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} {...(promptImpl ? { prompt: promptImpl } : {})} />;
   else if (state.view === "loop")
     body = (
       <Loop

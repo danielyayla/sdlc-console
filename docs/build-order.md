@@ -21,7 +21,7 @@ Work one numbered item at a time. Each item is a plan-mode session → `plan.md`
 - [x] 1.5 MCP server: `list_work`, `get_change`, `get_context`, `propose_artifact`, `submit_plan_revision`, `report_round`, `report_done`, `request_input`, `log_note`.
 - [x] 1.6 Claude Code launcher + session observer; Sessions view.
 - [x] 1.7 Lifecycle engine (local): accept → job; session done → local per-change run → green opens PR (minimal GitHub) → stage 5; merge → 6; loop.
-- [ ] 1.8 Config view read-only + eval case table.
+- [x] 1.8 Config view read-only + eval case table.
 Exit: one change travels 1→6→1 with real files, hooks and a real Claude Code session; `sdlc audit` clean.
 
 ## Phase 2 — GitHub mode, evals in CI, build-stage depth (blueprint §16 items 13–19)

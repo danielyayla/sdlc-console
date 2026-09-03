@@ -14,6 +14,7 @@ import {
   findingsImport,
   loopChange,
   newChange,
+  proposalDismiss,
   sendBackGate,
   triageAccept,
   triageDismiss,
@@ -260,6 +261,11 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         return;
       }
       throw new ActionError(404, `unknown session action ${action ?? ""}`);
+    }
+    if (parts[1] === "proposals" && parts[2] && method === "POST") {
+      const body = await readBody(req);
+      if (parts[3] === "dismiss") return reply(res, await proposalDismiss(store, parts[2], str(body, "reason")));
+      if (parts[3] === "accept") throw new ActionError(409, "accepting a proposal opens a PR on the code host (GitHub mode, Phase 2)");
     }
     if (parts[1] === "triage" && parts[2] && method === "POST") {
       const body = await readBody(req);
