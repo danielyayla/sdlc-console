@@ -1,6 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { identity as gitIdentity, isRepo, repoRoot, type GitIdentity } from "@sdlc/adapter-git";
 import { Engine, JobStore } from "./engine/index.js";
+import { DeliveryLog } from "./github/webhooks.js";
 import { createApp } from "./http.js";
 import { enrich, SessionRegistry } from "./sessions/registry.js";
 import type { SessionRecord } from "./snapshot.js";
@@ -23,7 +24,7 @@ export interface ServeOptions {
   /** Run the lifecycle engine: launch sessions and per-change runs on transitions. */
   engine?: boolean;
   log?: (line: string) => void;
-  /** Environment for the code host (`GITHUB_TOKEN`); defaults to the process environment. */
+  /** Environment for the code host (`GITHUB_TOKEN`) and the webhook receiver (`GITHUB_WEBHOOK_SECRET`); defaults to the process environment. */
   env?: Record<string, string | undefined>;
 }
 
@@ -35,6 +36,8 @@ export interface RunningServer {
   registry: SessionRegistry;
   engine: Engine | null;
   jobs: JobStore;
+  /** Webhook deliveries (null without the engine). */
+  deliveries: DeliveryLog | null;
   close: () => Promise<void>;
 }
 
@@ -52,7 +55,8 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
   const engine = opts.sdlcBin
     ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, ...(opts.log ? { log: opts.log } : {}), ...(opts.env ? { env: opts.env } : {}) })
     : null;
-  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(engine ? { engine, jobs } : {}), ...(opts.env ? { env: opts.env } : {}) });
+  const deliveries = engine ? new DeliveryLog(registry.database) : null;
+  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(engine ? { engine, jobs } : {}), ...(deliveries ? { deliveries } : {}), ...(opts.env ? { env: opts.env } : {}) });
   if (engine && opts.engine) void engine.tick();
   const watcher = opts.watch === false ? null : watchRepo(root, () => void store.refresh().catch(() => undefined));
   const host = opts.host ?? "127.0.0.1";
@@ -66,6 +70,7 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     registry,
     engine,
     jobs,
+    deliveries,
     close: async () => {
       watcher?.close();
       engine?.close();

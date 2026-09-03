@@ -217,7 +217,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     const sentBack = lastEvent(events, "gate.sent_back", (e) => e.data.gate === g);
     const planFinal = g === 3 ? lastEvent(events, "plan.final") : null;
     const planDrafted = g === 3 ? lastEvent(events, "plan.drafted") : null;
-    const prOpened = g === 5 ? lastEvent(events, "pr.opened", (e) => e.data.artifact === undefined) : null;
+    const prOpened = g === 5 ? latestOf(events, [lastEvent(events, "pr.opened", (e) => e.data.artifact === undefined), lastEvent(events, "pr.synchronized")]) : null;
     const latest = latestOf(events, [committed, sentBack, planFinal, planDrafted, prOpened]);
     let open = false;
     let since = change.created.at;
@@ -306,7 +306,8 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     artifactPrs[idx as ArtifactIndex] = { number: e.data.number, url: e.data.url, branch: e.data.branch, headSha: e.data.headSha, merged: gateOf !== undefined && accepted.has(gateOf as GateNumber) };
   }
 
-  const codePr = lastEvent(events, "pr.opened", (e) => e.data.artifact === undefined);
+  // findings belong to the head under review: those before the code PR opened, or before its head last moved, are history
+  const codePr = latestOf(events, [lastEvent(events, "pr.opened", (e) => e.data.artifact === undefined), lastEvent(events, "pr.synchronized")]);
   const afterPr = indexOf(events, codePr);
   const findings: ReviewFindingView[] = eventsNamed(events, "review.finding")
     .filter((e) => indexOf(events, e) > afterPr)
