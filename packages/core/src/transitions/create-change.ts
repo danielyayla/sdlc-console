@@ -3,7 +3,7 @@ import { nextChangeId } from "../ids.js";
 import type { Repo } from "../repo.js";
 import { readFile } from "../tree.js";
 import { refuse, type TransitionResult, type WritePlan } from "../writeplan.js";
-import { EventBuilder, trailersFor, type TransitionContext } from "./context.js";
+import { blobShaOf, EventBuilder, trailersFor, type TransitionContext } from "./context.js";
 
 export interface CreateChangeInput {
   title: string;
@@ -68,7 +68,7 @@ export function createChange(repo: Repo, input: CreateChangeInput, ctx: Transiti
   const originRef = input.origin.ref ? `${input.origin.type}:${input.origin.ref}` : input.origin.type;
   const events = [
     ev.human("change.created", null, 1, { origin: originRef }),
-    ev.human("artifact.committed", null, 1, { artifact: 0, path: `${dir}/intent.md`, sha: "0".repeat(40) }),
+    ev.human("artifact.committed", null, 1, { artifact: 0, path: `${dir}/intent.md`, sha: blobShaOf(ctx, intent) }),
   ];
   const plan: WritePlan = {
     changeId: id,

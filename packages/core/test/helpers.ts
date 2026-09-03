@@ -1,5 +1,19 @@
 import type { Event, EventName, EventOf } from "@sdlc/schemas";
-import { configFingerprint, treeFromRecord, withFiles, type Tree } from "../src/index.js";
+import { configFingerprint, deriveChange, loadRepo, treeFromRecord, withFiles, type ChangeFiles, type ChangeView, type Repo, type Tree } from "../src/index.js";
+
+/** Loaded files for a change, or throw (tests only). */
+export function filesOf(repo: Repo, id: string): ChangeFiles {
+  const files = repo.changes.get(id);
+  if (!files) throw new Error(`no ${id} in repo`);
+  return files;
+}
+
+/** Load + derive one change from a tree (tests only). */
+export function viewOf(tree: Tree, id: string): { repo: Repo; files: ChangeFiles; view: ChangeView } {
+  const repo = loadRepo(tree);
+  const files = filesOf(repo, id);
+  return { repo, files, view: deriveChange(repo, files) };
+}
 
 export const TS = "2026-09-03T10:00:00Z";
 export const SHA = "0123456789abcdef0123456789abcdef01234567";

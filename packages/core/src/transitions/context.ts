@@ -3,6 +3,7 @@ import { holdsRole } from "../config.js";
 import type { ChangeView } from "../derive.js";
 import type { ChangeFiles, Repo } from "../repo.js";
 import { gateOwner, ROLE_LABELS, type GateRole } from "../stages.js";
+import { syntheticSha } from "../tree.js";
 import type { TransitionResult } from "../writeplan.js";
 import { refuse } from "../writeplan.js";
 
@@ -23,6 +24,12 @@ export interface TransitionContext {
   mergeSha?: string;
   /** Extra ids known from other branches, for allocation (docs/storage-layout.md). */
   knownIds?: Iterable<string>;
+  /** Blob sha for content about to be written; the git adapter passes git's hash-object. Synthetic by default. */
+  blobSha?: (content: string) => string;
+}
+
+export function blobShaOf(ctx: TransitionContext, content: string): string {
+  return (ctx.blobSha ?? syntheticSha)(content);
 }
 
 export const SYSTEM_ACTOR = { type: "system", id: "sdlc-bot" } as const;

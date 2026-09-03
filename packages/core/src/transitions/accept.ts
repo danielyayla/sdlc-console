@@ -25,6 +25,11 @@ export function accept(repo: Repo, view: ChangeView, gate: GateNumber, ctx: Tran
   if (repo.config.records[artifactName] === "linked" && !view.record) {
     return refuse("gate.linked.record-missing", `${artifactName} is linked to an external record; accept is blocked until the record id and commit SHA are present`, doc.path);
   }
+  const artifactFiles = { 1: files.intent, 2: files.spec, 3: files.plan, 5: null, 6: files.incident }[gate];
+  if (artifactFiles && !artifactFiles.complete) {
+    const missing = [...artifactFiles.missingSections, ...artifactFiles.emptySections];
+    return refuse("gate.artifact-incomplete", `${doc.name} is incomplete: ${missing.join(", ")}`, doc.path);
+  }
   const sha = doc.sha ?? "0".repeat(40);
   const dir = files.dir;
   const cycle = files.change.cycle;

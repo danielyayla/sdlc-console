@@ -39,7 +39,12 @@ export interface GateView {
   since: string;
 }
 
-export type EvalsState = "not-run" | "running" | "green" | "red" | "waiting" | "stale";
+export type EvalsState = "not-run" | "running" | "green" | "red" | "waiting" | "stale" | "inc-blocked";
+
+/** The INC case a looped change must activate before passing stage 4 again. */
+export function incCaseIdFor(changeId: string, cycle: number): string | null {
+  return cycle > 1 ? `INC-${changeId}-${cycle - 1}` : null;
+}
 
 export interface ChangeView {
   id: string;
@@ -68,6 +73,7 @@ export interface ChangeView {
   evalsState: EvalsState;
   latestRun: PerChangeRun | null;
   intersectingCases: string[];
+  incCase: { id: string; status: "draft" | "active" | "retired" | "missing" } | null;
   pr: Pr | null;
   waitingOnYou: string | null;
   activity: ActivityEntry[];
@@ -80,6 +86,8 @@ export interface StageInputs {
   acceptedGates: ReadonlySet<number>;
   greenRunMatchesConfig: boolean;
   prMerged: boolean;
+  /** A looped change stays at 4 until its INC eval case is active (FR-14/FR-53). */
+  incCaseBlocked?: boolean;
 }
 
 /** Stage is a pure function of accepted gates + eval verdict + merge (docs/storage-layout.md). */
@@ -87,7 +95,7 @@ export function deriveStage(i: StageInputs): StageNumber {
   if (!i.acceptedGates.has(1)) return 1;
   if (!i.acceptedGates.has(2)) return 2;
   if (!i.acceptedGates.has(3)) return 3;
-  if (!i.greenRunMatchesConfig) return 4;
+  if (!i.greenRunMatchesConfig || i.incCaseBlocked) return 4;
   if (!i.prMerged) return 5;
   return 6;
 }
@@ -155,7 +163,10 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
   const latestRun = runsThisCycle.at(-1) ?? null;
   const greenMatching = runsThisCycle.some((r) => r.verdict === "green" && fingerprintMatches(r.configRef, repo.fingerprint));
   const prMerged = files.pr?.mergedAt !== undefined || lastEvent(events, "pr.merged") !== null;
-  const stage = deriveStage({ acceptedGates: accepted, greenRunMatchesConfig: greenMatching, prMerged });
+  const incCaseId = incCaseIdFor(change.id, change.cycle);
+  const incCase = incCaseId ? repo.evalCases.find((c) => c.id === incCaseId) ?? null : null;
+  const incCaseBlocked = incCaseId !== null && incCase?.status !== "active";
+  const stage = deriveStage({ acceptedGates: accepted, greenRunMatchesConfig: greenMatching, prMerged, incCaseBlocked });
   if (stage === 5 && !files.present.pr) {
     errors.push(err(`${dir}/pr.yaml`, "pr.missing", "evals are green but pr.yaml is missing"));
   }
@@ -216,7 +227,8 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
   let evalsState: EvalsState = "not-run";
   let waitingOnYou: string | null = null;
   if (stage === 4) {
-    if (runsThisCycle.length === 0) evalsState = "running";
+    if (greenMatching && incCaseBlocked) evalsState = "inc-blocked";
+    else if (runsThisCycle.length === 0) evalsState = "running";
     else if (greenMatching) evalsState = "green";
     else if (latestRun?.verdict === "green") evalsState = "stale";
     else {
@@ -249,6 +261,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     present: files.present,
     planRev,
     fresh: files.archivedCycles.length > 0 && !files.present.intent,
+    incCaseId,
   });
 
   const valid = errors.length === 0;
@@ -279,6 +292,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     evalsState,
     latestRun,
     intersectingCases: cases.map((c) => c.id),
+    incCase: incCaseId ? { id: incCaseId, status: incCase?.status ?? "missing" } : null,
     pr: files.pr,
     waitingOnYou,
     activity: activityFeed(files.events),
@@ -320,6 +334,7 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     evalsState: "not-run",
     latestRun: null,
     intersectingCases: [],
+    incCase: null,
     pr: null,
     waitingOnYou: null,
     activity: activityFeed(files.events),
@@ -389,6 +404,7 @@ interface StatusInputs {
   present: ChangeFiles["present"];
   planRev: number;
   fresh: boolean;
+  incCaseId: string | null;
 }
 
 /** `agent` flag and status text per spec §5 / §4. */
@@ -419,6 +435,8 @@ function deriveStatus(i: StatusInputs): { agent: boolean; status: string } {
           return { agent: false, status: "waiting on you: evals red twice" };
         case "stale":
           return { agent: true, status: "Evals green on an older config — rerun needed" };
+        case "inc-blocked":
+          return { agent: false, status: `Evals green — activate ${i.incCaseId ?? "the INC case"} before Test can pass` };
         default:
           return { agent: true, status: i.cases > 0 ? `Evals running · ${i.cases} case${i.cases === 1 ? "" : "s"}` : "Building — verification pending" };
       }

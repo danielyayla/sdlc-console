@@ -3,7 +3,7 @@ import type { ChangeView } from "../derive.js";
 import type { Repo } from "../repo.js";
 import { filesUnder, readFile } from "../tree.js";
 import { refuse, type FileWrite, type TransitionResult, type WritePlan } from "../writeplan.js";
-import { checkGate, EventBuilder, trailersFor, type TransitionContext } from "./context.js";
+import { blobShaOf, checkGate, EventBuilder, trailersFor, type TransitionContext } from "./context.js";
 
 const KEEP = new Set(["change.yaml", "log.jsonl"]);
 
@@ -88,7 +88,7 @@ export function loop(repo: Repo, view: ChangeView, ctx: TransitionContext): Tran
   const events = [
     ev.human("gate.accepted", check.role, n, { gate: 6, artifactSha: sha, source: "cli" }),
     ev.system("cycle.archived", next, { cycle: n, into: `cycles/${n}` }),
-    ev.system("artifact.committed", next, { artifact: 0, path: `${dir}/intent.md`, sha: "0".repeat(40) }),
+    ev.system("artifact.committed", next, { artifact: 0, path: `${dir}/intent.md`, sha: blobShaOf(ctx, intent) }),
     ev.system("stage.entered", next, { stage: 1 }),
   ];
   const plan: WritePlan = {
