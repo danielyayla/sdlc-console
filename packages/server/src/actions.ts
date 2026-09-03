@@ -1,4 +1,4 @@
-import { git, mergeBranch } from "@sdlc/adapter-git";
+import { git, mergeBranch, mergeIfUnmerged } from "@sdlc/adapter-git";
 import {
   accept,
   acceptTriage,
@@ -55,6 +55,18 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
       mergeSha = await mergeBranch(root, before.pr.branch, `sdlc(${id}): merge ${before.pr.branch} (gate 5)`, store.who);
     } catch (e) {
       throw new ActionError(502, `merge refused: ${(e as Error).message}`, [], true);
+    }
+  }
+  if (gate !== 5) {
+    // local mode: a draft on sdlc/<CHG>/<artifact> reaches the default branch when the owner accepts
+    const artifact = { 1: "intent", 2: "spec", 3: "plan", 6: "incident" }[gate];
+    const current = (await git(store.root, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    if (current === repo.config.defaultBranch) {
+      try {
+        await mergeIfUnmerged(store.root, `sdlc/${id}/${artifact}`, `sdlc(${id}): merge sdlc/${id}/${artifact} (gate ${gate})`, store.who);
+      } catch (e) {
+        throw new ActionError(502, `merge of sdlc/${id}/${artifact} refused: ${(e as Error).message}`, [], true);
+      }
     }
   }
   const r = await store.act((repo2, ctx) => accept(repo2, view(repo2, id), gate, ctx), mergeSha ? { mergeSha } : {});

@@ -120,3 +120,16 @@ export async function mergeBranch(dir: string, branch: string, message: string, 
   await git(dir, ["merge", "--no-ff", "--no-edit", "-m", message, branch], { env: envFor(who) });
   return (await git(dir, ["rev-parse", "HEAD"])).trim();
 }
+
+/**
+ * Local mode: an artifact drafted on `sdlc/<CHG>/<artifact>` (or any branch)
+ * reaches the default branch when the gate owner accepts. Merges the branch
+ * into the current one unless already merged; returns the merge sha or null.
+ */
+export async function mergeIfUnmerged(dir: string, branch: string, message: string, who: GitIdentity): Promise<string | null> {
+  const exists = (await gitRaw(dir, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])).code === 0;
+  if (!exists) return null;
+  const merged = (await gitRaw(dir, ["merge-base", "--is-ancestor", branch, "HEAD"])).code === 0;
+  if (merged) return null;
+  return mergeBranch(dir, branch, message, who);
+}

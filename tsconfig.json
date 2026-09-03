@@ -14,6 +14,9 @@
       "path": "packages/hooks/tsconfig.build.json"
     },
     {
+      "path": "packages/mcp/tsconfig.build.json"
+    },
+    {
       "path": "packages/server/tsconfig.build.json"
     },
     {

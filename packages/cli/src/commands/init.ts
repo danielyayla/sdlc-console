@@ -71,6 +71,10 @@ export async function init(io: Io, opts: InitOptions): Promise<InitResult> {
     created.push(".gitignore (.sdlc-state/)");
   } else skipped.push(".gitignore");
 
+  // .mcp.json so Claude Code finds the agent tools (create-only)
+  const bin = binPath();
+  put(".mcp.json", `${JSON.stringify({ mcpServers: { sdlc: bin ? { command: "node", args: [bin, "mcp"] } : { command: "sdlc", args: ["mcp"] } } }, null, 2)}\n`);
+
   // hook wrappers + settings.json, create-only (the console never edits .claude/**)
   const hooks = installHooks(root, binPath());
   created.push(...hooks.created);

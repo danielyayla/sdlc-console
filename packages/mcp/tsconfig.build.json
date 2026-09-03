@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../adapters/git/tsconfig.build.json" },
+    { "path": "../core/tsconfig.build.json" },
+    { "path": "../hooks/tsconfig.build.json" },
+    { "path": "../schemas/tsconfig.build.json" }
+  ]
+}

@@ -1,4 +1,4 @@
-import { git, mergeBranch } from "@sdlc/adapter-git";
+import { git, mergeBranch, mergeIfUnmerged } from "@sdlc/adapter-git";
 import { accept, sendBack, type ChangeView } from "@sdlc/core";
 import type { GateNumber } from "@sdlc/schemas";
 import { actingIdentity, assertHuman, baseBranch, commitPlan, loadCommitted, transitionContext, viewOf, type CliContext } from "../context.js";
@@ -32,8 +32,15 @@ export async function acceptCommand(ctx: CliContext, id: string, gate: GateNumbe
     if (current !== base) throw new CliError(`gate 5 merges into ${base}; check it out first (currently on ${current})`, 2);
     mergeSha = await mergeBranch(ctx.root, view.pr.branch, `sdlc(${id}): merge ${view.pr.branch} (gate 5)`, who);
   }
-  const fresh = mergeSha ? await loadCommitted(ctx) : { repo };
-  const freshView = mergeSha ? viewOf(fresh.repo, id) : view;
+  let merged: string | null = null;
+  if (gate !== 5) {
+    const artifact = { 1: "intent", 2: "spec", 3: "plan", 6: "incident" }[gate];
+    const base = await baseBranch(ctx, repo);
+    const current = (await git(ctx.root, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    if (current === base) merged = await mergeIfUnmerged(ctx.root, `sdlc/${id}/${artifact}`, `sdlc(${id}): merge sdlc/${id}/${artifact} (gate ${gate})`, who);
+  }
+  const fresh = mergeSha || merged ? await loadCommitted(ctx) : { repo };
+  const freshView = mergeSha || merged ? viewOf(fresh.repo, id) : view;
   const r = accept(fresh.repo, freshView, gate, transitionContext(who, mergeSha ? { mergeSha } : {}));
   if (!r.ok) throw new CliError(`accept refused`, 2, r.diagnostics);
   const commit = await commitPlan(ctx, fresh.repo, r.plan, who);

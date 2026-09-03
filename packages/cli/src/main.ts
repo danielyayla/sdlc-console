@@ -8,6 +8,7 @@ import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
 import { loopCommand } from "./commands/loop.js";
+import { mcpCommand } from "./commands/mcp.js";
 import { formatDiagnostic, validateCommand } from "./commands/validate.js";
 import { repoContext } from "./context.js";
 import { CliError, table, type Io } from "./io.js";
@@ -28,6 +29,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc security patch|escalate|dismiss <SEC> [--reason <text>]
   sdlc security import <file|->
   sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
+  sdlc mcp                                              (agent tools over stdio)
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
@@ -173,6 +175,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         emit(io, json, r, () => (r.changeId ? `${r.id} escalated → ${r.changeId} at the Plan gate · ${r.commit.slice(0, 7)}` : `${r.id} ${sub === "patch" ? "patch in PR gate" : "dismissed"} · ${r.commit.slice(0, 7)}`));
         return 0;
       }
+      case "mcp":
+        return await mcpCommand(io);
       case "hook": {
         if (!sub) throw new CliError("usage: sdlc hook <name>");
         return await hookCommand(io, sub);

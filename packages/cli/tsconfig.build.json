@@ -23,6 +23,9 @@
     },
     {
       "path": "../hooks/tsconfig.build.json"
+    },
+    {
+      "path": "../mcp/tsconfig.build.json"
     }
   ]
 }

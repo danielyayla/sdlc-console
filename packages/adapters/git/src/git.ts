@@ -103,3 +103,12 @@ export async function initRepo(dir: string, branch = "main", who?: GitIdentity):
     await git(dir, ["config", "user.name", who.name]);
   }
 }
+
+export async function branchExists(dir: string, name: string): Promise<boolean> {
+  return (await gitRaw(dir, ["show-ref", "--verify", "--quiet", `refs/heads/${name}`])).code === 0;
+}
+
+/** True when `ancestor` is reachable from `ref` (already merged). */
+export async function isAncestor(dir: string, ancestor: string, ref = "HEAD"): Promise<boolean> {
+  return (await gitRaw(dir, ["merge-base", "--is-ancestor", ancestor, ref])).code === 0;
+}

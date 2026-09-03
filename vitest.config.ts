@@ -15,6 +15,7 @@ export default defineConfig({
       "@sdlc/core": src("core"),
       "@sdlc/adapter-git": src("adapters/git"),
       "@sdlc/hooks": src("hooks"),
+      "@sdlc/mcp": src("mcp"),
       "@sdlc/server": src("server"),
       "@sdlc/cli": src("cli"),
       "@sdlc/fixtures": fixtures,

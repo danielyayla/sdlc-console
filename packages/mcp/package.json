@@ -1,8 +1,8 @@
 {
-  "name": "@sdlc/cli",
+  "name": "@sdlc/mcp",
   "version": "0.0.0",
   "private": true,
-  "description": "Human-facing sdlc command line.",
+  "description": "sdlc-mcp: agent-facing tools (discover work, get context, propose artifacts, report rounds). No accept tool exists.",
   "type": "module",
   "exports": {
     ".": {
@@ -14,14 +14,11 @@
     "dist"
   ],
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@sdlc/adapter-git": "workspace:*",
     "@sdlc/core": "workspace:*",
-    "@sdlc/schemas": "workspace:*",
-    "@sdlc/server": "workspace:*",
     "@sdlc/hooks": "workspace:*",
-    "@sdlc/mcp": "workspace:*"
-  },
-  "bin": {
-    "sdlc": "./dist/bin.js"
+    "@sdlc/schemas": "workspace:*",
+    "zod": "^4.5.4"
   }
 }
