@@ -12,6 +12,8 @@ export interface ServeOptions {
   identity?: GitIdentity;
   sessions?: () => SessionRecord[];
   watch?: boolean;
+  /** Built web app to serve at /. */
+  webDir?: string;
 }
 
 export interface RunningServer {
@@ -30,7 +32,7 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
   if (!who) throw new Error("no git identity — set user.email before serving");
   const store = new StateStore({ root, identity: who, ...(opts.sessions ? { sessions: opts.sessions } : {}) });
   await store.refresh();
-  const app = createApp(store);
+  const app = createApp(store, opts.webDir ? { webDir: opts.webDir } : {});
   const watcher = opts.watch === false ? null : watchRepo(root, () => void store.refresh().catch(() => undefined));
   const host = opts.host ?? "127.0.0.1";
   await new Promise<void>((resolve) => app.server.listen(opts.port ?? 0, host, resolve));

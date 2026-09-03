@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["packages/**/test/**/*.test.ts", "fixtures/test/**/*.test.ts"],
+    include: ["packages/**/test/**/*.test.{ts,tsx}", "fixtures/test/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/dist/**"],
   },
 });

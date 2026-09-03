@@ -19,6 +19,11 @@ export default defineConfig([
     languageOptions: { globals: globals.node },
   },
   {
+    // The console runs in a browser.
+    files: ["packages/web/src/**/*.{ts,tsx}"],
+    languageOptions: { globals: globals.browser },
+  },
+  {
     // Mechanical form of the CLAUDE.md rule "packages/core has no I/O".
     files: ["packages/core/src/**/*.ts"],
     rules: {

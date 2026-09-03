@@ -1,4 +1,6 @@
+import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { extname, join, normalize } from "node:path";
 import { readFile, type Tree } from "@sdlc/core";
 import { parseFrontMatter, type GateNumber } from "@sdlc/schemas";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -73,6 +75,25 @@ function artifact(tree: Tree, id: string, index: number): unknown {
   return { index, name, path: `${dir}/${name}`, present: true, sha: file.sha, body: split?.value?.body ?? file.content, frontMatter: split?.value?.data ?? null };
 }
 
+const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2", ".json": "application/json; charset=utf-8", ".map": "application/json" };
+
+/** Serve the built SPA (single view enum, no router: every unknown path gets index.html). */
+function serveStatic(webDir: string, url: URL, res: ServerResponse): boolean {
+  const rel = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.[/\\])+/, "");
+  let file = join(webDir, rel);
+  if (!file.startsWith(webDir)) return false;
+  if (!existsSync(file) || statSync(file).isDirectory()) file = join(webDir, "index.html");
+  if (!existsSync(file)) return false;
+  res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+  createReadStream(file).pipe(res);
+  return true;
+}
+
+export interface AppOptions {
+  /** Directory of the built web app; when absent only /api is served. */
+  webDir?: string;
+}
+
 export interface HttpApp {
   server: Server;
   wss: WebSocketServer;
@@ -80,7 +101,7 @@ export interface HttpApp {
 }
 
 /** HTTP JSON + WebSocket snapshot transport (blueprint §9.2). */
-export function createApp(store: StateStore): HttpApp {
+export function createApp(store: StateStore, options: AppOptions = {}): HttpApp {
   const server = createServer((req, res) => {
     void route(req, res).catch((e: unknown) => {
       if (e instanceof ActionError) {
@@ -114,7 +135,10 @@ export function createApp(store: StateStore): HttpApp {
     const url = new URL(req.url ?? "/", "http://localhost");
     const parts = url.pathname.split("/").filter(Boolean);
     const method = req.method ?? "GET";
-    if (parts[0] !== "api") throw new ActionError(404, "not found");
+    if (parts[0] !== "api") {
+      if (method === "GET" && options.webDir && serveStatic(options.webDir, url, res)) return;
+      throw new ActionError(404, "not found");
+    }
 
     if (method === "GET" && parts[1] === "state" && parts.length === 2) {
       json(res, 200, await store.refresh());

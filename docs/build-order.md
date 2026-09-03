@@ -15,7 +15,7 @@ Work one numbered item at a time. Each item is a plan-mode session → `plan.md`
 
 ## Phase 1 — Local MVP (needs Phase 0)
 - [x] 1.1 `sdlc serve`: watcher, snapshot/patch WebSocket, HTTP actions, local identity + `defaultRole`.
-- [ ] 1.2 Web: top bar, Pipeline, Change detail, Gates, tokens from spec §6.
+- [x] 1.2 Web: top bar, Pipeline, Change detail, Gates, tokens from spec §6.
 - [ ] 1.3 Web: Loop (file-backed triage), Security (file-backed + CSV/MD import), Metrics from git + ledger.
 - [ ] 1.4 Hooks package: `plan-sync`, `test-freeze`, `verify-before-done` → `sdlc hook <name>`; installed by init.
 - [ ] 1.5 MCP server: `list_work`, `get_change`, `get_context`, `propose_artifact`, `submit_plan_revision`, `report_round`, `report_done`, `request_input`, `log_note`.
