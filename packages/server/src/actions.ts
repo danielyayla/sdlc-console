@@ -1,4 +1,5 @@
-import { git, mergeBranch, mergeIfUnmerged } from "@sdlc/adapter-git";
+import { CodeHostError, git, mergeIfUnmerged } from "@sdlc/adapter-git";
+import { codeHostFor } from "./engine/codehost.js";
 import {
   accept,
   acceptTriage,
@@ -40,12 +41,13 @@ function view(repo: Repo, id: string): ChangeView {
   return deriveChange(repo, files);
 }
 
-export async function acceptGate(store: StateStore, id: string, gate: GateNumber): Promise<ActionResult> {
+export async function acceptGate(store: StateStore, id: string, gate: GateNumber, env: Record<string, string | undefined> = process.env): Promise<ActionResult> {
   await store.refresh();
   const repo = store.currentRepo;
   if (!repo) throw new ActionError(502, "repository not loaded", [], true);
   const before = view(repo, id);
   let mergeSha: string | undefined;
+  let source: "console" | "pr.merge" = "console";
   if (gate === 5) {
     if (!before.gate || before.gate.s !== 5 || !before.pr) throw new ActionError(409, `${id} is not waiting at gate 5 (${before.status})`);
     const root = store.root;
@@ -53,9 +55,12 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
     const current = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
     if (current !== base) throw new ActionError(409, `gate 5 merges into ${base}; the working tree is on ${current}`);
     try {
-      mergeSha = await mergeBranch(root, before.pr.branch, `sdlc(${id}): merge ${before.pr.branch} (gate 5)`, store.who);
+      const host = codeHostFor(repo.config.codeHost, env);
+      mergeSha = await host.merge(root, before.pr, `sdlc(${id}): merge ${before.pr.branch} (gate 5)`, store.who);
+      if (host.provider === "github") source = "pr.merge";
     } catch (e) {
-      throw new ActionError(502, `merge refused: ${(e as Error).message}`, [], true);
+      const retryable = e instanceof CodeHostError ? e.retryable : true;
+      throw new ActionError(retryable ? 502 : 409, `merge refused: ${(e as Error).message}`, [], retryable);
     }
   }
   if (gate !== 5) {
@@ -70,7 +75,7 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
       }
     }
   }
-  const r = await store.act((repo2, ctx) => accept(repo2, view(repo2, id), gate, ctx), mergeSha ? { mergeSha } : {});
+  const r = await store.act((repo2, ctx) => accept(repo2, view(repo2, id), gate, ctx), { source, ...(mergeSha ? { mergeSha } : {}) });
   const after = r.snapshot.changes.find((c) => c.id === id);
   const label = before.gate?.label ?? `gate ${gate}`;
   const toast = gate === 6 ? `Loop closed — ${id} re-entered Plan` : `${label} — ${id} moved to ${after ? stageDef(after.stage).name : "next stage"}`;

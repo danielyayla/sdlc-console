@@ -1,0 +1,21 @@
+{
+  "name": "@sdlc/adapter-github",
+  "version": "0.0.0",
+  "private": true,
+  "description": "GitHub code-host adapter: pull requests, commit statuses, CODEOWNERS and branch protection over the REST API.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@sdlc/adapter-git": "workspace:*",
+    "@sdlc/core": "workspace:*",
+    "@sdlc/schemas": "workspace:*"
+  }
+}

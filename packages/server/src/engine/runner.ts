@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import { commitWritePlan, git, headSha, newUlid, readTree } from "@sdlc/adapter-git";
 import { check, configFingerprint, intersectingCases, loadRepo, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
 import { stringifyJson, type CommandResult, type Event, type EvalResult, type PerChangeRun } from "@sdlc/schemas";
-import { SYSTEM_IDENTITY, codeHostFor } from "./codehost.js";
+import type { Env } from "@sdlc/adapter-github";
+import { SYSTEM_IDENTITY, codeHostFor, type CodeHost } from "./codehost.js";
 
 export interface Exec {
   (cmd: string, cwd: string): Promise<{ exitCode: number; output: string }>;
@@ -26,6 +27,9 @@ export interface RunInput {
   exec?: Exec;
   timeoutMs?: number;
   now?: () => Date;
+  /** Code host override (tests); otherwise `config.codeHost` + `env`. */
+  codeHost?: CodeHost;
+  env?: Env;
 }
 
 export interface RunOutcome {
@@ -117,8 +121,8 @@ export async function runPerChange(input: RunInput, repo: Repo): Promise<RunOutc
   let reds = 0;
   if (green) {
     const planMatches = view.planMatches ?? check.planSync(fileSet, view.planFiles, `${files.dir}/plan.md`).allowed;
-    const host = codeHostFor(repo.config.codeHost);
-    const opened = await host.openPr({ root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now() });
+    const host = input.codeHost ?? codeHostFor(repo.config.codeHost, input.env);
+    const opened = await host.openPr({ root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now(), evidence: "pass", evidenceSummary: `per-change run ${n} green · ${passed}/${total} checks passed` });
     prCommit = opened.commit;
   } else {
     for (let i = files.runs.length - 1; i >= 0 && files.runs[i]?.verdict === "red"; i--) reds++;

@@ -151,6 +151,10 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
       errors.push(err(`${dir}/log.jsonl`, "gate3.high-risk.source", "high-risk plan must be accepted by the tech lead (PR merge in github mode)"));
     }
   }
+  if (repo.config.codeHost === "github" && accepted.has(5)) {
+    const acc5 = lastEvent(events, "gate.accepted", (e) => e.data.gate === 5);
+    if (acc5 && acc5.data.source !== "pr.merge") errors.push(err(`${dir}/log.jsonl`, "gate5.github.source", "in github mode gate 5 must be recorded from the pull request merge (source pr.merge)"));
+  }
   const dupIds = new Set<string>();
   const seenIds = new Set<string>();
   for (const e of files.events) {

@@ -55,6 +55,18 @@ importers:
         specifier: workspace:*
         version: link:../../schemas
 
+  packages/adapters/github:
+    dependencies:
+      '@sdlc/adapter-git':
+        specifier: workspace:*
+        version: link:../git
+      '@sdlc/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@sdlc/schemas':
+        specifier: workspace:*
+        version: link:../../schemas
+
   packages/cli:
     dependencies:
       '@sdlc/adapter-git':
@@ -145,6 +157,9 @@ importers:
       '@sdlc/adapter-git':
         specifier: workspace:*
         version: link:../adapters/git
+      '@sdlc/adapter-github':
+        specifier: workspace:*
+        version: link:../adapters/github
       '@sdlc/core':
         specifier: workspace:*
         version: link:../core

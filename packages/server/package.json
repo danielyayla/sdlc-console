@@ -15,6 +15,7 @@
   ],
   "dependencies": {
     "@sdlc/adapter-git": "workspace:*",
+    "@sdlc/adapter-github": "workspace:*",
     "@sdlc/core": "workspace:*",
     "@sdlc/schemas": "workspace:*",
     "better-sqlite3": "^13.0.3",

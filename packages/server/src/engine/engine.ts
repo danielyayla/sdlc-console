@@ -17,6 +17,8 @@ export interface EngineOptions {
   /** Launch headless sessions automatically on transitions (opt-in). */
   autoLaunch: boolean;
   log?: (line: string) => void;
+  /** Environment for the code host (`GITHUB_TOKEN`); defaults to the process environment. */
+  env?: Record<string, string | undefined>;
 }
 
 /**
@@ -152,7 +154,7 @@ export class Engine {
     const job = this.opts.jobs.claim({ key, kind: "per-change-run", changeId: session.changeId, cycle: view.cycle, stage: 4 }, this.now());
     if (!job) return null;
     try {
-      const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}) }, repo);
+      const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}) }, repo);
       this.opts.jobs.update(key, { state: "done", note: `run ${outcome.run.n} ${outcome.run.verdict}${outcome.prCommit ? " · PR opened" : ""}` }, this.now());
       this.log(`${view.id}: run ${outcome.run.n} ${outcome.run.verdict}`);
       this.opts.registry.patch(session.id, { reviewed: outcome.run.verdict === "green" });
