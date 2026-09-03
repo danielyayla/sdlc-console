@@ -17,6 +17,13 @@
     "defaultBranch": {
       "type": "string"
     },
+    "codeHost": {
+      "type": "string",
+      "enum": [
+        "local",
+        "github"
+      ]
+    },
     "identities": {
       "minItems": 1,
       "type": "array",

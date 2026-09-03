@@ -137,8 +137,10 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
   if (accepted.has(3) && !files.present.plan) errors.push(err(`${dir}/plan.md`, "artifact.missing", "gate 3 accepted but plan.md is missing"));
   if (change.risk === "high" && accepted.has(3)) {
     const acc3 = lastEvent(events, "gate.accepted", (e) => e.data.gate === 3);
-    if (acc3 && acc3.data.source !== "pr.merge") {
-      errors.push(err(`${dir}/log.jsonl`, "gate3.high-risk.source", "high-risk plan accepted outside a PR merge"));
+    const viaPr = acc3?.data.source === "pr.merge";
+    const techLeadLocally = repo.config.codeHost === "local" && acc3?.actor.role === "tech_lead";
+    if (acc3 && !viaPr && !techLeadLocally) {
+      errors.push(err(`${dir}/log.jsonl`, "gate3.high-risk.source", "high-risk plan must be accepted by the tech lead (PR merge in github mode)"));
     }
   }
   const dupIds = new Set<string>();

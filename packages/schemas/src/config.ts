@@ -49,6 +49,8 @@ export const config = z.strictObject({
   schema: schemaVersion,
   defaultRole: z.enum(["po", "eng"]),
   defaultBranch: z.string().optional(),
+  /** Where gates that need a PR are executed; local mode has no PRs and lets a tech lead accept high-risk plans via CLI. */
+  codeHost: z.enum(["local", "github"]).optional(),
   identities: z.array(identity).min(1),
   /** Extra roles (decisions Q15) gate non-gate actions or PR reviews only. */
   roles: z

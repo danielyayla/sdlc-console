@@ -110,7 +110,14 @@ describe("deriveChange at every stage", () => {
     expect(v.autoEligible.terms.find((t) => t.name === "risk routine")?.ok).toBe(false);
   });
 
-  it("high-risk plan accepted outside a PR merge is a validation error", () => {
+  it("high-risk plan accepted by the tech lead in local mode is valid", () => {
+    const events = [...acceptedThrough([1, 2]), ev("artifact.committed", AGENT, { artifact: 2, path: "plan.md", sha: SHA }), ev("gate.accepted", { type: "human", id: "eng@example.com", role: "tech_lead" }, { gate: 3, artifactSha: SHA, source: "cli" })];
+    const v = view(withChange(baseTree(), { id: "CHG-0008", risk: "high", intent: true, spec: true, plan: true, events }), "CHG-0008");
+    expect(v.valid).toBe(true);
+    expect(v.stage).toBe(4);
+  });
+
+  it("high-risk plan accepted by a plain engineer is a validation error", () => {
     const v = view(withChange(baseTree(), { id: "CHG-0008", risk: "high", intent: true, spec: true, plan: true, events: acceptedThrough([1, 2, 3]) }), "CHG-0008");
     expect(v.valid).toBe(false);
     expect(v.validationErrors.map((d) => d.rule)).toContain("gate3.high-risk.source");

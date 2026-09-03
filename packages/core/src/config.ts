@@ -15,6 +15,7 @@ export interface ResolvedConfig {
   present: boolean;
   defaultRole: "po" | "eng";
   defaultBranch: string;
+  codeHost: "local" | "github";
   identities: Identity[];
   thresholds: ResolvedThresholds;
   records: Record<"intent" | "spec" | "plan" | "evals" | "pr" | "incident", RecordsMode>;
@@ -32,6 +33,7 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
     present: config !== null,
     defaultRole: config?.defaultRole ?? "po",
     defaultBranch: config?.defaultBranch ?? "main",
+    codeHost: config?.codeHost ?? "local",
     identities: config?.identities ?? [],
     thresholds: {
       autoFilesMax: t.autoFilesMax ?? d.autoFilesMax,
