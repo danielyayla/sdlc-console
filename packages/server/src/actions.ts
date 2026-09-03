@@ -13,6 +13,7 @@ import {
   dismissProposal,
   dismissTriage,
   escalateFinding,
+  harvestCase,
   importFindings,
   loop,
   patchFinding,
@@ -185,4 +186,15 @@ export async function findingsImport(store: StateStore, text: string): Promise<A
 export async function proposalDismiss(store: StateStore, id: string, reason: string): Promise<ActionResult> {
   const r = await store.act((repo, ctx) => dismissProposal(repo, id, reason, ctx));
   return { ...r, toast: `${id} dismissed`, changeId: null };
+}
+
+/** Post-merge "Add as eval": a draft case for the platform owner (FR-53). */
+export async function harvestChange(store: StateStore, id: string): Promise<ActionResult> {
+  let caseId: string | null = null;
+  const r = await store.act((repo, ctx) => {
+    const res = harvestCase(repo, view(repo, id), ctx);
+    if (res.ok) caseId = res.caseId ?? null;
+    return res;
+  });
+  return { ...r, toast: `${caseId ?? "case"} drafted from ${id} — the platform owner activates it under evals/cases`, changeId: id };
 }

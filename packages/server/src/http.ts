@@ -12,6 +12,7 @@ import {
   findingEscalate,
   findingPatch,
   findingsImport,
+  harvestChange,
   loopChange,
   newChange,
   proposalDismiss,
@@ -242,6 +243,9 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         case "loop":
           reply(res, await loopChange(store, id));
           return;
+        case "harvest":
+          reply(res, await harvestChange(store, id));
+          return;
         case "tasks/confirm":
           reply(res, await confirmTaskSplit(store, id, Array.isArray(body["tasks"]) ? (body["tasks"] as never) : undefined));
           return;
@@ -251,6 +255,23 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         default:
           throw new ActionError(404, `unknown action ${action}`);
       }
+    }
+    if (parts[1] === "evals") {
+      if (method === "GET" && parts.length === 2) {
+        json(res, 200, (await store.refresh()).evals);
+        return;
+      }
+      if (method === "POST" && parts[2] === "run" && parts.length === 3) {
+        if (!options.engine) throw new ActionError(409, "suite runs need the engine (start the server with sdlcBin)");
+        const body = await readBody(req);
+        const trigger = typeof body["trigger"] === "string" ? body["trigger"] : "manual";
+        if (!["manual", "schedule", "config-pr"].includes(trigger)) throw new ActionError(400, "trigger must be manual, schedule or config-pr");
+        const { job } = await options.engine.runSuite(trigger as "manual" | "schedule" | "config-pr", false);
+        if (!job) throw new ActionError(502, "repository not loaded", [], true);
+        json(res, 200, { ok: true, job, toast: job.state === "running" ? `suite run queued (${job.key.split(":").at(-1)}) — the strip updates when it commits` : `${job.key}: ${job.note ?? job.error ?? job.state}`, revision: store.current?.revision ?? 0 });
+        return;
+      }
+      throw new ActionError(404, "not found");
     }
     if (parts[1] === "webhooks") {
       const env = options.env ?? process.env;

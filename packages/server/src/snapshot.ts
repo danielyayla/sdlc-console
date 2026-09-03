@@ -3,6 +3,8 @@ import {
   badges,
   computeMetrics,
   deriveAll,
+  suiteStatus,
+  type SuiteStatus,
   gateQueues,
   validateTree,
   type StageMetrics,
@@ -56,6 +58,8 @@ export interface Snapshot {
   proposals: Proposal[];
   evalCases: EvalCase[];
   evalRuns: EvalRun[];
+  /** Suite banner: pass vs threshold, config-change gate, rolling budget, strip with config diffs. */
+  evals: SuiteStatus;
   sessions: SessionRecord[];
   config: ResolvedConfig;
   claudeMd: ParsedClaudeMd | null;
@@ -86,6 +90,7 @@ export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionR
     proposals: repo.proposals,
     evalCases: repo.evalCases,
     evalRuns: repo.evalRuns,
+    evals: suiteStatus(repo, now.toISOString().replace(/\.\d{3}Z$/, "Z")),
     sessions,
     config: repo.config,
     claudeMd: repo.claudeMd,

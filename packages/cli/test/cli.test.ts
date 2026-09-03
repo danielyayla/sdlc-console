@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -272,4 +272,78 @@ describe("sdlc hook", () => {
     expect((await sdlc(dir, ["hook", "nope"], {}, "{}")).code).toBe(1);
     expect((await sdlc(dir, ["hook", "test-freeze"], {}, "not json")).code).toBe(0);
   });
+});
+
+describe("eval suite in CI (2.5)", () => {
+  it("init writes the evals and validate workflows once", async () => {
+    const dir = await freshRepo();
+    const first = await sdlc(dir, ["init", "--json"]);
+    const created = first.json<{ created: string[] }>().created;
+    expect(created).toContain(".github/workflows/sdlc-evals.yml");
+    expect(created).toContain(".github/workflows/sdlc-validate.yml");
+    const evals = readFileSync(join(dir, ".github/workflows/sdlc-evals.yml"), "utf8");
+    expect(evals).toContain("evals run --trigger");
+    expect(evals).toContain("evals gate");
+    expect(evals).toContain("- CLAUDE.md");
+    expect(evals).toContain('- ".claude/**"');
+    expect(evals).toContain("sdlc/evals-runs");
+    expect(readFileSync(join(dir, ".github/workflows/sdlc-validate.yml"), "utf8")).toContain("validate");
+    const second = await sdlc(dir, ["init", "--json"]);
+    expect(second.json<{ skipped: string[] }>().skipped).toContain(".github/workflows/sdlc-evals.yml");
+  });
+
+  it("config-change gate (acceptance m): a CLAUDE.md change whose run regresses a case is blocked with before/after output; scheduled mode is not gated; harvest refuses an unmerged change", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    put(dir, "check.sh", "echo ok\n");
+    put(dir, "evals/cases/CASE-0001.json", JSON.stringify({ schema: 1, id: "CASE-0001", prompt: "Export a month as CSV.", checks: [{ name: "check", cmd: "sh ./check.sh", healthyOutput: "ok" }], source: { type: "manual" }, owner: "po@example.com", added: "2026-09-01T00:00:00Z", status: "active", paths: ["src/export.ts"] }, null, 2));
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "evals: CASE-0001"]);
+    const run1 = await sdlc(dir, ["evals", "run", "--trigger", "config-pr", "--json"]);
+    expect(run1.code).toBe(0);
+    expect(run1.json<{ run: { id: string; verdict: string; passRate: number } }>().run).toMatchObject({ id: "RUN-0001", verdict: "pass", passRate: 1 });
+    expect((await git(dir, ["log", "-1", "--format=%s %an"])).trim()).toBe("sdlc(evals): suite run RUN-0001 pass (1/1 of 1) sdlc-bot");
+    const gate1 = await sdlc(dir, ["evals", "gate"]);
+    expect(gate1.code).toBe(0);
+    expect(gate1.out).toContain("ok: RUN-0001 pass · 100% vs threshold 90%");
+    // the config changes and the check breaks
+    put(dir, "CLAUDE.md", "# P\n\n- Never guess.\n\n## Verifying your work\n- Build: `pnpm build`\n- Test: `pnpm test` (all green)\n- Lint: `pnpm lint`\n");
+    put(dir, "check.sh", "echo broken; exit 1\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "CLAUDE.md: never guess"]);
+    const gateStale = await sdlc(dir, ["evals", "gate"]);
+    expect(gateStale.code).toBe(1);
+    expect(gateStale.out).toContain("no suite run for the current config");
+    const run2 = await sdlc(dir, ["evals", "run", "--trigger", "config-pr"]);
+    expect(run2.code).toBe(0);
+    expect(run2.out).toContain("RUN-0002 fail · 0% (0/1)");
+    expect(run2.out).toContain("✗ CASE-0001");
+    expect(run2.out).toContain("broken");
+    const gate2 = await sdlc(dir, ["evals", "gate"]);
+    expect(gate2.code).toBe(1);
+    expect(gate2.out).toContain("blocked: RUN-0002 fail · 0% vs threshold 90% · 1 regressed");
+    expect(gate2.out).toContain("baseline RUN-0001");
+    expect(gate2.out).toContain("regressed CASE-0001");
+    expect(gate2.out).toMatch(/before:\n\s+--- check: sh \.\/check\.sh \(exit 0\)\n\s+ok/);
+    expect(gate2.out).toMatch(/after:\n\s+--- check: sh \.\/check\.sh \(exit 1\)\n\s+broken/);
+    const gateJson = await sdlc(dir, ["evals", "gate", "--json"]);
+    expect(gateJson.json<{ ok: boolean; regressed: { caseId: string }[] }>()).toMatchObject({ ok: false, regressed: [{ caseId: "CASE-0001" }] });
+    // scheduled mode: config PRs are not gated and the config-pr trigger runs nothing
+    put(dir, "sdlc/config.yaml", `${readFileSync(join(dir, "sdlc/config.yaml"), "utf8")}evals: { mode: scheduled, schedule: "0 3 * * *" }\n`);
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "config: scheduled evals"]);
+    const gate3 = await sdlc(dir, ["evals", "gate"]);
+    expect(gate3.code).toBe(0);
+    expect(gate3.out).toContain("not gated");
+    const skipped = await sdlc(dir, ["evals", "run", "--trigger", "config-pr", "--json"]);
+    expect(skipped.json<{ skipped: string }>().skipped).toContain("scheduled");
+    // agents cannot run or harvest
+    expect((await sdlc(dir, ["evals", "run"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
+    // harvest needs a merged change
+    const created = await sdlc(dir, ["change", "new", "--title", "Export", "--intent", "-", "--json"], {}, FULL_INTENT);
+    expect(created.code).toBe(0);
+    const harvest = await sdlc(dir, ["evals", "harvest", "CHG-0001"]);
+    expect(harvest.code).toBe(2);
+    expect(harvest.err).toContain("not merged (stage 1)");
+  }, 30_000);
 });

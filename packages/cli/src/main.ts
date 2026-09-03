@@ -6,6 +6,7 @@ import { hookCommand } from "./commands/hook.js";
 import { init } from "./commands/init.js";
 import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
+import { evalsGate, evalsHarvest, evalsRun, renderGate, renderRun } from "./commands/evals.js";
 import { sessionCommand } from "./commands/session.js";
 import { syncCommand } from "./commands/sync.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
@@ -38,6 +39,9 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc run <CHG>                                        (per-change run: verification + intersecting evals; green opens the PR)
   sdlc serve --engine                                   (launch sessions and runs automatically on transitions)
   sdlc sync                                             (GitHub mode: open artifact PRs, record merges done on GitHub, refresh the records PR)
+  sdlc evals run [--trigger manual|schedule|config-pr] [--ref r]   (run every active case; commits evals/runs/RUN-NNNN.json; raises retire/broken-check triage)
+  sdlc evals gate [--run RUN-id]                        (config-change gate: exit 1 below threshold, regressed cases with before/after)
+  sdlc evals harvest <CHG>                              (post-merge "Add as eval": draft case for the platform owner)
   POST /api/webhooks/github                             (GitHub mode: signed deliveries under GITHUB_WEBHOOK_SECRET; polling stays on as the fallback)
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
@@ -61,6 +65,8 @@ const OPTIONS = {
   incident: { type: "string" },
   port: { type: "string" },
   host: { type: "string" },
+  trigger: { type: "string" },
+  run: { type: "string" },
   reason: { type: "string" },
   task: { type: "string" },
   target: { type: "string" },
@@ -225,6 +231,27 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const r = await syncCommand(ctx);
         emit(io, json, r, () => `sync: ${r.opened.length} PR(s) opened${r.opened.map((o) => ` · ${o.changeId} ${o.branch} → #${o.number}`).join("")} · ${r.merges.filter((m) => m.recorded).length} merge(s) recorded${r.merges.filter((m) => !m.recorded && m.reason !== "already recorded").map((m) => ` · ${m.changeId} PR #${m.number} by ${m.mergedBy} not recorded: ${m.reason ?? ""}`).join("")} · records ${r.records.pushed ? `PR #${r.records.number ?? "?"} (${r.records.ahead} commit(s) ahead)` : r.records.error ? `failed: ${r.records.error}` : "in sync"}${r.errors.length > 0 ? `\n${r.errors.join("\n")}` : ""}`);
         return 0;
+      }
+      case "evals": {
+        const ctx = await repoContext(io, json);
+        if (sub === "run") {
+          const r = await evalsRun(ctx, { ...(values.trigger ? { trigger: values.trigger as "manual" } : {}), ...(values.ref ? { ref: values.ref } : {}) });
+          emit(io, json, r, () => renderRun(r));
+          return 0;
+        }
+        if (sub === "gate") {
+          const r = await evalsGate(ctx, values.run);
+          emit(io, json, r, () => renderGate(r));
+          return r.ok ? 0 : 1;
+        }
+        if (sub === "harvest") {
+          const id = positionals[2];
+          if (!id) throw new CliError("usage: sdlc evals harvest <CHG>");
+          const r = await evalsHarvest(ctx, id);
+          emit(io, json, r, () => `${r.caseId} drafted from ${id} (${r.commit.slice(0, 7)}) — the platform owner activates it under evals/cases`);
+          return 0;
+        }
+        throw new CliError("usage: sdlc evals run|gate|harvest");
       }
       case "audit": {
         const ctx = await repoContext(io, json);

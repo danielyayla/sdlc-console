@@ -25,7 +25,7 @@ export interface ResolvedConfig {
   identities: Identity[];
   thresholds: ResolvedThresholds;
   records: Record<"intent" | "spec" | "plan" | "evals" | "pr" | "incident", RecordsMode>;
-  evals: { mode: "continuous" | "scheduled"; threshold: number; budget: number | null };
+  evals: { mode: "continuous" | "scheduled"; threshold: number; budget: number | null; schedule: string | null };
   eligibility: { coverage: "strict" | "lenient" };
   extraRoles: string[];
 }
@@ -62,6 +62,7 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
       mode: config?.evals?.mode ?? CONFIG_DEFAULTS.evals.mode,
       threshold: config?.evals?.threshold ?? t.evalPassThreshold ?? d.evalPassThreshold,
       budget: config?.evals?.budget ?? null,
+      schedule: config?.evals?.schedule ?? null,
     },
     eligibility: { coverage: config?.eligibility?.coverage ?? CONFIG_DEFAULTS.eligibility.coverage },
     extraRoles: (config?.roles ?? []).map((x) => x.name),

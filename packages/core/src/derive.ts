@@ -100,6 +100,8 @@ export interface ChangeView {
   artifactPrs: Partial<Record<ArtifactIndex, ArtifactPrView>>;
   /** Review findings reported against the current code PR (this cycle, after it opened), most severe first. */
   findings: ReviewFindingView[];
+  /** The eval case this change was harvested into (post-merge "Add as eval"), if any. */
+  harvested: { id: string; status: "draft" | "active" | "retired" } | null;
   waitingOnYou: string | null;
   activity: ActivityEntry[];
   tasks: NonNullable<ChangeFiles["tasks"]>["tasks"];
@@ -346,6 +348,10 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     artifactPrs,
     pr: files.pr,
     findings,
+    harvested: (() => {
+      const c = repo.evalCases.find((x) => x.source.type === "change" && x.source.ref === change.id);
+      return c ? { id: c.id, status: c.status } : null;
+    })(),
     waitingOnYou,
     activity: activityFeed(files.events),
     tasks: files.tasks?.tasks ?? [],
@@ -390,6 +396,7 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     pr: null,
     artifactPrs: {},
     findings: [],
+    harvested: null,
     waitingOnYou: null,
     activity: activityFeed(files.events),
     tasks: [],

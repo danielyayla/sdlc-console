@@ -79,6 +79,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onSelectArt={(i) => dispatch({ type: "art", index: i })}
         onAccept={(gate) => void run(`/changes/${selected.id}/accept`, { gate })}
         onSendBack={(gate, feedback) => void run(`/changes/${selected.id}/send-back`, { gate, feedback })}
+        onHarvest={() => void run(`/changes/${selected.id}/harvest`, {})}
       />
     );
   else if (state.view === "gates") body = <Gates changes={changes} queues={snapshot.queues[state.role]} role={state.role} now={now} onSelect={(id) => dispatch({ type: "select", id })} />;
@@ -92,7 +93,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );
-  else if (state.view === "config") body = <Config snapshot={snapshot} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} {...(promptImpl ? { prompt: promptImpl } : {})} />;
+  else if (state.view === "config") body = <Config snapshot={snapshot} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} onRunSuite={() => void run("/evals/run", {})} {...(promptImpl ? { prompt: promptImpl } : {})} />;
   else if (state.view === "loop")
     body = (
       <Loop

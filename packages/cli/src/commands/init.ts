@@ -6,6 +6,7 @@ import { installHooks } from "@sdlc/hooks";
 import { stringifyYaml } from "@sdlc/schemas";
 import { CliError, type Io } from "../io.js";
 import { TEMPLATES } from "../templates.js";
+import { WORKFLOW_FILES, evalsWorkflow, validateWorkflow } from "../workflows.js";
 
 export interface InitOptions {
   product?: string;
@@ -60,6 +61,10 @@ export async function init(io: Io, opts: InitOptions): Promise<InitResult> {
   put("sdlc/config.yaml", stringifyYaml(config));
   for (const [name, body] of Object.entries(TEMPLATES)) put(`sdlc/templates/${name}.md`, body);
   for (const dir of ["sdlc/changes", "sdlc/loop/triage", "sdlc/security/findings", "sdlc/proposals", "evals/cases", "evals/runs"]) put(`${dir}/.gitkeep`, "");
+
+  // CI: the eval suite as the config-change gate, and validation on every PR (create-only)
+  put(WORKFLOW_FILES.evals, evalsWorkflow());
+  put(WORKFLOW_FILES.validate, validateWorkflow());
 
   if (installMergeUnion(root)) created.push(".gitattributes");
   else skipped.push(".gitattributes");

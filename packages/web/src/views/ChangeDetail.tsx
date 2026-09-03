@@ -14,6 +14,8 @@ export interface ChangeDetailProps {
   onSelectArt: (index: number) => void;
   onAccept: (gate: number) => void;
   onSendBack: (gate: number, feedback: string) => void;
+  /** Post-merge "Add as eval": drafts a case for the platform owner. */
+  onHarvest: () => void;
 }
 
 const STAGE_INDEX = [0, 1, 2, 3, 4, 5];
@@ -158,6 +160,16 @@ export function ChangeDetail(p: ChangeDetailProps) {
                   ))}
                 </ul>
               ) : null}
+            </div>
+          ) : null}
+          {view.stage === 6 || view.pr?.mergedAt ? (
+            <div className="panel">
+              <div className="eyebrow">Eval suite</div>
+              {view.harvested ? (
+                <div className="who">harvested as <span className="mono">{view.harvested.id}</span> <span className={`chip ${view.harvested.status === "active" ? "green" : view.harvested.status === "draft" ? "amber" : "gray"}`}>{view.harvested.status}</span></div>
+              ) : (
+                <div className="actions"><button className="btn" disabled={busy} onClick={() => { setBusy(true); p.onHarvest(); }} title="draft a case from the intent and the acceptance line; the platform owner activates it">Add as eval</button></div>
+              )}
             </div>
           ) : null}
           {!view.valid ? (

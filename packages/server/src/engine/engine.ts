@@ -5,6 +5,9 @@ import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
 import { mirrorReview } from "./review.js";
+import { runSuite, type SuiteOutcome } from "./suite.js";
+import { nextRunId } from "@sdlc/core";
+import type { EvalRun } from "@sdlc/schemas";
 import { gitHubCodeHostFrom, type WebhookEvent } from "@sdlc/adapter-github";
 import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
 
@@ -430,6 +433,40 @@ export class Engine {
       this.log(`${view.id}: run failed: ${(e as Error).message}`);
       return this.opts.jobs.get(key);
     }
+  }
+
+  /**
+   * Eval suite run as a keyed job (`evals:<trigger>:<RUN-id>`): the console
+   * queues it and returns; the CLI waits. The run file and any triage items
+   * are committed on the default branch by sdlc-bot.
+   */
+  async runSuite(trigger: EvalRun["trigger"], wait = true): Promise<{ job: Job | null; outcome: SuiteOutcome | null }> {
+    await this.opts.store.refresh(true);
+    const repo = this.opts.store.currentRepo;
+    if (!repo) return { job: null, outcome: null };
+    const key = `evals:${trigger}:${nextRunId(repo.evalRuns)}`;
+    const job = this.opts.jobs.claim({ key, kind: "evals-run", changeId: "", cycle: 0, stage: 4 }, this.now());
+    if (!job) return { job: this.opts.jobs.get(key), outcome: null };
+    const work = (async (): Promise<SuiteOutcome | null> => {
+      try {
+        const outcome = await runSuite({ root: this.opts.store.root, repo, trigger, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), log: (l) => this.log(l) });
+        const note = outcome.skipped ?? `${outcome.run?.id ?? "run"} ${outcome.run?.verdict ?? ""} · ${Math.round((outcome.run?.passRate ?? 0) * 100)}% (${outcome.run?.results.filter((r) => r.pass).length ?? 0}/${outcome.run?.results.length ?? 0})${outcome.signals.length > 0 ? ` · ${outcome.signals.length} triage item(s)` : ""}`;
+        this.opts.jobs.update(key, { state: outcome.skipped ? "skipped" : "done", note }, this.now());
+        await this.opts.store.refresh(true);
+        return outcome;
+      } catch (e) {
+        this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+        this.log(`evals: ${(e as Error).message}`);
+        await this.opts.store.refresh(true).catch(() => undefined);
+        return null;
+      }
+    })();
+    if (!wait) {
+      void work;
+      return { job, outcome: null };
+    }
+    const outcome = await work;
+    return { job: this.opts.jobs.get(key), outcome };
   }
 
   /** Manual per-change run for a change: uses its most recent build session's worktree, or the task branch worktree. */

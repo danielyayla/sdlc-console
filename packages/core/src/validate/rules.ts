@@ -134,6 +134,10 @@ export function repoRules(repo: Repo): RuleDiagnostic[] {
       out.push(block(undefined, `evals/cases/${c.id}.json`, "eval-case.active-without-checks", `${c.id} is active but has no checks`));
     }
   }
+  for (const r of repo.evalRuns) {
+    // incomplete never counts as pass; a run file claiming pass below its own threshold was hand-edited
+    if (r.verdict === "pass" && r.passRate < r.threshold) out.push(block(undefined, `evals/runs/${r.id}.json`, "eval-run.pass-below-threshold", `${r.id} is marked pass at ${Math.round(r.passRate * 100)}% below its threshold ${Math.round(r.threshold * 100)}%`));
+  }
   if (repo.evalCases.filter((c) => c.status !== "retired").length < repo.config.thresholds.suiteMinSize) {
     out.push(warn(undefined, "evals/cases", "eval-suite.under-sized", `eval suite has ${repo.evalCases.length} cases; under-sized below ${repo.config.thresholds.suiteMinSize}`));
   }

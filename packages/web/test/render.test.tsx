@@ -147,6 +147,16 @@ describe("Config (spec §4)", () => {
     expect(html).toContain("pass 100% · threshold 90%");
     expect(html).toContain("CASE-0003");
     expect(html).toContain("draft · checks missing");
-    expect(html).toContain("Run suite needs the CI adapter");
+    expect(html).toContain("Run suite");
+    expect(html).toContain("budget n/a");
+    expect(html).toContain("config PRs pass on RUN-0001");
+    expect(html).toContain("RUN-0001 · schedule · pass 100%");
+  });
+
+  it("a merged change shows the case it was harvested into (2.5)", () => {
+    const html = render({ ...initialState("po"), view: "detail", sel: "CHG-0012" });
+    expect(html).toContain("harvested as");
+    expect(html).toContain("CASE-0002");
+    expect(html).not.toContain("Add as eval");
   });
 });
