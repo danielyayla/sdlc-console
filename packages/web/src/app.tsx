@@ -8,6 +8,7 @@ import { Gates } from "./views/Gates";
 import { Loop } from "./views/Loop";
 import { Metrics } from "./views/Metrics";
 import { Security } from "./views/Security";
+import { Sessions } from "./views/Sessions";
 import { Pipeline } from "./views/Pipeline";
 import { Placeholder } from "./views/Placeholder";
 import { Toast } from "./views/Toast";
@@ -81,7 +82,16 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
       />
     );
   else if (state.view === "gates") body = <Gates changes={changes} queues={snapshot.queues[state.role]} role={state.role} now={now} onSelect={(id) => dispatch({ type: "select", id })} />;
-  else if (state.view === "sessions") body = <Placeholder title="Sessions" item="1.6" />;
+  else if (state.view === "sessions")
+    body = (
+      <Sessions
+        snapshot={snapshot}
+        onStart={(input) => void run("/sessions", input)}
+        onAction={(id, action, body) => void run(`/sessions/${id}/${action}`, body ?? {})}
+        onSelect={(id) => dispatch({ type: "select", id })}
+        {...(promptImpl ? { prompt: promptImpl } : {})}
+      />
+    );
   else if (state.view === "config") body = <Placeholder title="Config" item="1.8" />;
   else if (state.view === "loop")
     body = (

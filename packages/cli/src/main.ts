@@ -6,6 +6,7 @@ import { hookCommand } from "./commands/hook.js";
 import { init } from "./commands/init.js";
 import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
+import { sessionCommand } from "./commands/session.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
 import { loopCommand } from "./commands/loop.js";
 import { mcpCommand } from "./commands/mcp.js";
@@ -30,6 +31,8 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc security import <file|->
   sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
   sdlc mcp                                              (agent tools over stdio)
+  sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]
+  sdlc session list | stop <id>
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
@@ -52,6 +55,10 @@ const OPTIONS = {
   incident: { type: "string" },
   port: { type: "string" },
   reason: { type: "string" },
+  task: { type: "string" },
+  target: { type: "string" },
+  mode: { type: "string" },
+  detach: { type: "boolean", default: false },
   tune: { type: "string" },
   role: { type: "string" },
   "no-wait": { type: "boolean", default: false },
@@ -173,6 +180,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (!id || (sub !== "patch" && sub !== "escalate" && sub !== "dismiss")) throw new CliError("usage: sdlc security patch|escalate|dismiss <SEC>");
         const r = await securityCommand(ctx, sub, id, values.reason);
         emit(io, json, r, () => (r.changeId ? `${r.id} escalated → ${r.changeId} at the Plan gate · ${r.commit.slice(0, 7)}` : `${r.id} ${sub === "patch" ? "patch in PR gate" : "dismissed"} · ${r.commit.slice(0, 7)}`));
+        return 0;
+      }
+      case "session": {
+        const r = await sessionCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
         return 0;
       }
       case "mcp":

@@ -19,6 +19,7 @@ import {
   triageDismiss,
   type ActionResult,
 } from "./actions.js";
+import { launchSession, stopSession, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { ActionError, type StateStore } from "./store.js";
 
 type Body = Record<string, unknown>;
@@ -93,6 +94,9 @@ function serveStatic(webDir: string, url: URL, res: ServerResponse): boolean {
 export interface AppOptions {
   /** Directory of the built web app; when absent only /api is served. */
   webDir?: string;
+  registry?: SessionRegistry;
+  sdlcBin?: string;
+  claudeBin?: string;
 }
 
 export interface HttpApp {
@@ -203,6 +207,45 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         default:
           throw new ActionError(404, `unknown action ${action}`);
       }
+    }
+    if (parts[1] === "sessions" && method === "POST") {
+      const registry = options.registry;
+      if (!registry || !options.sdlcBin) throw new ActionError(409, "sessions are unavailable: the server was started without a session registry");
+      const body = await readBody(req);
+      const id = parts[2];
+      if (!id) {
+        const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}) };
+        const r = await launchSession(input, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: () => store.rebuild() });
+        store.rebuild();
+        json(res, 200, { ok: true, session: r.session, toast: r.session.mode === "SUPERVISED" ? `${r.session.id} prepared — run the command from the card` : `${r.session.id} started (${r.session.mode}) on ${r.session.branch}`, revision: store.current?.revision ?? 0 });
+        return;
+      }
+      const action = parts[3];
+      if (action === "stop" || action === "takeover") {
+        const s = stopSession(registry, id, action === "stop" ? "stopped" : "taken_over");
+        store.rebuild();
+        json(res, 200, { ok: true, session: s, toast: action === "stop" ? `${id} stopped` : `${id} taken over — worktree ${s.worktreePath}`, revision: store.current?.revision ?? 0 });
+        return;
+      }
+      if (action === "raise-cap") {
+        const s = registry.get(id);
+        if (!s) throw new ActionError(404, `${id} not found`);
+        if (s.capRaised) throw new ActionError(409, "the round cap can be raised once per session");
+        registry.patch(id, { capRaised: true });
+        store.rebuild();
+        json(res, 200, { ok: true, toast: `round cap raised once for ${id}`, revision: store.current?.revision ?? 0 });
+        return;
+      }
+      if (action === "message") {
+        const s = registry.get(id);
+        if (!s) throw new ActionError(404, `${id} not found`);
+        if (s.status === "running") throw new ActionError(409, "the session is still running; guidance is delivered by resuming a finished or stalled session");
+        const r = await launchSession({ changeId: s.changeId, kind: s.kind, ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: id, guidance: str(body, "text") } }, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: () => store.rebuild() });
+        store.rebuild();
+        json(res, 200, { ok: true, session: r.session, toast: `guidance sent — ${id} resumed`, revision: store.current?.revision ?? 0 });
+        return;
+      }
+      throw new ActionError(404, `unknown session action ${action ?? ""}`);
     }
     if (parts[1] === "triage" && parts[2] && method === "POST") {
       const body = await readBody(req);

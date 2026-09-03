@@ -1,6 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { identity as gitIdentity, isRepo, repoRoot, type GitIdentity } from "@sdlc/adapter-git";
 import { createApp } from "./http.js";
+import { enrich, SessionRegistry } from "./sessions/registry.js";
 import type { SessionRecord } from "./snapshot.js";
 import { StateStore } from "./store.js";
 import { watchRepo } from "./watcher.js";
@@ -14,6 +15,10 @@ export interface ServeOptions {
   watch?: boolean;
   /** Built web app to serve at /. */
   webDir?: string;
+  /** Path to the sdlc bin for per-session MCP configs; sessions cannot launch without it. */
+  sdlcBin?: string;
+  /** Harness executable (default `claude`); tests point it at a fake. */
+  claudeBin?: string;
 }
 
 export interface RunningServer {
@@ -21,6 +26,7 @@ export interface RunningServer {
   port: number;
   root: string;
   store: StateStore;
+  registry: SessionRegistry;
   close: () => Promise<void>;
 }
 
@@ -30,9 +36,11 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
   const root = await repoRoot(opts.cwd);
   const who = opts.identity ?? (await gitIdentity(root));
   if (!who) throw new Error("no git identity — set user.email before serving");
-  const store = new StateStore({ root, identity: who, ...(opts.sessions ? { sessions: opts.sessions } : {}) });
+  const registry = new SessionRegistry(root);
+  const sessions = opts.sessions ? () => opts.sessions?.() ?? [] : (repo: import("@sdlc/core").Repo | null) => registry.list().map((s) => enrich(s, repo));
+  const store = new StateStore({ root, identity: who, sessions });
   await store.refresh();
-  const app = createApp(store, opts.webDir ? { webDir: opts.webDir } : {});
+  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}) });
   const watcher = opts.watch === false ? null : watchRepo(root, () => void store.refresh().catch(() => undefined));
   const host = opts.host ?? "127.0.0.1";
   await new Promise<void>((resolve) => app.server.listen(opts.port ?? 0, host, resolve));
@@ -42,9 +50,11 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     port,
     root,
     store,
+    registry,
     close: async () => {
       watcher?.close();
       await app.close();
+      registry.close();
     },
   };
 }

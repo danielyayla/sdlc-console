@@ -20,7 +20,8 @@ export interface StoreOptions {
   root: string;
   identity: GitIdentity;
   ref?: string;
-  sessions?: () => SessionRecord[];
+  /** Session provider; receives the current repo so records can be enriched from the ledger. */
+  sessions?: (repo: Repo | null) => SessionRecord[];
   now?: () => Date;
 }
 
@@ -77,7 +78,7 @@ export class StateStore {
         this.repo = loadRepo(this.tree);
         this.lastHead = head;
         this.revision += 1;
-        this.snapshot = buildSnapshot(this.repo, this.identity(), this.opts.sessions?.() ?? [], this.revision, this.opts.now?.() ?? new Date());
+        this.snapshot = buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date());
         for (const fn of this.listeners) fn(this.snapshot);
         return this.snapshot;
       } finally {
@@ -91,7 +92,7 @@ export class StateStore {
   rebuild(): Snapshot {
     if (!this.repo) throw new Error("store not loaded");
     this.revision += 1;
-    this.snapshot = buildSnapshot(this.repo, this.identity(), this.opts.sessions?.() ?? [], this.revision, this.opts.now?.() ?? new Date());
+    this.snapshot = buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date());
     for (const fn of this.listeners) fn(this.snapshot);
     return this.snapshot;
   }

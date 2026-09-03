@@ -25,7 +25,7 @@ export async function serveCommand(io: Io, opts: ServeOptions): Promise<RunningS
   const ctx = await repoContext(io, false);
   const who = await actingIdentity(ctx);
   const webDir = findWebDir();
-  const server = await startServer({ cwd: ctx.root, identity: who, port: opts.port ?? DEFAULT_PORT, ...(webDir ? { webDir } : {}) });
+  const server = await startServer({ cwd: ctx.root, identity: who, port: opts.port ?? DEFAULT_PORT, sdlcBin: fileURLToPath(new URL("../bin.js", import.meta.url)), ...(webDir ? { webDir } : {}) });
   io.stdout(`${server.url}${webDir ? "" : "  (API only — build @sdlc/web to serve the console)"}\n`);
   return server;
 }

@@ -20,7 +20,7 @@ async function seededServer(): Promise<{ dir: string; server: RunningServer }> {
   writeSeed(dir);
   await git(dir, ["add", "-A"]);
   await git(dir, ["commit", "-q", "-m", "sdlc(repo): seed"]);
-  const server = await startServer({ cwd: dir, identity: { id: PO, name: "Priya Owens" }, sessions: () => seedSessions() as never });
+  const server = await startServer({ cwd: dir, identity: { id: PO, name: "Priya Owens" }, sessions: () => seedSessions() as never, watch: true });
   cleanups.push(() => server.close());
   return { dir, server };
 }

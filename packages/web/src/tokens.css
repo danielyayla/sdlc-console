@@ -165,3 +165,15 @@ a { color: inherit; }
 .metric-name { font-size: 12px; color: var(--text-muted); flex: 1; }
 .metric-value { font-size: 19px; font-variant-numeric: tabular-nums; color: var(--text-primary); }
 .metric-note { font-size: 11px; color: var(--text-faint); }
+
+/* sessions */
+.sessions { max-width: 960px; }
+.sessions-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.newsession { display: flex; gap: 8px; margin-left: auto; align-items: center; }
+.newsession select, .newsession input { background: var(--bg-raised); color: var(--text-primary); border: 1px solid var(--border-default); border-radius: var(--radius-control); padding: 5px 8px; font: inherit; }
+.newsession input { width: 320px; }
+.session-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.scard { background: var(--bg-panel); border: 1px solid var(--border-default); border-radius: var(--radius-card); padding: 12px; }
+.linkchip { cursor: pointer; background: transparent; }
+.rationale { border-left: 3px solid var(--green); padding: 4px 8px; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.cmd { min-height: 0; font-size: 11px; margin-top: 8px; }

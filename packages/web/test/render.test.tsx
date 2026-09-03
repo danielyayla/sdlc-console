@@ -114,3 +114,17 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("67%");
   });
 });
+
+describe("Sessions (spec §4)", () => {
+  it("renders the header counts, four seed cards with mode chips, waiting-on-you, rationale and the footer callout", () => {
+    const html = render({ ...initialState("eng"), view: "sessions" });
+    expect(html).toContain("2 active · review backlog 2"); // running + waiting; two done sessions on changes before stage 6
+    expect(html).toContain("CHG-0018/export-fix");
+    expect(html).toContain("PLAN MODE");
+    expect(html).toContain("HEADLESS");
+    expect(html).toContain("waiting on you: plan.md rev 2 marked final");
+    expect(html).toContain("test edit attempts: 1");
+    expect(html).toContain("New session");
+    expect(html).toContain("Sessions run Claude Code headless in a worktree per task");
+  });
+});
