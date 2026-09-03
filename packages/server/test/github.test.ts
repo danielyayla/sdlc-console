@@ -62,6 +62,8 @@ function harness(dir: string, env: Record<string, string>) {
 async function buildAndRun(dir: string, env: Record<string, string>) {
   const h = harness(dir, env);
   await h.store.refresh();
+  // the engine's first poll runs on that refresh; drain it here so it cannot race the commits below (main ahead → records PR)
+  await h.engine.sync();
   const launched = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
   const wt = launched.session.worktreePath;
   // 2.7: a fix merges only with a real repro commit before the fix

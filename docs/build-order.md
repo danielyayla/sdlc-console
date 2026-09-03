@@ -32,7 +32,7 @@ Exit: one change travels 1→6→1 with real files, hooks and a real Claude Code
 - [x] 2.5 Eval suite in CI: generated workflows, config-change gate (verdict ≥ threshold, `incomplete` ≠ pass), run history strip, budget, harvest actions, retire/broken-check signals → triage.
 - [x] 2.6 Build-stage depth: capacity ceiling, auto-eligibility with verification term, AUTO→SUPERVISED override, visual rounds strip with mock comparison.
 - [x] 2.7 Repro-first fix flow end-to-end: repro confirm/reject, freeze lift once, fallback auto-finding blocking merge, PR repro proof.
-- [ ] 2.8 CLAUDE.md repeat-mistake proposals (accept → PR); skills pass % from trigger-test set; backed-by column.
+- [x] 2.8 CLAUDE.md repeat-mistake proposals (accept → PR); skills pass % from trigger-test set; backed-by column.
 - [ ] 2.9 Records mode (`external`/`linked`) with MCP write-back and retry.
 - [ ] 2.10 Metrics from PR/CI/incident sources; trend chips.
 Exit: a change travels 1→6→1 against a GitHub repository with branch protection: every artifact and the code are PRs, gate decisions are merges, evidence is on the PR, `sdlc audit` clean.

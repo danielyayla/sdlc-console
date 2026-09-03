@@ -351,6 +351,7 @@ export function seedFiles(): Record<string, string> {
       { at: T("08-27", "10:00"), actor: system, event: "stage.entered", data: { stage: 4 } },
       { at: T("08-27", "10:05"), actor: agent("s-0017-plan"), event: "tasks.proposed", data: { tasks: [{ id: "export", title: "Work in src/export", files: ["src/export/csv.ts", "src/export/route.ts"], sequential: false }, { id: "test", title: "Work in test/export", files: ["test/export/csv.test.ts"], sequential: false }] } },
       { at: T("08-27", "10:10"), actor: human(ENG, "eng"), event: "tasks.confirmed", data: { taskIds: ["export", "test"] } },
+      { at: T("09-01", "15:30"), actor: agent("s-0017-build"), event: "hook.blocked", data: { hook: "plan-sync", reason: "commit touches files outside plan.md's file list", path: "src/export/format.ts" } },
       { at: T("09-01", "15:50"), actor: agent("s-0017-build"), event: "round", data: { n: 2, results: [{ name: "build", pass: true, outputExcerpt: "tsc -b" }, { name: "test", pass: true, outputExcerpt: "44 passed" }, { name: "lint", pass: true, outputExcerpt: "" }] } },
       { at: T("09-01", "15:55"), actor: agent("s-0017-build"), event: "hook.allowed", data: { hook: "plan-sync" } },
       { at: T("09-01", "16:05"), actor: system, event: "evals.green", data: { run: "run-1", passed: 4, total: 4 } },
@@ -388,6 +389,7 @@ export function seedFiles(): Record<string, string> {
       { at: T("09-02", "08:50"), actor: agent("sess-0018-repro"), event: "repro.failed", data: { testPath: "test/export/zero-total.test.ts", failureReason: "expected 4 rows, received 3" } },
       { at: T("09-02", "09:00"), actor: human(ENG, "eng"), event: "repro.confirmed", data: { testPath: "test/export/zero-total.test.ts", sha: reproSha } },
       { at: T("09-02", "09:20"), actor: agent("sess-0018-repro"), event: "hook.blocked", data: { hook: "test-freeze", reason: "test freeze active", path: "test/export/csv.test.ts" } },
+      { at: T("09-02", "09:25"), actor: agent("sess-0018-repro"), event: "hook.blocked", data: { hook: "plan-sync", reason: "Commit touches files outside plan.md's file list", path: "src/export/route.ts" } },
       { at: T("09-02", "09:34"), actor: system, event: "evals.red", data: { run: "run-1", passed: 3, total: 4 } },
     ]);
     put(`${dir}/tasks.yaml`, stringifyYaml({ schema: 1, changeId: id, cycle: 1, tasks: [{ id: "export-fix", title: "Fix zero-total filter", files: ["src/export/csv.ts", "test/export/zero-total.test.ts"], sequential: false, target: "test/export/zero-total.test.ts passes; no other test changes", worktree: `${id}/export-fix`, branch: `${id}/export-fix`, state: "running" }] }));
@@ -534,12 +536,14 @@ Idempotency key at the API edge or in the numbering service?
 
   // ---------------- proposals ----------------
   files["sdlc/proposals/PRP-0007.yaml"] = stringifyYaml({ schema: 1, id: "PRP-0007", type: "claude-md-line", text: "Never filter invoice rows by truthiness of the total; zero is a valid amount.", citations: ["CHG-0018", "CHG-0004"], status: "open", createdAt: T("09-02", "09:40") });
+  files["sdlc/proposals/PRP-0008.yaml"] = stringifyYaml({ schema: 1, id: "PRP-0008", type: "claude-md-line", text: "Before committing, check every touched path against plan.md's \"Files that change\"; add a new path to plan.md in the same commit.", citations: ["CHG-0017", "CHG-0018"], reason: "commit touches files outside plan.md's file list", status: "open", createdAt: T("09-02", "09:45") });
 
   // ---------------- evals ----------------
   files["evals/cases/CASE-0001.json"] = stringifyJson({ schema: 1, id: "CASE-0001", prompt: "Export a month of invoices as CSV and verify every invoice appears once with the template column order.", checks: [{ name: "test", cmd: "pnpm test -- test/export", healthyOutput: "passed" }], source: { type: "change", ref: "CHG-0017" }, owner: PLATFORM, added: T("08-27", "12:00"), status: "active", paths: ["src/export/csv.ts", "src/export/route.ts", "test/export/csv.test.ts"] });
   files["evals/cases/CASE-0002.json"] = stringifyJson({ schema: 1, id: "CASE-0002", prompt: "Render the three fixture invoices to PDF and verify size and layout.", checks: [{ name: "test", cmd: "pnpm test -- test/invoice/pdf", healthyOutput: "passed" }], source: { type: "change", ref: "CHG-0012" }, owner: PLATFORM, added: T("08-23", "12:00"), status: "active", paths: ["src/invoice/pdf.ts", "src/invoice/route.ts", "test/invoice/pdf.test.ts"] });
   files["evals/cases/CASE-0003.json"] = stringifyJson({ schema: 1, id: "CASE-0003", prompt: "Search invoices by number on the portal.", checks: [], source: { type: "manual" }, owner: PLATFORM, added: T("09-01", "12:00"), status: "draft", paths: ["src/portal/search.ts"] });
-  files["evals/runs/RUN-0001.json"] = stringifyJson({ schema: 1, id: "RUN-0001", trigger: "schedule", configRef: fingerprint, results: [{ caseId: "CASE-0001", pass: true, output: "1 passed" }, { caseId: "CASE-0002", pass: true, output: "1 passed" }], passRate: 1, threshold: 0.9, verdict: "pass", cost: 1.42, startedAt: T("09-02", "03:00"), finishedAt: T("09-02", "03:09") });
+  files["evals/cases/CASE-0004.json"] = stringifyJson({ schema: 1, id: "CASE-0004", prompt: "Write the customer-facing copy for the overdue invoice reminder email.", checks: [{ name: "trigger", cmd: "sdlc evals trigger brand --prompt \"Write the customer-facing copy for the overdue invoice reminder email.\"", healthyOutput: "loaded: skill brand" }], source: { type: "manual" }, owner: "marketing@veri.example", added: T("08-28", "12:00"), status: "active", paths: [], skill: "brand" });
+  files["evals/runs/RUN-0001.json"] = stringifyJson({ schema: 1, id: "RUN-0001", trigger: "schedule", configRef: fingerprint, results: [{ caseId: "CASE-0001", pass: true, output: "1 passed" }, { caseId: "CASE-0002", pass: true, output: "1 passed" }, { caseId: "CASE-0004", pass: true, output: "loaded: skill brand for \"Write the customer-facing copy for the overdue invoice reminder email.\"" }], passRate: 1, threshold: 0.9, verdict: "pass", cost: 1.42, startedAt: T("09-02", "03:00"), finishedAt: T("09-02", "03:09") });
 
   return files;
 }

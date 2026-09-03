@@ -1,5 +1,6 @@
 import type { ContextBundle } from "@sdlc/mcp";
-import type { ChangeView } from "@sdlc/core";
+import type { ChangeView, RepeatSignal } from "@sdlc/core";
+import { ONE_PAGE_WORDS } from "@sdlc/schemas";
 import type { SessionKind } from "./registry.js";
 
 export interface PromptInput {
@@ -10,6 +11,10 @@ export interface PromptInput {
   guidance?: string | null;
   /** REVIEW.md verbatim (review sessions); the console parses it, never edits it. */
   reviewPolicy?: string | null;
+  /** The repeat-reason cluster a `propose` session answers (FR-43). */
+  signal?: RepeatSignal | null;
+  /** CLAUDE.md as it is (propose sessions): the word budget is one page. */
+  claudeMd?: { wordCount: number; text: string } | null;
 }
 
 const COMMON = (p: PromptInput) => `You are working on change ${p.view.id} ("${p.view.title}", cycle ${p.view.cycle}) in an AI-native SDLC. Files in git are the source of truth; humans decide at gates; you never accept, merge or approve anything.
@@ -57,6 +62,22 @@ Review policy (REVIEW.md, verbatim):
 ${p.reviewPolicy ?? "(no REVIEW.md in this repository — review for bugs, security and compliance with spec.md and plan.md)"}
 
 Report every finding with mcp__sdlc__report_finding (severity high|medium|low, title, path, detail with the exact evidence). Rank by severity; do not pad. Do not edit files, do not push, do not approve, request changes or merge — the code owner decides on the PR. When you have reported everything, stop.${guidance}`;
+    case "propose": {
+      const sig = p.signal;
+      if (!sig) return `${COMMON(p)}\n\nNo repeat reason to answer; stop.`;
+      const words = p.claudeMd?.wordCount ?? 0;
+      const left = Math.max(0, ONE_PAGE_WORDS - words);
+      const occurrences = sig.occurrences.map((o) => `- ${o.changeId} · cycle ${o.cycle} · ${o.event === "hook.blocked" ? `hook ${o.via} blocked` : `sent back at ${o.via}`}${o.session ? ` · session ${o.session}` : ""} · ${o.ts}: "${o.raw}"`).join("\n");
+      return `${COMMON(p)}
+
+Task: the same mistake was made ${sig.count} times across sessions — reason: "${sig.display}". Occurrences:
+${occurrences}
+
+Read CLAUDE.md (${words} words; one page is ${ONE_PAGE_WORDS}, so ${left} words are left in the budget) and the cited changes (mcp__sdlc__get_change for ${sig.citations.join(", ")}; their plans and ledgers are on disk). Then propose exactly one line for CLAUDE.md that would have prevented these: concrete, imperative, no more than 25 words, no duplicate of a line already there. Call mcp__sdlc__propose_claude_md_line with text, citations [${sig.citations.map((c) => `"${c}"`).join(", ")}] and reason "${sig.reason}" once, then stop. Do not edit CLAUDE.md or any other file — a human accepts the line into a PR reviewed by the code owners, or dismisses it.
+
+CLAUDE.md as it is:
+${p.claudeMd?.text ?? "(missing)"}${guidance}`;
+    }
     case "diagnose":
       return `${COMMON(p)}
 

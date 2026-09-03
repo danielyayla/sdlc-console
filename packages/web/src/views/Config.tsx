@@ -4,6 +4,10 @@ import { ONE_PAGE_WORDS } from "../lib/config-consts";
 
 export interface ConfigProps {
   snapshot: Snapshot;
+  /** Proposal accept/dismiss belong to eng (and platform); the PO sees the cards read-only. */
+  role?: "po" | "eng";
+  /** Accept opens the PR (or cuts the branch) for the code owners; the console never merges it. */
+  onAcceptProposal: (id: string) => void;
   onDismissProposal: (id: string, reason: string) => void;
   /** "Run suite": queues an eval suite run on the engine; the strip updates when the run commits. */
   onRunSuite: () => void;
@@ -12,7 +16,7 @@ export interface ConfigProps {
 
 const ACTION_CLASS: Record<string, string> = { block: "red", ask: "amber", allow: "green" };
 
-export function Config({ snapshot, onDismissProposal, onRunSuite, prompt = (t) => window.prompt(t) }: ConfigProps) {
+export function Config({ snapshot, role = "po", onAcceptProposal, onDismissProposal, onRunSuite, prompt = (t) => window.prompt(t) }: ConfigProps) {
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "draft" | "retired">("all");
   const cm = snapshot.claudeMd;
   const diags = snapshot.validation.diagnostics;
@@ -29,6 +33,8 @@ export function Config({ snapshot, onDismissProposal, onRunSuite, prompt = (t) =
   const passHistory = (caseId: string) => runs.slice(-30).map((r) => r.results.find((x) => x.caseId === caseId)?.pass ?? null);
   const filtered = statusFilter === "all" ? cases : cases.filter((c) => c.status === statusFilter);
   const records = snapshot.config.records;
+  const skillThreshold = Math.round(snapshot.config.thresholds.skillPassThreshold * 100);
+  const canDecide = role === "eng";
 
   return (
     <div className="config">
@@ -76,17 +82,19 @@ export function Config({ snapshot, onDismissProposal, onRunSuite, prompt = (t) =
       </section>
 
       <section className="panel">
-        <div className="eyebrow">Skills</div>
+        <div className="eyebrow">Skills · advisory unless a hook backs them · pass % from trigger tests (threshold {skillThreshold}%)</div>
         <table className="bands">
-          <thead><tr><th>Name</th><th>Trigger</th><th>Owner</th><th>Backed by</th><th>Must hold</th><th>Pass %</th></tr></thead>
+          <thead><tr><th>Name</th><th>Trigger</th><th>Owner</th><th>Version</th><th>Backed by</th><th>Must hold</th><th>Pass %</th><th>Findings citing</th></tr></thead>
           <tbody>
-            {snapshot.skills.length === 0 ? <tr><td colSpan={6} className="empty">none under .claude/skills</td></tr> : null}
-            {snapshot.skills.map((s) => (
+            {snapshot.skillStatus.length === 0 ? <tr><td colSpan={8} className="empty">none under .claude/skills</td></tr> : null}
+            {snapshot.skillStatus.map((s) => (
               <tr key={s.name}>
                 <td className="mono">{s.name}</td><td>{s.trigger}</td><td className="muted">{s.owner ?? "—"}</td>
-                <td>{s.backedBy ? <span className="chip green">{s.backedBy}</span> : <span className="chip amber">advisory</span>}</td>
-                <td>{s.mustHold ? (s.backedBy ? "yes" : <span className="chip amber">must hold · no hook</span>) : "no"}</td>
-                <td className="muted">n/a · needs trigger tests</td>
+                <td className="mono">{s.version ?? "—"}</td>
+                <td>{s.backing === "hook" ? <span className={`chip ${s.backingScope === "managed" ? "agent" : "green"}`}>{s.backedBy}{s.backingScope === "managed" ? " · managed" : ""}</span> : s.backing === "unknown-hook" ? <span className="chip red" title="named in SKILL.md but not in .claude/settings.json">{s.backedBy} · not installed</span> : <span className="chip amber">advisory</span>}</td>
+                <td>{s.mustHold ? (s.mustHoldWithoutHook ? <span className="chip amber">must hold · no hook</span> : "yes") : "no"}</td>
+                <td title={s.passNote}>{s.passPct === null ? <span className="muted">{s.passNote}</span> : <span className={`chip ${s.belowThreshold ? "amber" : "green"}`}>{s.passPct}%{s.belowThreshold ? " · not triggering" : ""}</span>}<div className="muted">{s.triggerTests.active} trigger test{s.triggerTests.active === 1 ? "" : "s"}{s.run ? ` · ${s.run}` : ""}</div></td>
+                <td>{s.findingsCiting}</td>
               </tr>
             ))}
           </tbody>
@@ -119,17 +127,31 @@ export function Config({ snapshot, onDismissProposal, onRunSuite, prompt = (t) =
       </section>
 
       <section className="panel">
-        <div className="eyebrow">Proposals</div>
-        {snapshot.proposals.length === 0 ? <div className="empty">none</div> : null}
-        {snapshot.proposals.map((p) => (
-          <div className={`tcard${p.status !== "open" ? " dismissed" : ""}`} key={p.id}>
-            <div className="card-head"><span className="id">{p.id}</span><span className="chip">{p.type}</span><span className="chip gray">{p.status}</span>{p.pr ? <span className="chip amber">pending review</span> : null}</div>
+        <div className="eyebrow">Repeat mistakes · the same reason twice across sessions → a CLAUDE.md line</div>
+        {snapshot.repeatSignals.length === 0 ? <div className="empty">none — no reason was cited twice</div> : null}
+        {snapshot.repeatSignals.map((sig) => (
+          <div className="card-status" key={sig.reason}>
+            <span className={`chip ${sig.proposal ? "gray" : "amber"}`}>{sig.count}×</span> "{sig.display}" · from {sig.citations.join(", ")} · {sig.proposal ? <span>{sig.proposal.id} {sig.proposal.status}</span> : <span className="chip amber">no proposal yet — the engine drafts one (sdlc serve --engine)</span>}
+          </div>
+        ))}
+      </section>
+
+      <section className="panel">
+        <div className="eyebrow">Proposals · Accept opens a PR for the code owners; the console never edits CLAUDE.md</div>
+        {snapshot.proposalViews.length === 0 ? <div className="empty">none</div> : null}
+        {snapshot.proposalViews.map((p) => (
+          <div className={`tcard${p.status === "dismissed" ? " dismissed" : ""}`} key={p.id}>
+            <div className="card-head">
+              <span className="id">{p.id}</span><span className="chip">{p.type}</span><span className={`chip ${p.status === "open" ? "amber" : "gray"}`}>{p.status}</span>
+              {p.status === "accepted" ? (p.landed ? <span className="chip green">merged · CLAUDE.md carries it</span> : p.pr?.url ? <a className="chip amber" href={p.pr.url} target="_blank" rel="noreferrer">pending review · PR #{p.pr.number}</a> : <span className="chip amber">pending review · {p.pr?.branch ?? "branch"}</span>) : null}
+              {p.seen > 0 ? <span className="chip gray" title={p.reason ?? ""}>seen {p.seen}×</span> : null}
+            </div>
             <div className="card-title">{p.text}</div>
-            <div className="card-status">from {p.citations.join(", ")}</div>
+            <div className="card-status">from {p.citations.join(", ")}{p.reason ? ` · reason "${p.reason}"` : ""}{p.dismissal ? ` · dismissed by ${p.dismissal.by}: ${p.dismissal.reason}` : ""}</div>
             {p.status === "open" ? (
               <div className="actions">
-                <button className="btn primary" disabled title="opens a PR on the code host (GitHub mode, Phase 2)">Accept</button>
-                <button className="btn" onClick={() => { const reason = prompt(`Dismiss ${p.id} — reason (required):`); if (reason && reason.trim() !== "") onDismissProposal(p.id, reason); }}>Dismiss</button>
+                <button className="btn primary" disabled={!canDecide} title={canDecide ? "commit the line on a branch and open the PR for the code owners" : "eng or platform accepts a proposal"} onClick={() => onAcceptProposal(p.id)}>Accept · open PR</button>
+                <button className="btn" disabled={!canDecide} onClick={() => { const reason = prompt(`Dismiss ${p.id} — reason (required):`); if (reason && reason.trim() !== "") onDismissProposal(p.id, reason); }}>Dismiss</button>
               </div>
             ) : null}
           </div>

@@ -175,6 +175,27 @@ describe("Config (spec §4)", () => {
     expect(html).toContain("RUN-0001 · schedule · pass 100%");
   });
 
+  it("2.8: repeat signal with its proposal, proposal Accept for eng only, pending/merged chips, skills version · backed-by · pass % · findings citing", () => {
+    const eng = render({ ...initialState("eng"), view: "config" });
+    expect(eng).toContain("Repeat mistakes");
+    expect(eng).toContain("commit touches files outside plan.md&#x27;s file list");
+    expect(eng).toContain("from CHG-0017, CHG-0018");
+    expect(eng).toContain("PRP-0008 open");
+    expect(eng).toContain("seen 2×");
+    expect(eng).toContain("Accept · open PR");
+    expect(eng).not.toContain("no proposal yet");
+    // skills row: version (blob sha7), backed by plan-sync (team), 100% on one trigger test, findings citing
+    expect(eng).toContain(snapshot.skillStatus[0]?.version ?? "no-version");
+    expect(eng).toContain("plan-sync</span>");
+    expect(eng).toContain("100%</span>");
+    expect(eng).toContain("1 trigger test · RUN-0001");
+    expect(eng).toContain("Findings citing");
+    expect(eng).toContain("threshold 80%");
+    const po = render({ ...initialState("po"), view: "config" });
+    expect(po).toContain('title="eng or platform accepts a proposal"');
+    expect(po).toMatch(/<button class="btn primary" disabled="" title="eng or platform accepts a proposal"/);
+  });
+
   it("a merged change shows the case it was harvested into (2.5)", () => {
     const html = render({ ...initialState("po"), view: "detail", sel: "CHG-0012" });
     expect(html).toContain("harvested as");

@@ -2,13 +2,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { blobSha, commitWritePlan, currentBranch, defaultBranch, git, isRepo, newUlid, readTree, repoRoot } from "@sdlc/adapter-git";
-import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
+import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, normalizeReason, proposalForReason, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
 import { appendHookEvent } from "@sdlc/hooks";
 import { changeId as changeIdSchema, compileGlobs, parseArtifact, parsePlan, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
 import { z } from "zod";
 import { buildContext } from "./context-bundle.js";
 import { agentIdentity, sessionIdFrom } from "./identity.js";
-import { appendFinding, appendRound, clearWaiting, dirtyHash, loopState, readFindings, readReproDraft, readRounds, setWaiting, writeReproDraft, type StoredFinding, type StoredRound } from "./sessions.js";
+import { appendFinding, appendRound, clearWaiting, dirtyHash, loopState, readFindings, readReproDraft, readRounds, setWaiting, writeProposalDraft, writeReproDraft, type StoredFinding, type StoredRound } from "./sessions.js";
 
 export interface ServerOptions {
   cwd: string;
@@ -43,7 +43,7 @@ class Refusal extends Error {
   }
 }
 
-/** The eleven agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
+/** The twelve agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
 export function createSdlcServer(opts: ServerOptions): McpServer {
   const env = opts.env ?? process.env;
   const now = () => (opts.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -335,6 +335,27 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
   );
 
   server.registerTool(
+    "propose_claude_md_line",
+    {
+      description: "Propose one line for CLAUDE.md that would have prevented a repeated mistake (text, the change ids it cites, the repeat reason it answers). The draft is kept with the session and filed as sdlc/proposals/PRP-NNNN.yaml by the system when the session ends; a human accepts it into a PR or dismisses it. Nothing here edits CLAUDE.md.",
+      inputSchema: { changeId: changeIdSchema, text: z.string().min(1), citations: z.array(z.string().min(1)).min(1), reason: z.string().min(1), sessionId: z.string().optional() },
+    },
+    (args) =>
+      guard(async () => {
+        const l = await load();
+        viewOf(l.repo, args.changeId);
+        const text = args.text.trim();
+        if (/[\r\n]/.test(text)) throw new Refusal("a proposal is one line for CLAUDE.md");
+        const reason = normalizeReason(args.reason);
+        const existing = proposalForReason(l.repo.proposals, reason);
+        if (existing) throw new Refusal(`${existing.id} (${existing.status}) already answers "${reason}"; a new occurrence counts onto it — do not file another`);
+        const session = sessionIdFrom(env, args.sessionId);
+        writeProposalDraft(l.root, session, { text, citations: args.citations, reason, ts: now() });
+        return ok({ text, reason, citations: args.citations, note: "filed as sdlc/proposals/PRP-NNNN.yaml when the session ends; a human accepts (PR) or dismisses" });
+      }),
+  );
+
+  server.registerTool(
     "log_note",
     { description: "Append a note event to the change ledger (committed on the current branch).", inputSchema: { changeId: changeIdSchema, text: z.string().min(1), sessionId: z.string().optional() } },
     (args) =>
@@ -352,4 +373,4 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
   return server;
 }
 
-export const AGENT_TOOL_NAMES = ["list_work", "get_change", "get_context", "propose_artifact", "submit_plan_revision", "report_repro", "report_round", "report_done", "report_finding", "request_input", "log_note"] as const;
+export const AGENT_TOOL_NAMES = ["list_work", "get_change", "get_context", "propose_artifact", "submit_plan_revision", "report_repro", "report_round", "report_done", "report_finding", "propose_claude_md_line", "request_input", "log_note"] as const;

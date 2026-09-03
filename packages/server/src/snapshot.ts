@@ -3,7 +3,13 @@ import {
   badges,
   computeMetrics,
   deriveAll,
+  proposalViews,
+  repeatSignals,
+  skillStatus,
   suiteStatus,
+  type ProposalView,
+  type RepeatSignal,
+  type SkillStatus,
   type SuiteStatus,
   gateQueues,
   validateTree,
@@ -57,6 +63,10 @@ export interface Snapshot {
   triage: { path: string; data: Triage; body: string }[];
   findings: Finding[];
   proposals: Proposal[];
+  /** Proposals with what the ledger says about them: times the reason was seen, and whether the default branch already carries the line. */
+  proposalViews: ProposalView[];
+  /** Repeat-mistake signals (FR-43): reasons cited twice or more across sessions, with the proposal answering each. */
+  repeatSignals: RepeatSignal[];
   evalCases: EvalCase[];
   evalRuns: EvalRun[];
   /** Suite banner: pass vs threshold, config-change gate, rolling budget, strip with config diffs. */
@@ -68,6 +78,8 @@ export interface Snapshot {
   claudeMd: ParsedClaudeMd | null;
   hooks: HookRow[];
   skills: ParsedSkill[];
+  /** Skills table: version, backing hook, pass % from trigger tests, findings citing (spec 5A.3). */
+  skillStatus: SkillStatus[];
   agents: ParsedAgent[];
   bands: Bands | null;
   metrics: StageMetrics[];
@@ -91,6 +103,8 @@ export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionR
     triage: repo.triage,
     findings: repo.findings,
     proposals: repo.proposals,
+    proposalViews: proposalViews(repo),
+    repeatSignals: repeatSignals(repo),
     evalCases: repo.evalCases,
     evalRuns: repo.evalRuns,
     evals: suiteStatus(repo, now.toISOString().replace(/\.\d{3}Z$/, "Z")),
@@ -100,6 +114,7 @@ export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionR
     claudeMd: repo.claudeMd,
     hooks: repo.settings?.hooks ?? [],
     skills: repo.skills,
+    skillStatus: skillStatus(repo),
     agents: repo.agents,
     bands: repo.bands,
     metrics: computeMetrics(repo, all.changes, { now: now.toISOString() }),

@@ -89,6 +89,7 @@ const prPayload = (p: { action: string; number: number; headRef: string; headSha
 /** A build session's commit plus the per-change run: the code PR #1 for CHG-0018 at its tested head. */
 async function buildAndRun(h: ReturnType<typeof harness>, dir: string) {
   await h.store.refresh();
+  await h.engine.sync(); // drain the first poll before main moves ahead of origin
   const launched = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
   const wt = launched.session.worktreePath;
   await realizeSeedRepro(dir, wt); // 2.7: the fix's repro proof

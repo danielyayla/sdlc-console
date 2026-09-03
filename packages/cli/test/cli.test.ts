@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, initRepo } from "@sdlc/adapter-git";
 import { main, type Io } from "../src/index.js";
@@ -382,5 +383,54 @@ describe("repro and freeze commands (2.7)", () => {
     const help = await sdlc(dir, ["nope"]);
     expect(help.err).toContain("sdlc repro confirm <CHG>");
     expect(help.err).toContain("sdlc freeze lift <CHG> --file p --reason r");
+  });
+});
+
+describe("proposal and trigger-test commands (2.8)", () => {
+  const FAKE = fileURLToPath(new URL("../../server/test/fixtures/fake-claude.sh", import.meta.url));
+
+  it("proposal accept|dismiss are wired, human-only, need eng or platform, and dismiss needs a reason", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    expect((await sdlc(dir, ["proposal"])).err).toContain("usage: sdlc proposal accept <PRP>");
+    put(dir, "sdlc/proposals/PRP-0001.yaml", "schema: 1\nid: PRP-0001\ntype: claude-md-line\ntext: Run the tests before reporting done.\ncitations: [CHG-0001]\nreason: tests not run\nstatus: open\ncreatedAt: 2026-09-02T09:40:00Z\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "proposal"]);
+    expect((await sdlc(dir, ["proposal", "accept", "PRP-0001"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
+    const po = await sdlc(dir, ["proposal", "accept", "PRP-0001"]);
+    expect(po.code).toBe(1);
+    expect(po.err).toContain("holds neither eng nor platform");
+    const noReason = await sdlc(dir, ["proposal", "dismiss", "PRP-0001"], { SDLC_IDENTITY: "eng@example.com" });
+    expect(noReason.code).toBe(2);
+    expect(noReason.err).toContain("--reason is required");
+    // local mode: accept cuts the branch with the line and marks the proposal; main's CLAUDE.md is untouched
+    const accepted = await sdlc(dir, ["proposal", "accept", "PRP-0001", "--json"], { SDLC_IDENTITY: "eng@example.com" });
+    expect(accepted.code).toBe(0);
+    expect(accepted.json<{ toast: string }>().toast).toBe("PRP-0001 accepted — branch sdlc/proposals/PRP-0001 carries the line — open a PR from it for the code owners");
+    expect(await git(dir, ["show", "sdlc/proposals/PRP-0001:CLAUDE.md"])).toContain("- Run the tests before reporting done.");
+    expect(await git(dir, ["show", "main:CLAUDE.md"])).not.toContain("Run the tests before reporting done.");
+    expect(await git(dir, ["show", "main:sdlc/proposals/PRP-0001.yaml"])).toContain("status: accepted");
+    expect((await git(dir, ["log", "-1", "--format=%an <%ae>", "sdlc/proposals/PRP-0001"])).trim()).toBe("Pat Owner <eng@example.com>"); // SDLC_IDENTITY overrides the email; the name comes from git
+    expect((await sdlc(dir, ["proposal", "accept", "PRP-0001"], { SDLC_IDENTITY: "eng@example.com" })).code).toBe(1);
+    const help = await sdlc(dir, ["nope"]);
+    expect(help.err).toContain("sdlc proposal accept <PRP>");
+    expect(help.err).toContain("sdlc evals trigger <skill> --prompt <text>");
+  });
+
+  it("evals trigger runs the harness headless and exits 0 only when the Skill tool loaded the skill", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    expect((await sdlc(dir, ["evals", "trigger"])).err).toContain("usage: sdlc evals trigger <skill> --prompt <text>");
+    const loaded = await sdlc(dir, ["evals", "trigger", "brand", "--prompt", "Write the reminder copy.", "--json"], { SDLC_CLAUDE_BIN: FAKE, FAKE_CLAUDE_SKILL: "brand" });
+    expect(loaded.code).toBe(0);
+    expect(loaded.json<{ loaded: boolean; evidence: string }>()).toMatchObject({ loaded: true, skill: "brand", prompt: "Write the reminder copy." });
+    expect(loaded.json<{ evidence: string }>().evidence).toContain('"name":"Skill"');
+    const other = await sdlc(dir, ["evals", "trigger", "brand", "--prompt", "Write the reminder copy."], { SDLC_CLAUDE_BIN: FAKE, FAKE_CLAUDE_SKILL: "compliance" });
+    expect(other.code).toBe(1);
+    expect(other.out).toContain("not loaded: skill brand");
+    const none = await sdlc(dir, ["evals", "trigger", "brand", "--prompt", "Write the reminder copy."], { SDLC_CLAUDE_BIN: FAKE });
+    expect(none.code).toBe(1);
+    expect(none.out).toContain("not loaded: skill brand");
+    expect(none.out).toContain("working"); // the transcript tail is the evidence, verbatim
   });
 });

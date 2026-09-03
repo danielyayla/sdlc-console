@@ -10,6 +10,10 @@ if [ -n "$FAKE_CLAUDE_FAIL" ]; then
   printf '%s\n' '{"type":"result","subtype":"error","is_error":true,"result":"boom","session_id":"11111111-2222-3333-4444-555555555555"}'
   exit 1
 fi
+# FAKE_CLAUDE_SKILL=<name> makes it load that skill (a Skill tool_use line), as a trigger test expects.
+if [ -n "$FAKE_CLAUDE_SKILL" ]; then
+  printf '%s\n' "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"Skill\",\"input\":{\"skill\":\"$FAKE_CLAUDE_SKILL\"}}]}}"
+fi
 printf '%s\n' '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"done","total_cost_usd":0.12,"num_turns":3,"session_id":"11111111-2222-3333-4444-555555555555"}'
 exit 0

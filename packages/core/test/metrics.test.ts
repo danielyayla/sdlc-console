@@ -24,7 +24,7 @@ describe("computeMetrics over the seed (git + ledger only)", () => {
   it("counts ledger events inside the 30-day window", () => {
     expect(find(1, "intents committed")).toMatchObject({ value: 7, unit: "count" });
     expect(find(6, "incidents recorded")).toMatchObject({ value: 1 });
-    expect(find(3, "plan-sync blocks")).toMatchObject({ value: 0 });
+    expect(find(3, "plan-sync blocks")).toMatchObject({ value: 2 }); // CHG-0017 and CHG-0018 (2.8 seed: the repeat signal)
     expect(find(5, "deploys")).toMatchObject({ value: 1 });
   });
   it("derives latencies and rates", () => {

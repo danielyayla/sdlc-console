@@ -1,4 +1,4 @@
-import { deriveChange, proposeTasks, confirmTasks, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
+import { deriveChange, pendingRepeatSignals, proposeTasks, confirmTasks, reasonKey, validateWritePlan, type ChangeView, type Repo, type RepeatSignal } from "@sdlc/core";
 import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, type GitIdentity } from "@sdlc/adapter-git";
 import { readReproDraft } from "@sdlc/mcp";
 import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
@@ -6,6 +6,7 @@ import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
 import { mirrorReview } from "./review.js";
+import { mirrorProposal } from "./proposals.js";
 import { runSuite, type SuiteOutcome } from "./suite.js";
 import { nextRunId } from "@sdlc/core";
 import type { EvalRun } from "@sdlc/schemas";
@@ -90,7 +91,9 @@ export class Engine {
         if (!view.valid || view.closed) continue;
         await this.forChange(repo, view).catch((e: unknown) => this.log(`${view.id}: ${(e as Error).message}`));
       }
-      if (repo.config.codeHost === "github" && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
+      if (this.opts.autoLaunch) await this.forProposals(repo).catch((e: unknown) => this.log(`proposals: ${(e as Error).message}`));
+      // a poll is redundant while a pass is in flight: that pass reads the same state (a webhook's pass still queues behind it, see sync())
+      if (repo.config.codeHost === "github" && !this.inflight && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
     } finally {
       this.ticking = false;
       if (this.pending) {
@@ -327,12 +330,38 @@ export class Engine {
     }
   }
 
-  private async launch(view: ChangeView, key: string, kind: Job["kind"], sessionKind: Exclude<SessionKind, "intent" | "diagnose">): Promise<void> {
+  /**
+   * FR-43: one claude-md-proposal job per repeat reason nobody answered
+   * (`proposal:<reason key>`), launched on the newest cited change that is
+   * still open. The proposal the session drafts is filed when it ends; a
+   * reason with a proposal (open, accepted or dismissed) is never drafted again.
+   */
+  private async forProposals(repo: Repo): Promise<void> {
+    for (const signal of pendingRepeatSignals(repo)) {
+      const key = `proposal:${reasonKey(signal.reason)}`;
+      if (this.opts.jobs.get(key)) continue;
+      const cited = [...signal.occurrences].reverse().map((o) => o.changeId).find((id) => {
+        const files = repo.changes.get(id);
+        if (!files) return false;
+        const v = deriveChange(repo, files);
+        return v.valid && !v.closed;
+      });
+      if (!cited) {
+        this.log(`proposal for "${signal.reason}" (${signal.count}×): no cited change is open; nothing launched`);
+        continue;
+      }
+      const files = repo.changes.get(cited);
+      if (!files) continue;
+      await this.launch(deriveChange(repo, files), key, "claude-md-proposal", "propose", signal);
+    }
+  }
+
+  private async launch(view: ChangeView, key: string, kind: Job["kind"], sessionKind: Exclude<SessionKind, "intent" | "diagnose">, signal: RepeatSignal | null = null): Promise<void> {
     const job = this.opts.jobs.claim({ key, kind, changeId: view.id, cycle: view.cycle, stage: view.stage }, this.now());
     if (!job) return;
     try {
       const r = await launchSession(
-        { changeId: view.id, kind: sessionKind, ...(sessionKind === "build" ? { mode: view.autoEligible.value ? ("AUTO" as const) : ("SUPERVISED" as const) } : {}) },
+        { changeId: view.id, kind: sessionKind, ...(sessionKind === "build" ? { mode: view.autoEligible.value ? ("AUTO" as const) : ("SUPERVISED" as const) } : {}), ...(signal ? { reason: signal.reason } : {}) },
         { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), onExit: (s) => void this.onSessionExit(s) },
       );
       this.opts.jobs.update(key, { sessionId: r.session.id, state: r.session.mode === "SUPERVISED" ? "done" : "running", note: r.session.mode === "SUPERVISED" ? "prepared for the engineer" : null }, this.now());
@@ -376,6 +405,11 @@ export class Engine {
       await this.mirrorForSession(session);
       return;
     }
+    if (session.kind === "propose") {
+      if (session.status === "done") await this.fileProposalForSession(session);
+      else this.opts.store.rebuild();
+      return;
+    }
     if (session.kind !== "build" || session.status !== "done") {
       this.opts.store.rebuild();
       return;
@@ -402,6 +436,28 @@ export class Engine {
     } catch (e) {
       this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
       this.log(`${view.id}: review mirror failed: ${(e as Error).message}`);
+      this.opts.store.rebuild();
+    }
+    return this.opts.jobs.get(key);
+  }
+
+  /** A propose session finished: the line it drafted becomes `sdlc/proposals/PRP-NNNN.yaml` (once per session). */
+  async fileProposalForSession(session: StoredSession): Promise<Job | null> {
+    await this.opts.store.refresh(true);
+    const repo = this.opts.store.currentRepo;
+    if (!repo) return null;
+    const key = `proposal-mirror:${session.id}`;
+    const job = this.opts.jobs.claim({ key, kind: "proposal-mirror", changeId: session.changeId, cycle: session.cycle, stage: 0 }, this.now());
+    if (!job) return null;
+    try {
+      const outcome = await mirrorProposal({ root: this.opts.store.root, session, ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}) }, repo);
+      this.opts.jobs.update(key, { state: outcome.proposalId ? "done" : "skipped", note: outcome.note }, this.now());
+      this.log(`${session.changeId}: ${outcome.note}`);
+      this.opts.registry.patch(session.id, { reviewed: true });
+      await this.opts.store.refresh(true);
+    } catch (e) {
+      this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+      this.log(`${session.changeId}: proposal not filed: ${(e as Error).message}`);
       this.opts.store.rebuild();
     }
     return this.opts.jobs.get(key);

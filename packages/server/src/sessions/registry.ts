@@ -7,7 +7,7 @@ import { loopState, readReproDraft, readRounds, type ReproDraft, type StoredRoun
 import type { RoundResult } from "@sdlc/schemas";
 import type { SessionRecord } from "../snapshot.js";
 
-export type SessionKind = "intent" | "design" | "plan" | "build" | "review" | "diagnose";
+export type SessionKind = "intent" | "design" | "plan" | "build" | "review" | "diagnose" | "propose";
 export type SessionStatus = "running" | "waiting" | "done" | "error" | "stopped" | "taken_over" | "awaiting_engineer";
 
 /** Runtime record (C): rebuildable; the ledger keeps the summary lines. */

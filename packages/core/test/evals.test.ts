@@ -108,7 +108,7 @@ describe("config-change gate (2.5, acceptance m)", () => {
     const old = withFiles(tree, { "sdlc/config.yaml": cfg, "evals/runs/RUN-0002.json": stringifyJson(run("RUN-0002", [{ caseId: "CASE-0001", pass: true }], { cost: 0.7 })) });
     expect(budgetStatus(loadRepo(old), NOW)).toMatchObject({ used: 2.12, remaining: 0, exhausted: true });
     const status = suiteStatus(repo, NOW);
-    expect(status).toMatchObject({ mode: "continuous", threshold: 0.9, active: 2, draft: 1, retired: 0, underSized: true, suiteMinSize: 20, latest: { id: "RUN-0001" }, current: { id: "RUN-0001" }, gate: { ok: true } });
+    expect(status).toMatchObject({ mode: "continuous", threshold: 0.9, active: 3, draft: 1, retired: 0, underSized: true, suiteMinSize: 20, latest: { id: "RUN-0001" }, current: { id: "RUN-0001" }, gate: { ok: true } });
     expect(status.strip).toEqual([{ id: "RUN-0001", verdict: "pass", passRate: 1, trigger: "schedule", startedAt: "2026-09-02T03:00:00Z", model: "claude-opus-5", changes: ["first run"] }]);
   });
 });
@@ -191,18 +191,18 @@ describe("harvest (2.5, FR-53)", () => {
     const r = harvestCase(without, view, ctx);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.caseId).toBe("CASE-0004");
-    expect(r.plan.files[0]?.path).toBe("evals/cases/CASE-0004.json");
+    expect(r.caseId).toBe("CASE-0005");
+    expect(r.plan.files[0]?.path).toBe("evals/cases/CASE-0005.json");
     const written = JSON.parse(r.plan.files[0]?.content ?? "{}") as Record<string, unknown>;
-    expect(written).toMatchObject({ id: "CASE-0004", status: "draft", owner: "platform@veri.example", source: { type: "change", ref: "CHG-0012" }, added: NOW, paths: view.planFiles });
+    expect(written).toMatchObject({ id: "CASE-0005", status: "draft", owner: "platform@veri.example", source: { type: "change", ref: "CHG-0012" }, added: NOW, paths: view.planFiles });
     expect(String(written["prompt"])).toContain(view.title);
     expect(String(written["prompt"])).toContain("Behaviour outside this change is unchanged");
     expect((written["checks"] as { name: string; cmd: string }[]).map((c) => c.cmd)).toEqual(["pnpm build", "pnpm test", "pnpm lint"]);
     expect(r.plan.events[0]?.event).toMatchObject({ event: "note", actor: { type: "human", id: PO } });
-    expect(r.plan.commitMessage).toBe("sdlc(CHG-0012): harvest CASE-0004 (draft)");
+    expect(r.plan.commitMessage).toBe("sdlc(CHG-0012): harvest CASE-0005 (draft)");
     const after = loadRepo(applyWritePlan(without.tree, r.plan));
-    expect(deriveChange(after, after.changes.get("CHG-0012") ?? files("CHG-0012")).harvested).toEqual({ id: "CASE-0004", status: "draft" });
+    expect(deriveChange(after, after.changes.get("CHG-0012") ?? files("CHG-0012")).harvested).toEqual({ id: "CASE-0005", status: "draft" });
     // draft cases stay out of the active suite
-    expect(suiteStatus(after, NOW)).toMatchObject({ active: 1, draft: 2 });
+    expect(suiteStatus(after, NOW)).toMatchObject({ active: 2, draft: 2 });
   });
 });

@@ -20,6 +20,8 @@ export const thresholds = z.strictObject({
   suiteMinSize: z.number().int().min(0).optional(),
   noDiscriminationRuns: z.number().int().min(1).optional(),
   brokenCheckRuns: z.number().int().min(1).optional(),
+  /** Share of a skill's trigger tests that must load it; below → amber and a "skill not triggering" triage item. */
+  skillPassThreshold: ratio.optional(),
 });
 
 /** Defaults applied by core when `sdlc/config.yaml` leaves a threshold unset. */
@@ -32,6 +34,7 @@ export const CONFIG_DEFAULTS = {
     suiteMinSize: 20,
     noDiscriminationRuns: 20,
     brokenCheckRuns: 3,
+    skillPassThreshold: 0.8,
   },
   evals: { mode: "continuous" as const },
   eligibility: { coverage: "lenient" as const },

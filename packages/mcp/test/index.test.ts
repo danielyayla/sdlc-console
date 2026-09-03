@@ -4,9 +4,9 @@ import { AGENT_TOOL_NAMES, PACKAGE_NAME, agentIdentity, loopState, sessionIdFrom
 const round = (n: number, pass: boolean, hash = "h", name = "test"): StoredRound => ({ n, ts: "2026-09-03T10:00:00Z", results: [{ name, pass, outputExcerpt: "x" }], dirtyHash: hash });
 
 describe("@sdlc/mcp", () => {
-  it("exports its package name and exactly eleven agent tools, none of which accepts anything", () => {
+  it("exports its package name and exactly twelve agent tools, none of which accepts anything", () => {
     expect(PACKAGE_NAME).toBe("@sdlc/mcp");
-    expect(AGENT_TOOL_NAMES).toHaveLength(11);
+    expect(AGENT_TOOL_NAMES).toHaveLength(12);
     expect(AGENT_TOOL_NAMES.some((n) => /accept|merge|approve|lift|confirm/.test(n))).toBe(false);
   });
   it("identity and session come from the launcher's environment", () => {

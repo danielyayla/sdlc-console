@@ -30,8 +30,10 @@ async function seeded(configPatch: (text: string) => string = (t) => t): Promise
   return dir;
 }
 
-const green: Exec = (cmd) => Promise.resolve({ exitCode: 0, output: `${cmd}: Tests 12 passed (12)` });
-const exportRed: Exec = (cmd) => Promise.resolve(cmd.includes("test/export") ? { exitCode: 1, output: "Tests 1 failed | 11 passed\n  ✗ zero-total row missing" } : { exitCode: 0, output: `${cmd}: Tests 12 passed (12)` });
+// the seed's brand trigger test (CASE-0004, 2.8) runs `sdlc evals trigger`; the fake harness answers as a loaded skill would
+const trigger = (cmd: string) => (cmd.startsWith("sdlc evals trigger") ? { exitCode: 0, output: `loaded: skill brand for "…"` } : null);
+const green: Exec = (cmd) => Promise.resolve(trigger(cmd) ?? { exitCode: 0, output: `${cmd}: Tests 12 passed (12)` });
+const exportRed: Exec = (cmd) => Promise.resolve(trigger(cmd) ?? (cmd.includes("test/export") ? { exitCode: 1, output: "Tests 1 failed | 11 passed\n  ✗ zero-total row missing" } : { exitCode: 0, output: `${cmd}: Tests 12 passed (12)` }));
 /** A clock that advances one minute per reading. */
 function minuteClock(): () => number {
   let t = 0;
@@ -50,14 +52,14 @@ describe("eval suite run (2.5): active cases, verbatim output, run file by sdlc-
     const r = await runSuite({ root: dir, repo, trigger: "manual", exec: green, now: NOW, clock, env: { SDLC_MODEL: "claude-fable-5-1" } });
     expect(r.skipped).toBeNull();
     expect(r.run).toMatchObject({ id: "RUN-0002", trigger: "manual", passRate: 1, threshold: 0.9, verdict: "pass", cost: 1, startedAt: "2026-09-04T09:00:00Z" });
-    expect(r.run?.results.map((x) => x.caseId)).toEqual(["CASE-0001", "CASE-0002"]);
+    expect(r.run?.results.map((x) => x.caseId)).toEqual(["CASE-0001", "CASE-0002", "CASE-0004"]);
     expect(r.run?.results[0]?.output).toContain("--- test: pnpm test -- test/export (exit 0)\npnpm test -- test/export: Tests 12 passed (12)");
     expect(r.run?.configRef.model).toBe("claude-fable-5-1");
     expect(r.run?.configRef.claudeMdSha).toBe(repo.fingerprint.claudeMdSha);
     expect(r.signals).toEqual([]);
     const after = await repoAt(dir);
     expect(after.evalRuns.map((x) => x.id)).toEqual(["RUN-0001", "RUN-0002"]);
-    expect((await git(dir, ["log", "-1", "--format=%s%n%an <%ae>%n%(trailers:key=SDLC-Actor,valueonly)"])).trim().split("\n")).toEqual(["sdlc(evals): suite run RUN-0002 pass (2/2 of 2)", "sdlc-bot <sdlc-bot@sdlc.local>", "system:sdlc-bot@sdlc.local"]);
+    expect((await git(dir, ["log", "-1", "--format=%s%n%an <%ae>%n%(trailers:key=SDLC-Actor,valueonly)"])).trim().split("\n")).toEqual(["sdlc(evals): suite run RUN-0002 pass (3/3 of 3)", "sdlc-bot <sdlc-bot@sdlc.local>", "system:sdlc-bot@sdlc.local"]);
     expect(existsSync(join(dir, ".sdlc-state", "worktrees"))).toBe(true);
     expect((await git(dir, ["worktree", "list"])).split("\n").filter((l) => l.includes("evals-"))).toEqual([]);
     expect(evalGate(after)).toMatchObject({ ok: true, run: { id: "RUN-0002" } });
@@ -69,7 +71,7 @@ describe("eval suite run (2.5): active cases, verbatim output, run file by sdlc-
     const r = await runSuite({ root: dir, repo: await repoAt(dir), trigger: "manual", exec: green, now: NOW, clock: minuteClock() });
     expect(r.run).toMatchObject({ id: "RUN-0002", verdict: "incomplete", passRate: 1 });
     expect(r.run?.results).toHaveLength(1);
-    expect((await git(dir, ["log", "-1", "--format=%s"])).trim()).toBe("sdlc(evals): suite run RUN-0002 incomplete (1/1 of 2 · stopped at the budget)");
+    expect((await git(dir, ["log", "-1", "--format=%s"])).trim()).toBe("sdlc(evals): suite run RUN-0002 incomplete (1/1 of 3 · stopped at the budget)");
     const after = await repoAt(dir);
     const gate = evalGate(after);
     expect(gate.ok).toBe(false);
@@ -91,23 +93,23 @@ describe("eval suite run (2.5): active cases, verbatim output, run file by sdlc-
   it("raises retire and broken-check triage items once per streak, committed by sdlc-bot after the run", async () => {
     const dir = await seeded((t) => t.replace("suiteMinSize: 20", "suiteMinSize: 20\n  noDiscriminationRuns: 2\n  brokenCheckRuns: 2"));
     const first = await runSuite({ root: dir, repo: await repoAt(dir), trigger: "schedule", exec: green, now: NOW, clock: minuteClock() });
-    expect(first.signals.map((s) => [s.kind, s.caseId])).toEqual([["retire", "CASE-0001"], ["retire", "CASE-0002"]]);
+    expect(first.signals.map((s) => [s.kind, s.caseId])).toEqual([["retire", "CASE-0001"], ["retire", "CASE-0002"], ["retire", "CASE-0004"]]);
     expect(first.signalsCommit).not.toBeNull();
     const after1 = await repoAt(dir);
-    expect(after1.triage.filter((t) => t.data.tier === "eval-retire").map((t) => [t.data.id, t.data.src])).toEqual([["TRI-0044", "eval-retire:CASE-0001"], ["TRI-0045", "eval-retire:CASE-0002"]]);
-    expect((await git(dir, ["log", "-1", "--format=%s%n%an"])).trim().split("\n")).toEqual(["sdlc(evals): 2 triage items from the suite (retire CASE-0001, retire CASE-0002)", "sdlc-bot"]);
+    expect(after1.triage.filter((t) => t.data.tier === "eval-retire").map((t) => [t.data.id, t.data.src])).toEqual([["TRI-0044", "eval-retire:CASE-0001"], ["TRI-0045", "eval-retire:CASE-0002"], ["TRI-0046", "eval-retire:CASE-0004"]]);
+    expect((await git(dir, ["log", "-1", "--format=%s%n%an"])).trim().split("\n")).toEqual(["sdlc(evals): 3 triage items from the suite (retire CASE-0001, retire CASE-0002, retire CASE-0004)", "sdlc-bot"]);
     expect(after1.triage.find((t) => t.data.id === "TRI-0044")?.body).toContain("## Proposed outcome");
     // the streak extends: nothing new
     const second = await runSuite({ root: dir, repo: after1, trigger: "schedule", exec: green, now: NOW, clock: minuteClock() });
     expect(second.signals).toEqual([]);
-    expect((await repoAt(dir)).triage).toHaveLength(4);
+    expect((await repoAt(dir)).triage).toHaveLength(5);
     // CASE-0001 fails twice under the same config → broken check
     const third = await runSuite({ root: dir, repo: await repoAt(dir), trigger: "schedule", exec: exportRed, now: NOW, clock: minuteClock() });
     expect(third.run?.verdict).toBe("fail");
     expect(third.signals).toEqual([]);
     const fourth = await runSuite({ root: dir, repo: await repoAt(dir), trigger: "schedule", exec: exportRed, now: NOW, clock: minuteClock() });
     expect(fourth.signals.map((s) => [s.kind, s.caseId, s.src])).toEqual([["broken", "CASE-0001", "eval-broken:CASE-0001"]]);
-    const flaky = (await repoAt(dir)).triage.find((t) => t.data.id === "TRI-0046");
+    const flaky = (await repoAt(dir)).triage.find((t) => t.data.id === "TRI-0047");
     expect(flaky?.data).toMatchObject({ tier: "flaky", status: "open", title: "CASE-0001: broken check (failing 2 runs, no config change)" });
     expect(flaky?.data.evidence).toContain("zero-total row missing");
   });
@@ -144,7 +146,7 @@ describe("engine job, console endpoints and harvest (2.5)", () => {
     expect(queued.job.key).toBe("evals:manual:RUN-0002");
     expect(queued.toast).toContain("suite run queued (RUN-0002)");
     await waitFor(() => h.jobs.get("evals:manual:RUN-0002")?.state === "done");
-    expect(h.jobs.get("evals:manual:RUN-0002")?.note).toBe("RUN-0002 pass · 100% (2/2)");
+    expect(h.jobs.get("evals:manual:RUN-0002")?.note).toBe("RUN-0002 pass · 100% (3/3)");
     const status = (await (await fetch(`${url}/api/evals`)).json()) as { latest: { id: string }; gate: { ok: boolean }; budget: { used: number } };
     expect(status).toMatchObject({ latest: { id: "RUN-0002" }, gate: { ok: true } });
     expect(status.budget.used).toBeGreaterThanOrEqual(1.42);
@@ -175,17 +177,17 @@ describe("engine job, console endpoints and harvest (2.5)", () => {
     expect(merged.stage).toBe(6);
     expect(merged.harvested).toBeNull();
     const harvested = (await (await fetch(`${url}/api/changes/CHG-0018/harvest`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json()) as { ok: boolean; toast: string };
-    expect(harvested.toast).toContain("CASE-0004 drafted from CHG-0018");
+    expect(harvested.toast).toContain("CASE-0005 drafted from CHG-0018");
     const after = await repoAt(dir);
-    const c = after.evalCases.find((x) => x.id === "CASE-0004");
+    const c = after.evalCases.find((x) => x.id === "CASE-0005");
     expect(c).toMatchObject({ status: "draft", owner: "platform@veri.example", source: { type: "change", ref: "CHG-0018" }, checks: [{ name: "build", cmd: "pnpm build" }, { name: "test", cmd: "pnpm test" }, { name: "lint", cmd: "pnpm lint" }] });
     expect(c?.paths).toEqual(merged.planFiles);
     const view = deriveChange(after, after.changes.get("CHG-0018") ?? (() => { throw new Error("CHG-0018"); })());
-    expect(view.harvested).toEqual({ id: "CASE-0004", status: "draft" });
-    expect(view.activity.find((a) => a.event === "note")?.text).toContain("harvested as CASE-0004");
-    expect((await git(dir, ["log", "-1", "--format=%s %an"])).trim()).toBe("sdlc(CHG-0018): harvest CASE-0004 (draft) Eli Ng");
+    expect(view.harvested).toEqual({ id: "CASE-0005", status: "draft" });
+    expect(view.activity.find((a) => a.event === "note")?.text).toContain("harvested as CASE-0005");
+    expect((await git(dir, ["log", "-1", "--format=%s %an"])).trim()).toBe("sdlc(CHG-0018): harvest CASE-0005 (draft) Eli Ng");
     // the draft never enters the suite
     const next = await runSuite({ root: dir, repo: after, trigger: "manual", exec: green, now: NOW, clock: minuteClock() });
-    expect(next.run?.results.map((r) => r.caseId)).toEqual(["CASE-0001", "CASE-0002"]);
+    expect(next.run?.results.map((r) => r.caseId)).toEqual(["CASE-0001", "CASE-0002", "CASE-0004"]);
   }, 60_000);
 });

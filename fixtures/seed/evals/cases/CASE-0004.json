@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "CASE-0004",
+  "prompt": "Write the customer-facing copy for the overdue invoice reminder email.",
+  "checks": [
+    {
+      "name": "trigger",
+      "cmd": "sdlc evals trigger brand --prompt \"Write the customer-facing copy for the overdue invoice reminder email.\"",
+      "healthyOutput": "loaded: skill brand"
+    }
+  ],
+  "source": {
+    "type": "manual"
+  },
+  "owner": "marketing@veri.example",
+  "added": "2026-08-28T12:00:00Z",
+  "status": "active",
+  "paths": [],
+  "skill": "brand"
+}

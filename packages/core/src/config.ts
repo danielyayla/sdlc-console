@@ -10,6 +10,7 @@ export interface ResolvedThresholds {
   suiteMinSize: number;
   noDiscriminationRuns: number;
   brokenCheckRuns: number;
+  skillPassThreshold: number;
 }
 
 /** Identity whose `github` login matches (case-insensitive), for attributing merges done on the code host. */
@@ -50,6 +51,7 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
       suiteMinSize: t.suiteMinSize ?? d.suiteMinSize,
       noDiscriminationRuns: t.noDiscriminationRuns ?? d.noDiscriminationRuns,
       brokenCheckRuns: t.brokenCheckRuns ?? d.brokenCheckRuns,
+      skillPassThreshold: t.skillPassThreshold ?? d.skillPassThreshold,
     },
     records: {
       intent: r.intent ?? "repo",

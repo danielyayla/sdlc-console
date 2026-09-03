@@ -124,3 +124,32 @@ export function clearReproDraft(root: string, session: string): void {
   const file = reproFile(root, session);
   if (existsSync(file)) rmSync(file);
 }
+
+/** The CLAUDE.md line a propose session drafted (FR-43): kept beside the session; the system files it as a proposal when the session ends. */
+export interface ProposalDraft {
+  text: string;
+  citations: string[];
+  /** The repeat reason the line answers (as the job handed it over). */
+  reason: string;
+  ts: string;
+}
+
+export function proposalFile(root: string, session: string): string {
+  return join(root, ".sdlc-state", "sessions", session, "proposal.json");
+}
+
+export function readProposalDraft(root: string, session: string): ProposalDraft | null {
+  const file = proposalFile(root, session);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as ProposalDraft;
+  } catch {
+    return null;
+  }
+}
+
+export function writeProposalDraft(root: string, session: string, draft: ProposalDraft): void {
+  const file = proposalFile(root, session);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
+}

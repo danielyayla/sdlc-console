@@ -32,6 +32,8 @@ export const evalCase = z.strictObject({
   added: isoTimestamp,
   status: evalCaseStatus,
   paths: z.array(relPath),
+  /** A trigger test: the prompt should load this skill (`.claude/skills/<name>`); its pass feeds the skill's pass % (spec 5A.3). */
+  skill: nonEmpty.optional(),
 });
 
 export const configRef = z.strictObject({

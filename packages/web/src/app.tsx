@@ -109,7 +109,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );
-  else if (state.view === "config") body = <Config snapshot={snapshot} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} onRunSuite={() => void run("/evals/run", {})} {...(promptImpl ? { prompt: promptImpl } : {})} />;
+  else if (state.view === "config") body = <Config snapshot={snapshot} role={state.role} onAcceptProposal={(id) => void run(`/proposals/${id}/accept`, {})} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} onRunSuite={() => void run("/evals/run", {})} {...(promptImpl ? { prompt: promptImpl } : {})} />;
   else if (state.view === "loop")
     body = (
       <Loop

@@ -11,13 +11,26 @@ import { Engine, JobStore, SessionRegistry, StateStore, capacityOf, launchSessio
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.sh", import.meta.url));
 const ENG = { id: "eng@veri.example", name: "Eli Ng" };
 const cleanups: (() => Promise<void> | void)[] = [];
+/** A harness process may still be writing when the test ends: retry the removal instead of failing the cleanup. */
+async function rmRetry(dir: string): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      if (i >= 5) throw e;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+}
+
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c();
 });
 
 async function seeded(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "sdlc-depth-"));
-  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  cleanups.push(() => rmRetry(dir));
   await initRepo(dir, "main", { id: PO, name: "Priya Owens" });
   await git(dir, ["config", "commit.gpgsign", "false"]);
   writeSeed(dir);

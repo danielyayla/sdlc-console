@@ -3,7 +3,8 @@ import { evalGate, harvestCase, validateWritePlan, type GateResult } from "@sdlc
 import { runSuite, type SuiteOutcome } from "@sdlc/server";
 import type { EvalRun } from "@sdlc/schemas";
 import { actingIdentity, assertHuman, loadCommitted, transitionContext, viewOf, type CliContext } from "../context.js";
-import { CliError } from "../io.js";
+import { CliError, type Io } from "../io.js";
+import { spawn } from "node:child_process";
 
 export interface EvalsRunOptions {
   trigger?: EvalRun["trigger"];
@@ -58,4 +59,60 @@ export async function evalsHarvest(ctx: CliContext, changeId: string): Promise<{
   if (report.blocking) throw new CliError("write-plan rejected by validation", 1, report.diagnostics.filter((d) => d.blocking));
   const commit = await commitWritePlan(ctx.root, r.plan, { identity: who });
   return { caseId: r.caseId ?? "", commit };
+}
+
+export interface TriggerResult {
+  skill: string;
+  prompt: string;
+  loaded: boolean;
+  /** The harness line that loaded the skill, or the tail of the transcript when it did not. */
+  evidence: string;
+  exitCode: number | null;
+}
+
+/**
+ * `sdlc evals trigger <skill> --prompt <text>`: the trigger-test runner
+ * (spec 5A.3 "share of trigger-test prompts that loaded the skill"). Runs the
+ * harness headless on the prompt and passes iff its stream shows the `Skill`
+ * tool invoked with that name. This is the check command a trigger-test
+ * case (`skill: <name>`) uses; the suite tallies the pass % per skill.
+ */
+export function evalsTrigger(io: Io, skill: string, prompt: string, opts: { claudeBin?: string; timeoutMs?: number } = {}): Promise<TriggerResult> {
+  const bin = opts.claudeBin ?? io.env["SDLC_CLAUDE_BIN"] ?? "claude";
+  return new Promise((resolve) => {
+    const child = spawn(bin, ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "default", "--max-turns", "3", "--allowedTools", "Skill", "Read", "Grep"], { cwd: io.cwd, env: { ...io.env, SDLC_ACTOR_TYPE: "agent" }, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let loadedLine: string | null = null;
+    const timer = setTimeout(() => child.kill("SIGTERM"), opts.timeoutMs ?? 5 * 60_000);
+    const scan = (chunk: string) => {
+      out += chunk;
+      if (loadedLine) return;
+      for (const line of chunk.split(/\r?\n/)) {
+        if (line.trim() === "") continue;
+        try {
+          const v = JSON.parse(line) as { type?: string; message?: { content?: { type?: string; name?: string; input?: { skill?: string; name?: string } }[] } };
+          const uses = v.message?.content ?? [];
+          if (uses.some((c) => c.type === "tool_use" && c.name === "Skill" && (c.input?.skill === skill || c.input?.name === skill))) loadedLine = line;
+        } catch {
+          // not a JSON line; the transcript tail is the evidence
+        }
+      }
+    };
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", scan);
+    child.stderr.on("data", (c: string) => (out += c));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolve({ skill, prompt, loaded: false, evidence: `harness ${bin} could not start: ${e.message}`, exitCode: null });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ skill, prompt, loaded: loadedLine !== null, evidence: loadedLine ?? out.slice(-4000), exitCode: code });
+    });
+  });
+}
+
+export function renderTrigger(r: TriggerResult): string {
+  return `${r.loaded ? "loaded" : "not loaded"}: skill ${r.skill} for "${r.prompt}"${r.exitCode !== null && r.exitCode !== 0 ? ` (harness exit ${r.exitCode})` : ""}\n${r.evidence}`;
 }

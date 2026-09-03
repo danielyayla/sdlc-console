@@ -62,12 +62,30 @@ async function sdlc(dir: string, args: string[], identity = PO): Promise<{ code:
 const INTENT = "# Intent: Dunning reminders schedule\n\n## Problem\nOverdue invoices get no reminders.\n\n## Proposed outcome\nThree reminders at 7, 14 and 30 days.\n\n## Affected users and systems\nFinance; email service.\n\n## Constraints\nBrand voice; no reminders on disputed invoices.\n\n## Open questions\nEscalate after 30 days?\n";
 
 describe("sdlc-mcp tools", () => {
-  it("lists the eleven tools and no accept/merge/approve/freeze-lift/repro-confirm", async () => {
+  it("lists the twelve tools and no accept/merge/approve/freeze-lift/repro-confirm", async () => {
     const dir = await seeded();
     const c = await client(dir);
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "report_done", "report_finding", "report_repro", "report_round", "request_input", "submit_plan_revision"]);
+    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "propose_claude_md_line", "report_done", "report_finding", "report_repro", "report_round", "request_input", "submit_plan_revision"]);
     expect(names.some((n) => /accept|merge|approve|lift|confirm/.test(n))).toBe(false);
+  });
+
+  it("propose_claude_md_line (2.8): keeps a one-line draft beside the session; a reason already answered by a proposal is refused", async () => {
+    const dir = await seeded();
+    const c = await client(dir, { SDLC_SESSION: "sess-prop" });
+    const answered = await call(c, "propose_claude_md_line", { changeId: "CHG-0018", text: "x", citations: ["CHG-0018"], reason: "Commit touches files outside plan.md's file list" });
+    expect(answered.isError).toBe(true);
+    expect(String(answered.value["error"])).toContain("PRP-0008 (open) already answers");
+    const multi = await call(c, "propose_claude_md_line", { changeId: "CHG-0018", text: "two\nlines", citations: ["CHG-0018"], reason: "test freeze active" });
+    expect(multi.isError).toBe(true);
+    const r = await call(c, "propose_claude_md_line", { changeId: "CHG-0018", text: "  Under a repro freeze, propose test changes with request_input; never edit the test.  ", citations: ["CHG-0018", "CHG-0019"], reason: "Test Freeze Active" });
+    expect(r.isError).toBe(false);
+    expect(r.value).toMatchObject({ text: "Under a repro freeze, propose test changes with request_input; never edit the test.", reason: "test freeze active", citations: ["CHG-0018", "CHG-0019"] });
+    const draft = JSON.parse(readFileSync(join(dir, ".sdlc-state/sessions/sess-prop/proposal.json"), "utf8")) as Record<string, unknown>;
+    expect(draft).toMatchObject({ text: "Under a repro freeze, propose test changes with request_input; never edit the test.", reason: "test freeze active", ts: "2026-09-03T12:00:00Z" });
+    // nothing committed, nothing under sdlc/proposals yet: the system files it when the session ends
+    expect((await git(dir, ["status", "--porcelain"])).trim()).toBe("");
+    expect((await git(dir, ["log", "-1", "--format=%s"])).trim()).toBe("sdlc(repo): seed");
   });
 
   it("report_repro (2.7): commits the failing test alone on the task branch, records repro.failed and keeps the draft; refuses features, committed repros, paths outside the test globs and commits that carry more than the test", async () => {

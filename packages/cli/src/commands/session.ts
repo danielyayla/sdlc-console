@@ -77,12 +77,13 @@ export async function sessionCommand(io: Io, sub: string | undefined, rest: stri
   const ctx = await repoContext(io, json);
   if (sub === "start") {
     const id = rest[0];
-    if (!id) throw new CliError("usage: sdlc session start <CHG> [--kind intent|design|plan|build|review|diagnose] [--task <id>] [--target <text>] [--mode AUTO|PLAN|SUPERVISED|HEADLESS] [--detach]");
+    if (!id) throw new CliError("usage: sdlc session start <CHG> [--kind intent|design|plan|build|review|diagnose|propose] [--task <id>] [--target <text>] [--mode AUTO|PLAN|SUPERVISED|HEADLESS] [--reason <repeat reason>] [--detach]");
     const r = await sessionStart(ctx, id, {
       ...(typeof values["kind"] === "string" ? { kind: values["kind"] as LaunchInput["kind"] } : {}),
       ...(typeof values["task"] === "string" ? { taskId: values["task"] } : {}),
       ...(typeof values["target"] === "string" ? { target: values["target"] } : {}),
       ...(typeof values["mode"] === "string" ? { mode: values["mode"] as LaunchInput["mode"] } : {}),
+      ...(typeof values["reason"] === "string" ? { reason: values["reason"] } : {}),
       ...(values["detach"] === true ? { detach: true } : {}),
     });
     return { value: r, text: `${r.session.id} ${r.session.status} (${r.session.mode}) · ${r.session.branch}${r.exitCode !== null ? ` · exit ${r.exitCode}` : ""}${r.session.error ? `\n${r.session.error}` : ""}` };

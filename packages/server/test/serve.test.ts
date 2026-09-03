@@ -121,7 +121,7 @@ describe("sdlc serve", () => {
     expect(created.status).toBe(200);
     expect(created.body["changeId"]).toBe("CHG-0025");
 
-    expect((await post(`${server.url}/api/proposals/PRP-0007/accept`)).status).toBe(409);
+    expect((await post(`${server.url}/api/proposals/PRP-0007/accept`)).status).toBe(403); // po identity: eng or platform accepts (2.8)
     expect((await post(`${server.url}/api/proposals/PRP-0007/dismiss`, { reason: "covered by lint" })).status).toBe(403); // po identity
     const loop = await post(`${server.url}/api/changes/CHG-0012/loop`);
     expect(loop.status).toBe(200);

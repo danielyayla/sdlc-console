@@ -10,13 +10,33 @@ import { Engine, JobStore, SessionRegistry, StateStore, launchSession, type Exec
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.sh", import.meta.url));
 const cleanups: (() => Promise<void> | void)[] = [];
+/** A harness process may still be writing when the test ends: retry the removal instead of failing the cleanup. */
+async function rmRetry(dir: string): Promise<void> {
+  for (let i = 0; ; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      if (i >= 5) throw e;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+}
+
+async function waitFor(pred: () => boolean, ms = 15_000): Promise<void> {
+  const until = Date.now() + ms;
+  while (!pred()) {
+    if (Date.now() > until) throw new Error("timed out waiting for the engine");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c();
 });
 
 async function seeded(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "sdlc-engine-"));
-  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  cleanups.push(() => rmRetry(dir));
   await initRepo(dir, "main", { id: PO, name: "Priya Owens" });
   await git(dir, ["config", "commit.gpgsign", "false"]);
   writeSeed(dir);
@@ -170,7 +190,7 @@ describe("per-change run → PR → stage 5 → merge → stage 6 → loop (acce
     await commitWritePlan(dir, r.plan, { identity: { id: PO, name: "P" } });
     await store.refresh(true);
     await engine.tick();
-    await new Promise((r2) => setTimeout(r2, 800));
+    await waitFor(() => jobs.list().some((j) => j.kind === "design-pass" && j.state !== "running"));
     await engine.tick();
     const design = jobs.list().filter((j) => j.kind === "design-pass");
     expect(design).toHaveLength(1);

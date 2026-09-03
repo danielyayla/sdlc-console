@@ -6,7 +6,8 @@ import { hookCommand } from "./commands/hook.js";
 import { init } from "./commands/init.js";
 import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
-import { evalsGate, evalsHarvest, evalsRun, renderGate, renderRun } from "./commands/evals.js";
+import { evalsGate, evalsHarvest, evalsRun, evalsTrigger, renderGate, renderRun, renderTrigger } from "./commands/evals.js";
+import { proposalCommand } from "./commands/proposal.js";
 import { freezeCommand, reproCommand } from "./commands/repro.js";
 import { sessionCommand } from "./commands/session.js";
 import { syncCommand } from "./commands/sync.js";
@@ -35,7 +36,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc security import <file|->
   sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
   sdlc mcp                                              (agent tools over stdio)
-  sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose)
+  sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose propose)
   sdlc session list | stop <id> | downgrade <id> [--reason r]   (downgrade: AUTO → SUPERVISED, never upward)
   sdlc repro confirm <CHG> [--file t --reason r --sha s]   (fix: the reported test fails for the right reason → freeze)
   sdlc repro reject <CHG> --reason r                    (wrong failure — send back to the session)
@@ -47,6 +48,9 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc evals run [--trigger manual|schedule|config-pr] [--ref r]   (run every active case; commits evals/runs/RUN-NNNN.json; raises retire/broken-check triage)
   sdlc evals gate [--run RUN-id]                        (config-change gate: exit 1 below threshold, regressed cases with before/after)
   sdlc evals harvest <CHG>                              (post-merge "Add as eval": draft case for the platform owner)
+  sdlc evals trigger <skill> --prompt <text>            (trigger test: exit 0 iff the harness loaded the skill; the check a skill:<name> case uses)
+  sdlc proposal accept <PRP>                            (CLAUDE.md line → branch sdlc/proposals/<PRP> and, in GitHub mode, a PR for the code owners)
+  sdlc proposal dismiss <PRP> --reason <text>
   POST /api/webhooks/github                             (GitHub mode: signed deliveries under GITHUB_WEBHOOK_SECRET; polling stays on as the fallback)
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
@@ -84,6 +88,7 @@ const OPTIONS = {
   tune: { type: "string" },
   role: { type: "string" },
   "no-wait": { type: "boolean", default: false },
+  prompt: { type: "string" },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -215,6 +220,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
         emit(io, json, r.value, () => r.text);
         return 0;
       }
+      case "proposal": {
+        const r = await proposalCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
+        return 0;
+      }
       case "freeze": {
         const r = await freezeCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
@@ -269,7 +279,14 @@ export async function main(argv: string[], io: Io): Promise<number> {
           emit(io, json, r, () => `${r.caseId} drafted from ${id} (${r.commit.slice(0, 7)}) — the platform owner activates it under evals/cases`);
           return 0;
         }
-        throw new CliError("usage: sdlc evals run|gate|harvest");
+        if (sub === "trigger") {
+          const skill = positionals[2];
+          if (!skill || !values.prompt) throw new CliError("usage: sdlc evals trigger <skill> --prompt <text>");
+          const r = await evalsTrigger(io, skill, values.prompt);
+          emit(io, json, r, () => renderTrigger(r));
+          return r.loaded ? 0 : 1;
+        }
+        throw new CliError("usage: sdlc evals run|gate|harvest|trigger");
       }
       case "audit": {
         const ctx = await repoContext(io, json);

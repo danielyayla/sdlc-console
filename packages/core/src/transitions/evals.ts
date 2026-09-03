@@ -1,12 +1,31 @@
 import { stringifyFrontMatter, stringifyJson, type EvalCase, type Triage } from "@sdlc/schemas";
 import type { ChangeView } from "../derive.js";
-import { evalSignals, nextCaseId, type EvalSignal } from "../evals.js";
+import { evalSignals, nextCaseId, skillSignals, type EvalSignal } from "../evals.js";
 import { nextId } from "../ids.js";
 import type { Repo } from "../repo.js";
 import { refuse, type TransitionResult, type WritePlan } from "../writeplan.js";
 import { EventBuilder, SYSTEM_ACTOR, trailersFor, type TransitionContext } from "./context.js";
 
 function triageBody(s: EvalSignal): string {
+  if (s.kind === "skill") {
+    return `# Intent: ${s.title}
+
+## Problem
+${s.evidence}
+
+## Proposed outcome
+The skill's description (its trigger) is rewritten so the prompts in its trigger tests load it, or the trigger tests are corrected; the change is a PR on .claude/skills/${s.skill ?? ""}/SKILL.md reviewed by its owner.
+
+## Affected users and systems
+Every session that should apply the ${s.skill ?? ""} skill; the eval suite's trigger tests.
+
+## Constraints
+Skills are advisory; a must-hold rule needs a hook behind it, not a better description.
+
+## Open questions
+Did the model or harness change rather than the skill?
+`;
+  }
   const outcome = s.kind === "retire" ? `Decide whether ${s.caseId} is retired (history kept) or hardened with a check that can fail; the suite's pass rate should measure something again.` : `Repair or replace ${s.caseId}'s checks so a pass means the behaviour holds; until then its failures are noise in the pass rate.`;
   return `# Intent: ${s.title}
 
@@ -39,7 +58,7 @@ function alreadyRaised(repo: Repo, s: EvalSignal): boolean {
  * Deduped by `src`, so a streak raises one item however many runs extend it.
  */
 export function raiseEvalSignals(repo: Repo, ctx: Pick<TransitionContext, "now">): TransitionResult & { signals?: EvalSignal[] } {
-  const pending = evalSignals(repo).filter((s) => !alreadyRaised(repo, s));
+  const pending = [...evalSignals(repo), ...skillSignals(repo)].filter((s) => !alreadyRaised(repo, s));
   if (pending.length === 0) return refuse("evals.no-signals", "no new eval signals");
   const ids = repo.triage.map((t) => t.data.id);
   const files: WritePlan["files"] = [];
@@ -47,7 +66,7 @@ export function raiseEvalSignals(repo: Repo, ctx: Pick<TransitionContext, "now">
   for (const s of pending) {
     const id = nextId("TRI", [...ids, ...raised]);
     raised.push(id);
-    const data: Triage = { schema: 1, id, tier: s.kind === "retire" ? "eval-retire" : "flaky", src: s.src, title: s.title, evidence: s.evidence, createdAt: ctx.now, status: "open" };
+    const data: Triage = { schema: 1, id, tier: s.kind === "retire" ? "eval-retire" : s.kind === "skill" ? "skill-trigger" : "flaky", src: s.src, title: s.title, evidence: s.evidence, createdAt: ctx.now, status: "open" };
     files.push({ path: `sdlc/loop/triage/${id}.md`, content: stringifyFrontMatter(data as unknown as Record<string, unknown>, triageBody(s)) });
   }
   return {
@@ -57,7 +76,7 @@ export function raiseEvalSignals(repo: Repo, ctx: Pick<TransitionContext, "now">
       changeId: null,
       files,
       events: [],
-      commitMessage: `sdlc(evals): ${raised.length} triage item${raised.length === 1 ? "" : "s"} from the suite (${pending.map((s) => `${s.kind} ${s.caseId}`).join(", ")})`,
+      commitMessage: `sdlc(evals): ${raised.length} triage item${raised.length === 1 ? "" : "s"} from the suite (${pending.map((s) => `${s.kind} ${s.kind === "skill" ? (s.skill ?? "") : s.caseId}`).join(", ")})`,
       trailers: { "SDLC-Actor": `system:${SYSTEM_ACTOR.id}` },
       actor: SYSTEM_ACTOR,
     },

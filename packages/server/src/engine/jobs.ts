@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-export type JobKind = "design-pass" | "plan-session" | "build-session" | "per-change-run" | "open-pr" | "resume-session" | "review" | "review-mirror" | "evals-run";
+export type JobKind = "design-pass" | "plan-session" | "build-session" | "per-change-run" | "open-pr" | "resume-session" | "review" | "review-mirror" | "evals-run" | "claude-md-proposal" | "proposal-mirror";
 export type JobState = "queued" | "running" | "done" | "failed" | "skipped";
 
 export interface Job {

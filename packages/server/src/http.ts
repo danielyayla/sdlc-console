@@ -29,6 +29,7 @@ import {
 import type { Engine, JobStore } from "./engine/index.js";
 import { receiveWebhook, type DeliveryLog } from "./github/webhooks.js";
 import { clearRepro, downgradeSession, launchSession, markReproRejected, reproDraftFor, resumeAfterRepro, stopSession, verifyReproCommit, type LaunchDeps, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
+import { acceptProposalAction } from "./proposals.js";
 import { ActionError, type StateStore } from "./store.js";
 
 type Body = Record<string, unknown>;
@@ -387,7 +388,7 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
       const body = await readBody(req);
       const id = parts[2];
       if (!id) {
-        const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}) };
+        const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}), ...(typeof body["reason"] === "string" && body["reason"].trim() !== "" ? { reason: body["reason"] } : {}) };
         const r = await launchSession(input, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) });
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: r.session.mode === "SUPERVISED" ? `${r.session.id} prepared — run the command from the card` : `${r.session.id} started (${r.session.mode}) on ${r.session.branch}`, revision: store.current?.revision ?? 0 });
@@ -429,7 +430,7 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
     if (parts[1] === "proposals" && parts[2] && method === "POST") {
       const body = await readBody(req);
       if (parts[3] === "dismiss") return reply(res, await proposalDismiss(store, parts[2], str(body, "reason")));
-      if (parts[3] === "accept") throw new ActionError(409, "accepting a proposal opens a PR on the code host (GitHub mode, Phase 2)");
+      if (parts[3] === "accept") return reply(res, await acceptProposalAction(store, parts[2], options.env ?? process.env));
     }
     if (parts[1] === "triage" && parts[2] && method === "POST") {
       const body = await readBody(req);

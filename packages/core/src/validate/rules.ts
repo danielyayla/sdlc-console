@@ -4,6 +4,7 @@ import type { ChangeView } from "../derive.js";
 import { eventsNamed, eventsOfCycle, lastEvent } from "../events.js";
 import type { ChangeFiles, Repo } from "../repo.js";
 import { isDowngrade } from "../modes.js";
+import { normalizeReason } from "../proposals.js";
 import { gateOwner, STAGES } from "../stages.js";
 
 /** A diagnostic with the engine's blocking verdict (blueprint §11.1). */
@@ -168,8 +169,18 @@ export function repoRules(repo: Repo): RuleDiagnostic[] {
   for (const p of repo.proposals) {
     if (p.status === "dismissed" && !p.dismissal) out.push(block(undefined, `sdlc/proposals/${p.id}.yaml`, "dismissal.reason-missing", `${p.id} is dismissed without a reason`));
   }
+  const seenReason = new Map<string, string>();
+  for (const p of repo.proposals) {
+    if (p.reason === undefined) continue;
+    const key = normalizeReason(p.reason);
+    const other = seenReason.get(key);
+    if (other) out.push(warn(undefined, `sdlc/proposals/${p.id}.yaml`, "proposal.reason-duplicate", `${p.id} answers the same reason as ${other} ("${key}"); a third occurrence counts onto one proposal, it does not file another`));
+    else seenReason.set(key, p.id);
+  }
+  const hookNames = new Set((repo.settings?.hooks ?? []).map((h) => h.name));
   for (const s of repo.skills) {
     if (s.mustHold && !s.backedBy) out.push(warn(undefined, `.claude/skills/${s.name}/SKILL.md`, "skill.must-hold.advisory", `skill ${s.name} must hold but no hook backs it`));
+    if (s.backedBy && repo.settings && !hookNames.has(s.backedBy)) out.push(warn(undefined, `.claude/skills/${s.name}/SKILL.md`, "skill.backed-by.unknown", `skill ${s.name} says it is backed by hook ${s.backedBy}, which is not in .claude/settings.json — advisory until the hook is installed`));
   }
   if (repo.config.present) {
     const highRisk = [...repo.changes.values()].some((c) => c.change?.risk === "high");

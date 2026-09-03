@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { addWorktree, branchExists, commitWritePlan, currentBranch, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
-import { deriveChange, loadRepo, logPath, stageDef, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
-import { buildContext, type ContextBundle } from "@sdlc/mcp";
+import { deriveChange, loadRepo, logPath, normalizeReason, repeatSignals, stageDef, type ChangeView, type Repo, type RepeatSignal, type WritePlan } from "@sdlc/core";
+import { PROPOSAL_JOB, buildContext, type ContextBundle } from "@sdlc/mcp";
 import type { Event } from "@sdlc/schemas";
 import { ActionError } from "../store.js";
 import { capacityOf } from "./capacity.js";
@@ -23,6 +23,8 @@ export interface LaunchInput {
   engineer?: string | null | undefined;
   /** Relaunch an existing session with guidance (`claude --resume`). */
   resume?: { sessionId: string; guidance: string } | undefined;
+  /** `propose` sessions: the repeat reason to answer (default: the first pending signal citing the change). */
+  reason?: string | undefined;
 }
 
 export interface LaunchDeps {
@@ -56,6 +58,8 @@ function branchFor(kind: SessionKind, view: ChangeView, taskId: string | null): 
   if (kind === "build") return `${view.id}/${taskId ?? "work"}`;
   // the review reads the PR branch as pushed; it never commits there (the PR head stays the tested head)
   if (kind === "review") return view.pr?.branch ?? `${view.id}/work`;
+  // the proposal job reads; its branch is a throwaway cut from the default branch and nothing is committed on it
+  if (kind === "propose") return `sdlc/propose/${view.id}`;
   const artifact = { intent: "intent", design: "spec", plan: "plan", diagnose: "incident" }[kind];
   return `sdlc/${view.id}/${artifact}`;
 }
@@ -70,7 +74,7 @@ export function worktreePathFor(root: string, branch: string): string {
  * bundle's read-only allowedTools list is what keeps them from editing files.
  */
 function permissionMode(mode: Mode, kind: SessionKind): string {
-  if (kind === "plan" || kind === "review" || mode === "PLAN") return "default";
+  if (kind === "plan" || kind === "review" || kind === "propose" || mode === "PLAN") return "default";
   return "acceptEdits";
 }
 
@@ -120,6 +124,14 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     throw new ActionError(409, `${kind} session does not match stage ${view.stage}`);
   }
   if (kind === "review" && (view.stage !== 5 || !view.pr || view.pr.mergedAt !== undefined)) throw new ActionError(409, `review sessions belong to stage 5 with an open pull request; ${view.id} is at stage ${view.stage}`);
+  let signal: RepeatSignal | null = null;
+  if (kind === "propose") {
+    // FR-43: the job answers one repeat reason; a reason already answered by a proposal is never drafted twice
+    const signals = repeatSignals(repo);
+    signal = input.reason ? (signals.find((x) => x.reason === normalizeReason(input.reason ?? "")) ?? null) : (signals.find((x) => x.proposal === null && x.citations.includes(view.id)) ?? null);
+    if (!signal) throw new ActionError(409, input.reason ? `"${normalizeReason(input.reason)}" is not a repeat reason (two hook blocks or send-backs across sessions)` : `no repeat reason cites ${view.id} without a proposal`);
+    if (signal.proposal) throw new ActionError(409, `${signal.proposal.id} (${signal.proposal.status}) already answers "${signal.reason}"; a new occurrence counts onto it`);
+  }
   const taskId = input.taskId ?? (kind === "build" ? (view.tasks.find((t) => t.state !== "done")?.id ?? null) : null);
   const task = taskId ? view.tasks.find((t) => t.id === taskId) : undefined;
   const target = input.target ?? task?.target ?? (kind === "build" ? view.acceptanceLine : null);
@@ -137,7 +149,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   if (kind === "review" && !(await branchExists(deps.root, branch))) throw new ActionError(409, `the PR branch ${branch} is not in this clone; the review reads the pushed head, it never recreates it`);
   const worktree = worktreePathFor(deps.root, branch);
   // a review session's own ledger lines are lifecycle records: they commit on the default branch, not on the PR branch
-  const ledgerDir = kind === "review" ? deps.root : worktree;
+  const ledgerDir = kind === "review" || kind === "propose" ? deps.root : worktree;
   if (!existsSync(worktree)) {
     mkdirSync(join(deps.root, ".sdlc-state", "worktrees"), { recursive: true });
     const base = repo.config.defaultBranch;
@@ -153,8 +165,8 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   mkdirSync(stateDir, { recursive: true });
   const mcpConfig = join(stateDir, "mcp.json");
   writeFileSync(mcpConfig, `${JSON.stringify({ mcpServers: { sdlc: { command: "node", args: [deps.sdlcBin, "mcp"], env: { SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent" } } } }, null, 2)}\n`);
-  const bundle: ContextBundle = buildContext(repo, view);
-  const prompt = resuming ? resuming.guidance : promptFor(kind, { view, bundle, sessionId: id, target, reviewPolicy: repo.reviewPolicy?.text ?? null });
+  const bundle: ContextBundle = buildContext(repo, view, kind === "propose" ? PROPOSAL_JOB : undefined);
+  const prompt = resuming ? resuming.guidance : promptFor(kind, { view, bundle, sessionId: id, target, reviewPolicy: repo.reviewPolicy?.text ?? null, signal, claudeMd: repo.claudeMd ? { wordCount: repo.claudeMd.wordCount, text: readFileSync(join(deps.root, "CLAUDE.md"), "utf8") } : null });
   writeFileSync(join(stateDir, "prompt.md"), prompt);
   writeFileSync(join(stateDir, "context.json"), `${JSON.stringify(bundle, null, 2)}\n`);
 
@@ -242,7 +254,16 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
       if (!alreadyStopped) {
         const reason = status === "done" ? "done" : status === "taken_over" || status === "awaiting_engineer" ? "taken_over" : status === "stopped" ? "stopped" : "error";
         const stopped: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(after, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.stopped", data: { session: id, reason } } as Event;
-        await systemEventCommit(ledgerDir, view.id, stopped, `sdlc(${view.id}): session ${id} ${reason}`, SYSTEM).catch(() => undefined);
+        // the ledger line is the record of the exit; another commit on the same branch (an index lock) is retried, never lost silently
+        for (let attempt = 0; attempt < 5; attempt++) {
+          try {
+            await systemEventCommit(ledgerDir, view.id, stopped, `sdlc(${view.id}): session ${id} ${reason}`, SYSTEM);
+            break;
+          } catch (e) {
+            if (attempt === 4) deps.registry.patch(id, { error: `session.stopped not recorded: ${(e as Error).message}` });
+            else await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+          }
+        }
       }
       const final = deps.registry.get(id);
       if (final) deps.onExit?.(final);

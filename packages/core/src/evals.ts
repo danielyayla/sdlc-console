@@ -194,8 +194,11 @@ export function suiteStatus(repo: Pick<Repo, "evalCases" | "evalRuns" | "fingerp
 }
 
 export interface EvalSignal {
-  kind: "retire" | "broken";
+  kind: "retire" | "broken" | "skill";
+  /** The case (for `skill`: the first trigger test that did not load the skill). */
   caseId: string;
+  /** `skill` signals: the skill whose trigger tests fell below the threshold. */
+  skill?: string;
   /** Runs that make the streak, oldest first. */
   runs: string[];
   /** Dedupe key, also the triage item's `src`. */
@@ -226,6 +229,38 @@ export function evalSignals(repo: Pick<Repo, "evalCases" | "evalRuns" | "config"
     if (first && lastM.length >= m && lastM.every((h) => !h.result.pass) && lastM.every((h) => fingerprintMatches(h.run.configRef, first.run.configRef))) {
       out.push({ kind: "broken", caseId: c.id, runs: lastM.map((h) => h.run.id), src: `eval-broken:${c.id}`, title: `${c.id}: broken check (failing ${m} runs, no config change)`, evidence: `${c.id} failed in ${m} consecutive suite runs (${first.run.id} … ${lastM.at(-1)?.run.id}) under the same CLAUDE.md, hooks and skills; nothing the suite guards changed, so the check itself is suspect. Last output:\n${lastM.at(-1)?.result.output ?? ""}` });
     }
+  }
+  return out;
+}
+
+/**
+ * Skill-not-triggering (spec 5A.3): in the latest complete run, a skill's
+ * active trigger tests loaded it below `thresholds.skillPassThreshold`.
+ * One signal per skill; the run is the streak so a repeat under the same
+ * run raises nothing twice.
+ */
+export function skillSignals(repo: Pick<Repo, "skills" | "evalCases" | "evalRuns" | "config">): EvalSignal[] {
+  const threshold = repo.config.thresholds.skillPassThreshold;
+  const runs = orderedRuns(repo, true);
+  const out: EvalSignal[] = [];
+  for (const s of repo.skills) {
+    const ids = new Set(repo.evalCases.filter((c) => c.skill === s.name && c.status === "active").map((c) => c.id));
+    if (ids.size === 0) continue;
+    const run = [...runs].reverse().find((r) => r.results.some((x) => ids.has(x.caseId)));
+    if (!run) continue;
+    const results = run.results.filter((r) => ids.has(r.caseId));
+    const passed = results.filter((r) => r.pass).length;
+    if (passed / results.length >= threshold) continue;
+    const failing = results.filter((r) => !r.pass);
+    out.push({
+      kind: "skill",
+      caseId: failing[0]?.caseId ?? results[0]?.caseId ?? "",
+      skill: s.name,
+      runs: [run.id],
+      src: `skill-trigger:${s.name}`,
+      title: `skill ${s.name} not triggering (${passed}/${results.length} trigger prompts loaded it in ${run.id})`,
+      evidence: `In ${run.id} the trigger tests for .claude/skills/${s.name} loaded it ${passed} of ${results.length} times, below the ${Math.round(threshold * 100)}% threshold. Not loaded: ${failing.map((r) => r.caseId).join(", ")}. Output of ${failing[0]?.caseId ?? ""}:\n${failing[0]?.output ?? ""}`,
+    });
   }
   return out;
 }
