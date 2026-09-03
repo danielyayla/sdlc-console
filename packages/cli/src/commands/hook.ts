@@ -7,7 +7,7 @@ export async function hookCommand(io: Io, name: string): Promise<number> {
     io.stderr(`unknown hook ${name}; expected one of ${HOOK_NAMES.join(", ")}\n`);
     return 1;
   }
-  const input = parseHookInput(await io.stdin(), io.cwd);
+  const input = parseHookInput(await io.stdin(), io.cwd, io.env);
   const r = await runHook(name as HookName, input, { env: io.env });
   if (r.error) io.stderr(`${r.reason}\n`);
   if (!r.allowed) io.stderr(`${r.reason}\n`);

@@ -9,6 +9,7 @@ describe("@sdlc/hooks", () => {
     const i = parseHookInput('{"session_id":"s1","cwd":"/w","hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/w/test/a.test.ts"},"extra":1}', "/x");
     expect(i).toMatchObject({ session_id: "s1", cwd: "/w", tool_name: "Edit" });
     expect(parseHookInput("not json", "/x")).toMatchObject({ session_id: "unknown-session", cwd: "/x", hook_event_name: "" });
+    expect(parseHookInput('{"session_id":"harness-uuid"}', "/x", { SDLC_SESSION: "sess-abc" }).session_id).toBe("sess-abc");
   });
   it("finds the change id in the branch or the environment", () => {
     expect(changeIdFrom("CHG-0018/export-fix", {})).toBe("CHG-0018");

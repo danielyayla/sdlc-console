@@ -9,7 +9,12 @@ export interface HookInput {
   transcript_path?: string;
 }
 
-export function parseHookInput(text: string, fallbackCwd: string): HookInput {
+/**
+ * Parse the harness JSON. When the launcher set `SDLC_SESSION`, that is the
+ * console's session id and wins over the harness's own session_id, so hook
+ * events and rounds land on the same session record as the MCP tools' writes.
+ */
+export function parseHookInput(text: string, fallbackCwd: string, env: Record<string, string | undefined> = {}): HookInput {
   const raw: unknown = (() => {
     try {
       return text.trim() === "" ? {} : (JSON.parse(text) as unknown);
@@ -19,8 +24,9 @@ export function parseHookInput(text: string, fallbackCwd: string): HookInput {
   })();
   const o = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
   const str = (k: string, d = "") => (typeof o[k] === "string" ? (o[k] as string) : d);
+  const fromEnv = env["SDLC_SESSION"];
   const input: HookInput = {
-    session_id: str("session_id", "unknown-session"),
+    session_id: fromEnv && fromEnv.trim() !== "" ? fromEnv : str("session_id", "unknown-session"),
     cwd: str("cwd", fallbackCwd) || fallbackCwd,
     hook_event_name: str("hook_event_name"),
     stop_hook_active: o["stop_hook_active"] === true,
