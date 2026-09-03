@@ -17,5 +17,8 @@
     "@sdlc/adapter-git": "workspace:*",
     "@sdlc/core": "workspace:*",
     "@sdlc/schemas": "workspace:*"
+  },
+  "bin": {
+    "sdlc": "./dist/bin.js"
   }
 }

@@ -1,0 +1,162 @@
+import { parseArgs } from "node:util";
+import { auditCommand, renderAudit } from "./commands/audit.js";
+import { changeList, changeNew, changeShow, summarize } from "./commands/change.js";
+import { acceptCommand, parseGate, sendBackCommand } from "./commands/gate.js";
+import { init } from "./commands/init.js";
+import { loopCommand } from "./commands/loop.js";
+import { formatDiagnostic, validateCommand } from "./commands/validate.js";
+import { repoContext } from "./context.js";
+import { CliError, table, type Io } from "./io.js";
+
+export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
+
+  sdlc init [--product <name>] [--intent-home <path>]
+  sdlc validate [--ref <ref>] [--working]
+  sdlc change new --title <t> [--kind feature|fix] [--risk routine|high] [--origin idea|ticket:REF|…] [--intent <file|->]
+  sdlc change list [--stage n]
+  sdlc change show <CHG>
+  sdlc accept <CHG> --gate n
+  sdlc send-back <CHG> --gate n --feedback <text>
+  sdlc loop <CHG> [--incident <file>]
+  sdlc audit <CHG>
+
+Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
+Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
+
+const OPTIONS = {
+  json: { type: "boolean", default: false },
+  help: { type: "boolean", short: "h", default: false },
+  product: { type: "string" },
+  "intent-home": { type: "string" },
+  ref: { type: "string" },
+  working: { type: "boolean", default: false },
+  title: { type: "string" },
+  kind: { type: "string" },
+  risk: { type: "string" },
+  origin: { type: "string" },
+  intent: { type: "string" },
+  stage: { type: "string" },
+  gate: { type: "string" },
+  feedback: { type: "string" },
+  incident: { type: "string" },
+} as const;
+
+function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
+  io.stdout(json ? `${JSON.stringify(value, null, 2)}\n` : `${human()}\n`);
+}
+
+/** Entry point shared by the bin and the tests. Returns the exit code. */
+export async function main(argv: string[], io: Io): Promise<number> {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true });
+  } catch (e) {
+    io.stderr(`${(e as Error).message}\n${USAGE}\n`);
+    return 1;
+  }
+  const { values, positionals } = parsed;
+  const json = values.json === true;
+  const [cmd, sub, ...rest] = positionals;
+  if (values.help || !cmd) {
+    io.stdout(`${USAGE}\n`);
+    return values.help ? 0 : 1;
+  }
+  try {
+    switch (cmd) {
+      case "init": {
+        const r = await init(io, { ...(values.product ? { product: values.product } : {}), ...(values["intent-home"] ? { intentHome: values["intent-home"] } : {}) });
+        emit(io, json, r, () => [...r.created.map((c) => `created  ${c}`), ...r.skipped.map((s) => `kept     ${s}`)].join("\n"));
+        return 0;
+      }
+      case "validate": {
+        const ctx = await repoContext(io, json);
+        const r = await validateCommand(ctx, { ...(values.ref ? { ref: values.ref } : {}), working: values.working === true });
+        emit(io, json, r, () => (r.diagnostics.length === 0 ? `${r.ref}: clean` : [...r.diagnostics.map(formatDiagnostic), r.blocking ? `${r.ref}: BLOCKING` : `${r.ref}: ok with warnings`].join("\n")));
+        return r.blocking ? 1 : 0;
+      }
+      case "change": {
+        const ctx = await repoContext(io, json);
+        if (sub === "new") {
+          if (!values.title) throw new CliError("--title is required");
+          const r = await changeNew(ctx, {
+            title: values.title,
+            kind: (values.kind ?? "feature") as "feature" | "fix",
+            risk: (values.risk ?? "routine") as "routine" | "high",
+            origin: values.origin ?? "idea",
+            ...(values.intent ? { intent: values.intent } : {}),
+          });
+          emit(io, json, r, () => `${r.id} created at stage 1 (${r.view.status}) · ${r.commit.slice(0, 7)}`);
+          return 0;
+        }
+        if (sub === "list") {
+          const r = await changeList(ctx, { ...(values.stage ? { stage: Number(values.stage) } : {}), ...(values.ref ? { ref: values.ref } : {}) });
+          emit(io, json, r, () => (r.length === 0 ? "no changes" : table(r.map(summarize), ["id", "stage", "gate", "⌁", "risk", "status"])));
+          return 0;
+        }
+        if (sub === "show") {
+          const id = rest[0];
+          if (!id) throw new CliError("usage: sdlc change show <CHG>");
+          const v = await changeShow(ctx, id, values.ref ?? "HEAD");
+          emit(io, json, v, () =>
+            [
+              `${v.id}  ${v.title}`,
+              `stage ${v.stage} · ${v.stageName} · cycle ${v.cycle} · ${v.kind} · ${v.risk}`,
+              `status: ${v.status}`,
+              v.gate ? `gate ${v.gate.s} · ${v.gate.label} · owner ${v.gate.ownerRole} · since ${v.gate.since}` : "no gate open",
+              `docs: ${Object.values(v.docs).map((d) => `${d.name}=${d.state}`).join("  ")}`,
+              `auto: ${v.autoEligible.value ? "eligible" : "not eligible"} — ${v.autoEligible.terms.map((t) => `${t.ok ? "✓" : "✗"} ${t.name}`).join(", ")}`,
+              v.valid ? "" : `validation errors:\n${v.validationErrors.map((d) => `  ${d.rule}: ${d.message}`).join("\n")}`,
+              "activity:",
+              ...v.activity.slice(0, 12).map((a) => `  ${a.actor === "agent" ? "⌁" : a.actor === "human" ? "●" : "·"} ${a.ts} ${a.actorId}: ${a.text}`),
+            ]
+              .filter((l) => l !== "")
+              .join("\n"),
+          );
+          return 0;
+        }
+        throw new CliError(`unknown subcommand: change ${sub ?? ""}\n${USAGE}`);
+      }
+      case "accept": {
+        const ctx = await repoContext(io, json);
+        if (!sub) throw new CliError("usage: sdlc accept <CHG> --gate n");
+        const r = await acceptCommand(ctx, sub, parseGate(values.gate));
+        emit(io, json, r, () => `${r.view.gate ? "" : ""}${r.id}: gate ${r.gate} accepted · now stage ${r.view.stage} (${r.view.status}) · ${r.commit.slice(0, 7)}`);
+        return 0;
+      }
+      case "send-back": {
+        const ctx = await repoContext(io, json);
+        if (!sub) throw new CliError("usage: sdlc send-back <CHG> --gate n --feedback <text>");
+        const r = await sendBackCommand(ctx, sub, parseGate(values.gate), values.feedback ?? "");
+        emit(io, json, r, () => `${r.id}: gate ${r.gate} sent back · stage ${r.view.stage} (${r.view.status}) · ${r.commit.slice(0, 7)}`);
+        return 0;
+      }
+      case "loop": {
+        const ctx = await repoContext(io, json);
+        if (!sub) throw new CliError("usage: sdlc loop <CHG> [--incident <file>]");
+        const r = await loopCommand(ctx, sub, values.incident ? { incident: values.incident } : {});
+        emit(io, json, r, () => `${r.id}: loop closed → cycle ${r.cycle}, stage ${r.view.stage} (${r.view.status}) · ${r.commits.map((c) => c.slice(0, 7)).join(", ")}`);
+        return 0;
+      }
+      case "audit": {
+        const ctx = await repoContext(io, json);
+        if (!sub) throw new CliError("usage: sdlc audit <CHG>");
+        const r = await auditCommand(ctx, sub, values.ref ?? "HEAD");
+        emit(io, json, r, () => renderAudit(r));
+        return r.clean ? 0 : 1;
+      }
+      default:
+        throw new CliError(`unknown command: ${cmd}\n${USAGE}`);
+    }
+  } catch (e) {
+    if (e instanceof CliError) {
+      if (json) io.stdout(`${JSON.stringify({ error: e.message, details: e.details ?? null }, null, 2)}\n`);
+      else {
+        io.stderr(`error: ${e.message}\n`);
+        if (Array.isArray(e.details)) for (const d of e.details as { rule?: string; message?: string; path?: string }[]) io.stderr(`  ${d.rule ?? ""}: ${d.message ?? ""}${d.path ? ` (${d.path})` : ""}\n`);
+      }
+      return e.exitCode;
+    }
+    io.stderr(`error: ${(e as Error).message}\n`);
+    return 1;
+  }
+}
