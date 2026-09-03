@@ -80,7 +80,7 @@ describe("launchSession", () => {
     const plan = await launchSession({ changeId: "CHG-0019" }, deps(dir, registry, { FAKE_CLAUDE_ARGS: argsFile }));
     expect(plan.session.mode).toBe("PLAN");
     await plan.finished;
-    expect(readFileSync(argsFile, "utf8")).toContain("--permission-mode plan");
+    expect(readFileSync(argsFile, "utf8")).toContain("--permission-mode default"); // plan mode would deny the MCP tools
 
     await expect(launchSession({ changeId: "CHG-0022", kind: "build" }, deps(dir, registry))).rejects.toThrow(/stage 4/);
     // CHG-0022 has no accepted spec → AUTO is not eligible; CHG-0018 (routine, 2 files, test target) is

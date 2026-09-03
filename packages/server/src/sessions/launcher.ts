@@ -61,8 +61,13 @@ export function worktreePathFor(root: string, branch: string): string {
   return join(root, ".sdlc-state", "worktrees", branch.replace(/\//g, "__"));
 }
 
+/**
+ * Claude Code's `plan` permission mode denies MCP tools (observed: get_context and
+ * submit_plan_revision were refused), so plan sessions run in `default` mode and the
+ * bundle's read-only allowedTools list is what keeps them from editing files.
+ */
 function permissionMode(mode: Mode, kind: SessionKind): string {
-  if (kind === "plan" || mode === "PLAN") return "plan";
+  if (kind === "plan" || mode === "PLAN") return "default";
   return "acceptEdits";
 }
 

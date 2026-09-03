@@ -161,6 +161,7 @@ describe("per-change run → PR → stage 5 → merge → stage 6 → loop (acce
     const design = jobs.list().filter((j) => j.kind === "design-pass");
     expect(design).toHaveLength(1);
     expect(design[0]?.changeId).toBe("CHG-0022");
+    expect(design[0]?.state).toBe("done"); // the fake harness finished → the job is closed
     expect(registry.list().find((s) => s.id === design[0]?.sessionId)?.kind).toBe("design");
     cleanups.push(() => new Promise((r3) => setTimeout(r3, 300)));
   }, 30_000);

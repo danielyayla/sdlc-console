@@ -125,6 +125,12 @@ export class Engine {
   /** A build session finished: run the per-change run; green → PR; red → resume once, then wait. */
   async onSessionExit(session: StoredSession): Promise<void> {
     if (this.closed) return;
+    // the job that launched this session is finished with it
+    for (const job of this.opts.jobs.list()) {
+      if (job.sessionId === session.id && job.state === "running") {
+        this.opts.jobs.update(job.key, { state: session.status === "done" ? "done" : "failed", ...(session.error ? { error: session.error } : {}) }, this.now());
+      }
+    }
     if (session.kind !== "build" || session.status !== "done") {
       this.opts.store.rebuild();
       return;
