@@ -2,7 +2,7 @@ import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { gitRaw } from "@sdlc/adapter-git";
-import { readFile, type Tree } from "@sdlc/core";
+import { readFile, type ArtifactIndex, type Tree } from "@sdlc/core";
 import { readRounds } from "@sdlc/mcp";
 import { parseFrontMatter, type GateNumber } from "@sdlc/schemas";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -30,6 +30,7 @@ import type { Engine, JobStore } from "./engine/index.js";
 import { receiveWebhook, type DeliveryLog } from "./github/webhooks.js";
 import { clearRepro, downgradeSession, launchSession, markReproRejected, reproDraftFor, resumeAfterRepro, stopSession, verifyReproCommit, type LaunchDeps, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { acceptProposalAction } from "./proposals.js";
+import { linkRecordAction, retryWritebackAction, type WritebackDeps } from "./records.js";
 import { ActionError, type StateStore } from "./store.js";
 
 type Body = Record<string, unknown>;
@@ -88,6 +89,19 @@ function header(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(v) ? v[0] : v;
 }
 
+const ARTIFACT_NAMES = ["intent", "spec", "plan", "evals", "pr", "incident"] as const;
+
+function artifactOf(body: Body): ArtifactIndex {
+  const v = body["artifact"];
+  if (typeof v === "string") {
+    const i = ARTIFACT_NAMES.indexOf(v as (typeof ARTIFACT_NAMES)[number]);
+    if (i >= 0) return i as ArtifactIndex;
+  }
+  const n = typeof v === "number" ? v : Number(v);
+  if (Number.isInteger(n) && n >= 0 && n <= 5) return n as ArtifactIndex;
+  throw new ActionError(400, "artifact must be intent|spec|plan|evals|pr|incident or 0–5");
+}
+
 function gateOf(body: Body): GateNumber {
   const n = Number(body["gate"]);
   if (![1, 2, 3, 5, 6].includes(n)) throw new ActionError(400, "gate must be 1, 2, 3, 5 or 6");
@@ -138,6 +152,8 @@ export interface AppOptions {
   sdlcBin?: string;
   claudeBin?: string;
   engine?: Engine;
+  /** Records write-backs (FR-16): the connector and retry policy the link/retry actions use; defaults to `.mcp.json`. */
+  writeback?: WritebackDeps;
   jobs?: JobStore;
   /** Processed webhook deliveries (replay guard); the receiver is off without it. */
   deliveries?: DeliveryLog;
@@ -314,7 +330,18 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         case "auto-findings/dismiss":
           reply(res, await dismissPrAutoFinding(store, id, { path: str(body, "path"), reason: str(body, "reason") }));
           return;
+        case "records/link": {
+          const url = str(body, "url", false);
+          reply(res, await linkRecordAction(store, id, { system: str(body, "system"), id: str(body, "id"), ...(url ? { url } : {}) }, options.writeback ?? {}));
           return;
+        }
+        case "records/retry": {
+          // FR-16 "write-back failed · retry": runs now; 502 retryable when the connector fails again
+          const r = await retryWritebackAction(store, id, artifactOf(body), options.writeback ?? {});
+          options.engine?.noteWriteback(r.run);
+          reply(res, r);
+          return;
+        }
         default:
           throw new ActionError(404, `unknown action ${action}`);
       }

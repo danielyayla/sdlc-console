@@ -9,6 +9,8 @@ export * from "./store.js";
 export * from "./watcher.js";
 export * from "./actions.js";
 export * from "./proposals.js";
+export * from "./records.js";
+export * from "./records/index.js";
 export * from "./http.js";
 export * from "./serve.js";
 export * from "./sessions/index.js";

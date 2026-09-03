@@ -434,3 +434,35 @@ describe("proposal and trigger-test commands (2.8)", () => {
     expect(none.out).toContain("working"); // the transcript tail is the evidence, verbatim
   });
 });
+
+describe("record commands (2.9, FR-16)", () => {
+  it("record link writes change.yaml.record and the ledger (human, once), status shows modes and sync, retry says when nothing is owed", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    put(dir, "intent-body.md", FULL_INTENT);
+    expect((await sdlc(dir, ["change", "new", "--title", "Export", "--intent", "intent-body.md", "--json"])).code).toBe(0);
+    expect((await sdlc(dir, ["record"])).err).toContain("usage: sdlc record link <CHG>");
+    expect((await sdlc(dir, ["record", "link", "CHG-0001", "--system", "jira"])).code).toBe(2);
+    expect((await sdlc(dir, ["record", "link", "CHG-0001", "--system", "jira", "--id", "EXP-1"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
+    const linked = await sdlc(dir, ["record", "link", "CHG-0001", "--system", "jira", "--id", "EXP-1", "--url", "https://jira.example/browse/EXP-1"]);
+    expect(linked.code).toBe(0);
+    expect(linked.out).toContain("CHG-0001 linked to jira EXP-1");
+    expect(readFileSync(join(dir, "sdlc/changes/CHG-0001/change.yaml"), "utf8")).toContain("id: EXP-1");
+    expect(readFileSync(join(dir, "sdlc/changes/CHG-0001/log.jsonl"), "utf8")).toContain('"event":"record.linked"');
+    const again = await sdlc(dir, ["record", "link", "CHG-0001", "--system", "jira", "--id", "EXP-2"]);
+    expect(again.code).not.toBe(0);
+    expect(again.err).toContain("already linked to jira EXP-1");
+    const status = await sdlc(dir, ["record", "status", "CHG-0001"]);
+    expect(status.code).toBe(0);
+    expect(status.out).toContain("record: jira EXP-1 (https://jira.example/browse/EXP-1)  connector: none");
+    expect(status.out).toContain("intent.md    repo      synced never");
+    const json = await sdlc(dir, ["record", "status", "CHG-0001", "--json"]);
+    expect(json.json<{ record: { id: string }; rows: { artifact: string; mode: string }[] }>().rows.map((r) => r.mode)).toEqual(["repo", "repo", "repo", "repo", "repo", "repo"]);
+    const retry = await sdlc(dir, ["record", "retry", "CHG-0001", "intent"]);
+    expect(retry.code).not.toBe(0);
+    expect(retry.err).toContain("nothing to write back");
+    expect((await sdlc(dir, ["record", "retry", "CHG-0001", "bogus"])).err).toContain("unknown artifact bogus");
+    const show = await sdlc(dir, ["change", "show", "CHG-0001"]);
+    expect(show.out).toContain("linked to jira EXP-1");
+  });
+});

@@ -123,6 +123,14 @@ describe("sdlc serve", () => {
 
     expect((await post(`${server.url}/api/proposals/PRP-0007/accept`)).status).toBe(403); // po identity: eng or platform accepts (2.8)
     expect((await post(`${server.url}/api/proposals/PRP-0007/dismiss`, { reason: "covered by lint" })).status).toBe(403); // po identity
+    // records (2.9): retry with nothing owed, a bad artifact name, a link missing its id; the seed's connector is a placeholder command, so a link is refused as 502 retryable rather than recorded unverified
+    expect((await post(`${server.url}/api/changes/CHG-0022/records/retry`, { artifact: "intent" })).status).toBe(409);
+    expect((await post(`${server.url}/api/changes/CHG-0022/records/retry`, { artifact: "bogus" })).status).toBe(400);
+    expect((await post(`${server.url}/api/changes/CHG-0022/records/link`, { system: "jira" })).status).toBe(400);
+    const linked = await post(`${server.url}/api/changes/CHG-0022/records/link`, { system: "jira", id: "INV-22" });
+    expect(linked.status).toBe(502);
+    expect(linked.body["retryable"]).toBe(true);
+    expect(linked.body["error"]).toContain("jira INV-22 could not be verified: connector records (sdlc-records-connector) did not start");
     const loop = await post(`${server.url}/api/changes/CHG-0012/loop`);
     expect(loop.status).toBe(200);
     expect(loop.body["toast"]).toBe("Loop closed — CHG-0012 re-entered Plan");

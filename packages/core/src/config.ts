@@ -30,6 +30,8 @@ export interface ResolvedConfig {
   evals: { mode: "continuous" | "scheduled"; threshold: number; budget: number | null; schedule: string | null };
   eligibility: { coverage: "strict" | "lenient" };
   extraRoles: string[];
+  /** `records.connector`: the MCP server in `.mcp.json` that owns the external records (FR-16); null when unset. */
+  recordsConnector: string | null;
 }
 
 /** Apply defaults from the schema layer; never writes anything back. */
@@ -69,6 +71,7 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
     },
     eligibility: { coverage: config?.eligibility?.coverage ?? CONFIG_DEFAULTS.eligibility.coverage },
     extraRoles: (config?.roles ?? []).map((x) => x.name),
+    recordsConnector: config?.records?.connector ?? null,
   };
 }
 

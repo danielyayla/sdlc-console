@@ -1,2 +1,2 @@
-{"schema":1,"id":"01J8SEEDSEEDSEEDSEED00002X","ts":"2026-09-02T10:00:00Z","seq":1,"cycle":1,"actor":{"type":"human","id":"po@veri.example","role":"po"},"event":"change.created","data":{"origin":"idea"}}
-{"schema":1,"id":"01J8SEEDSEEDSEEDSEED00002Y","ts":"2026-09-02T10:01:00Z","seq":2,"cycle":1,"actor":{"type":"agent","id":"claude-code","session":"s-0023-intent"},"event":"question","data":{"text":"How many reminders before escalation?"}}
+{"schema":1,"id":"01J8SEEDSEEDSEEDSEED00002Y","ts":"2026-09-02T10:00:00Z","seq":1,"cycle":1,"actor":{"type":"human","id":"po@veri.example","role":"po"},"event":"change.created","data":{"origin":"idea"}}
+{"schema":1,"id":"01J8SEEDSEEDSEEDSEED00002Z","ts":"2026-09-02T10:01:00Z","seq":2,"cycle":1,"actor":{"type":"agent","id":"claude-code","session":"s-0023-intent"},"event":"question","data":{"text":"How many reminders before escalation?"}}

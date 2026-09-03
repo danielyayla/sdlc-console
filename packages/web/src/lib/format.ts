@@ -50,8 +50,17 @@ export function viewerState(doc: ChangeView["docs"][0], view: ChangeView): strin
   else if (doc.state === "stale") parts.push("committed · edited after acceptance");
   else if (doc.state === "pending-review") parts.push("pending review");
   else parts.push(doc.index === 2 ? `draft (rev ${view.planRev})` : "draft");
-  if (doc.state !== "absent") parts.push(doc.authoritative ? "authoritative" : `copy · ${doc.sourceOfTruth}`);
+  if (doc.state !== "absent") parts.push(recordState(doc));
   return parts.join(" · ");
+}
+
+/** Spec 5A.6: "authoritative" / "copy of <record> · synced <time>" — linked mode is authoritative but names the record it is tied to. */
+export function recordState(doc: ChangeView["docs"][0]): string {
+  const r = doc.record;
+  if (r.mode === "repo") return "authoritative";
+  const synced = r.syncedAt ? `synced ${r.syncedAt.replace("T", " ").replace(/:\d\dZ$/, "")}` : "not synced";
+  const who = r.chip ?? "external record (none linked)";
+  return r.mode === "external" ? `copy of ${who} · ${synced}` : `authoritative · linked to ${who} · ${synced}`;
 }
 
 /** Gate label for a change in the column strip: "Accept intent.md" / "Merge PR" / "Accept plan.md · tech lead". */

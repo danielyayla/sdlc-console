@@ -147,6 +147,11 @@ export function changeRules(repo: Repo, files: ChangeFiles, view: ChangeView): R
 /** Repo-level rules: eval cases, dismissals, config parse and lint warnings. */
 export function repoRules(repo: Repo): RuleDiagnostic[] {
   const out: RuleDiagnostic[] = repo.diagnostics.map(rule);
+  // records mode (FR-16): write-backs need a connector; linked mode needs an artifact commit to write back
+  const rec = repo.config.records;
+  const outside = STAGES.filter((s) => rec[s.artifact] !== "repo").map((s) => s.artifact);
+  if (outside.length > 0 && !repo.rawConfig?.records?.connector) out.push(warn(undefined, "sdlc/config.yaml", "records.connector-missing", `records ${outside.join(", ")} ${outside.length === 1 ? "is" : "are"} external or linked but records.connector names no MCP server in .mcp.json — write-backs will fail until it does`));
+  for (const a of ["evals", "pr"] as const) if (rec[a] === "linked") out.push(warn(undefined, "sdlc/config.yaml", "records.linked-unsupported", `records.${a} is linked but ${a} has no artifact commit to write back; it behaves as external`));
   for (const c of repo.evalCases) {
     if (c.status === "active" && c.checks.length === 0) {
       out.push(block(undefined, `evals/cases/${c.id}.json`, "eval-case.active-without-checks", `${c.id} is active but has no checks`));

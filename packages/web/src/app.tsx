@@ -89,6 +89,8 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onSelectArt={(i) => dispatch({ type: "art", index: i })}
         onAccept={(gate) => void run(`/changes/${selected.id}/accept`, { gate })}
         onSendBack={(gate, feedback) => void run(`/changes/${selected.id}/send-back`, { gate, feedback })}
+        onLinkRecord={(system, id, url) => void run(`/changes/${selected.id}/records/link`, { system, id, ...(url ? { url } : {}) })}
+        onRetryWriteback={(artifact) => void run(`/changes/${selected.id}/records/retry`, { artifact })}
         onHarvest={() => void run(`/changes/${selected.id}/harvest`, {})}
         reproDraft={reproDraftOf(snapshot, selected.id)}
         onReproConfirm={() => void run(`/changes/${selected.id}/repro/confirm`, {})}

@@ -203,3 +203,20 @@ describe("Config (spec §4)", () => {
     expect(html).not.toContain("Add as eval");
   });
 });
+
+describe("Records mode (2.9, FR-16, spec 5A.6)", () => {
+  it("the viewer header says copy of <record> · synced for an external artifact, the record chip links out, the Record panel lists the mode and sync, and Config shows the connector", () => {
+    const html = render({ ...initialState("eng"), view: "detail", sel: "CHG-0012", art: 5 });
+    expect(html).toContain("copy of servicenow INC0041207 · synced 2026-09-02 07:31");
+    expect(html).toContain('href="https://servicenow.example/incident/INC0041207"');
+    expect(html).toContain("Record · servicenow INC0041207");
+    expect(html).toContain("incident.md · external");
+    expect(html).not.toContain("write-back failed");
+    const config = render({ ...initialState("eng"), view: "config" });
+    expect(config).toContain("incident: external");
+    expect(config).toContain("connector: records");
+    // a repo-mode artifact keeps the plain header
+    const intent = render({ ...initialState("po"), view: "detail", sel: "CHG-0022" });
+    expect(intent).toContain("pending review · authoritative");
+  });
+});

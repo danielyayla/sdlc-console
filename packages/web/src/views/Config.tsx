@@ -123,7 +123,7 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
 
       <section className="panel">
         <div className="eyebrow">Records · source of truth per artifact</div>
-        <div className="card-status">{(["intent", "spec", "plan", "evals", "pr", "incident"] as const).map((k) => <span className="chip" key={k}>{k}: {records[k]}</span>)}</div>
+        <div className="card-status">{(["intent", "spec", "plan", "evals", "pr", "incident"] as const).map((k) => <span className={`chip${records[k] === "repo" ? "" : " amber"}`} key={k}>{k}: {records[k]}</span>)}<span className="chip gray">connector: {snapshot.config.recordsConnector ?? "none"}</span></div>
       </section>
 
       <section className="panel">

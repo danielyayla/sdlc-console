@@ -9,7 +9,10 @@ created:
 origin:
   type: ticket
   ref: JIRA-4411
-record: null
+record:
+  system: jira
+  id: JIRA-4411
+  url: https://jira.example/browse/JIRA-4411
 cycle: 1
 repro: null
 closed: null

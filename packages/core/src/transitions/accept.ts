@@ -2,6 +2,7 @@ import { parseFrontMatter, stringifyFrontMatter, stringifyYaml, type GateNumber 
 import type { ChangeView } from "../derive.js";
 import type { Repo } from "../repo.js";
 import { ARTIFACT_INDEX_FOR_GATE, gateDefs, stageDef } from "../stages.js";
+import { commitWritebackFailure, commitWrittenBack, effectiveMode, shortSha } from "../records.js";
 import { readFile } from "../tree.js";
 import { refuse, type FileWrite, type TransitionResult, type WritePlan } from "../writeplan.js";
 import { checkGate, EventBuilder, trailersFor, type TransitionContext } from "./context.js";
@@ -22,8 +23,12 @@ export function accept(repo: Repo, view: ChangeView, gate: GateNumber, ctx: Tran
   const doc = view.docs[idx];
   const stage = stageDef(gate);
   const artifactName = stage.artifact;
-  if (repo.config.records[artifactName] === "linked" && !view.record) {
-    return refuse("gate.linked.record-missing", `${artifactName} is linked to an external record; accept is blocked until the record id and commit SHA are present`, doc.path);
+  if (effectiveMode(repo, artifactName) === "linked") {
+    if (!view.record) return refuse("gate.linked.record-missing", `${artifactName} is linked to an external record; accept is blocked until the record id and commit SHA are present`, doc.path);
+    if (doc.sha && !commitWrittenBack(files, idx, doc.sha)) {
+      const failed = commitWritebackFailure(files, idx, doc.sha);
+      return refuse("gate.linked.sha-not-written", `${doc.name} is linked to ${view.record.system} ${view.record.id} but commit ${shortSha(doc.sha)} has not been written to it yet (${failed !== null ? `write-back failed: ${failed} — retry it` : "write-back pending"})`, doc.path);
+    }
   }
   const artifactFiles = { 1: files.intent, 2: files.spec, 3: files.plan, 5: null, 6: files.incident }[gate];
   if (artifactFiles && !artifactFiles.complete) {

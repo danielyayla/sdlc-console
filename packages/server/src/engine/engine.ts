@@ -1,4 +1,4 @@
-import { deriveChange, pendingRepeatSignals, proposeTasks, confirmTasks, reasonKey, validateWritePlan, type ChangeView, type Repo, type RepeatSignal } from "@sdlc/core";
+import { deriveChange, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, reasonKey, validateWritePlan, writebacksInState, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
 import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, type GitIdentity } from "@sdlc/adapter-git";
 import { readReproDraft } from "@sdlc/mcp";
 import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
@@ -12,6 +12,7 @@ import { nextRunId } from "@sdlc/core";
 import type { EvalRun } from "@sdlc/schemas";
 import { gitHubCodeHostFrom, type WebhookEvent } from "@sdlc/adapter-github";
 import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
+import { runWriteback, type WritebackDeps, type WritebackRun } from "../records.js";
 
 export interface EngineOptions {
   store: StateStore;
@@ -31,6 +32,10 @@ export interface EngineOptions {
   syncIntervalMs?: number;
   /** GitHub mode: while webhook deliveries keep arriving, the poll backs off to this gap (default 10 min) — polling is the fallback, not the transport. */
   webhookQuietMs?: number;
+  /** Records write-backs (FR-16): connector, attempts and backoff per run. Defaults to the `.mcp.json` connector, 3 attempts, 2 s doubling. */
+  writeback?: WritebackDeps;
+  /** A failed write-back is retried on ticks after this gap (default 10 min); the retry action runs it at once. */
+  writebackRetryMs?: number;
 }
 
 /** What the engine did with a verified webhook delivery — one line, recorded with the delivery. */
@@ -56,6 +61,8 @@ export class Engine {
   private closed = false;
   /** Changes whose build session is held by the capacity ceiling; logged once per hold. */
   private readonly ceilingLogged = new Set<string>();
+  /** Last attempt per write-back job key (epoch ms) — the retry gap is wall-clock, not the injected `now`. */
+  private readonly writebackTried = new Map<string, number>();
   private readonly unsubscribe: () => void;
 
   constructor(private readonly opts: EngineOptions) {
@@ -91,6 +98,7 @@ export class Engine {
         if (!view.valid || view.closed) continue;
         await this.forChange(repo, view).catch((e: unknown) => this.log(`${view.id}: ${(e as Error).message}`));
       }
+      await this.forWritebacks(repo).catch((e: unknown) => this.log(`write-backs: ${(e as Error).message}`));
       if (this.opts.autoLaunch) await this.forProposals(repo).catch((e: unknown) => this.log(`proposals: ${(e as Error).message}`));
       // a poll is redundant while a pass is in flight: that pass reads the same state (a webhook's pass still queues behind it, see sync())
       if (repo.config.codeHost === "github" && !this.inflight && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
@@ -356,6 +364,59 @@ export class Engine {
     }
   }
 
+  /**
+   * FR-16: every write-back the ledgers call for runs as a job keyed on the
+   * fact (`writeback:<CHG>:<artifact>:<kind>:<sha7>`). A failed one is retried
+   * on later ticks every `writebackRetryMs` until it lands — the ledger keeps
+   * the first failure, a success records `record.writeback.ok`.
+   */
+  private async forWritebacks(repo: Repo): Promise<void> {
+    const retryMs = this.opts.writebackRetryMs ?? 600_000;
+    for (const w of [...pendingWritebacks(repo), ...writebacksInState(repo, "failed")]) {
+      if (this.closed) return;
+      const key = writebackJobKey(w);
+      const job = this.opts.jobs.get(key);
+      if (job?.state === "running" || job?.state === "done") continue;
+      const tried = this.writebackTried.get(key);
+      if (job?.state === "failed" && tried !== undefined && Date.now() - tried < retryMs) continue;
+      await this.writeBack(repo, w);
+    }
+  }
+
+  /** Run one write-back now (the tick, or the retry action) and keep its job current. */
+  async writeBack(repo: Repo, w: RequiredWriteback): Promise<Job | null> {
+    const key = writebackJobKey(w);
+    const cycle = repo.changes.get(w.changeId)?.change?.cycle ?? 0;
+    const job = this.opts.jobs.get(key) ? this.opts.jobs.update(key, { state: "running", error: null }, this.now()) : this.opts.jobs.claim({ key, kind: "record-writeback", changeId: w.changeId, cycle, stage: 0 }, this.now());
+    if (!job) return null;
+    this.writebackTried.set(key, Date.now());
+    try {
+      const run = await runWriteback(this.opts.store, w, { ...(this.opts.writeback ?? {}), ...(this.opts.now ? { now: this.opts.now } : {}) });
+      this.noteWriteback(run);
+    } catch (e) {
+      this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+      this.log(`${w.changeId}: write-back not recorded: ${(e as Error).message}`);
+      this.opts.store.rebuild();
+    }
+    return this.opts.jobs.get(key);
+  }
+
+  /** Record a write-back run's outcome on its job (also for runs the retry action made). */
+  noteWriteback(run: WritebackRun): void {
+    const w = run.writeback;
+    const key = writebackJobKey(w);
+    const what = `${w.file} ${w.kind} ${w.sha.slice(0, 7)} → ${w.record.system} ${w.record.id}`;
+    if (!this.opts.jobs.get(key)) this.opts.jobs.claim({ key, kind: "record-writeback", changeId: w.changeId, cycle: 0, stage: 0 }, this.now());
+    this.writebackTried.set(key, Date.now());
+    if (run.ok) {
+      this.opts.jobs.update(key, { state: "done", error: null, note: `${what} · attempt ${run.attempts}` }, this.now());
+      this.log(`${w.changeId}: wrote back ${what}`);
+    } else {
+      this.opts.jobs.update(key, { state: "failed", error: run.error, note: `${what} · ${run.attempts} attempt${run.attempts === 1 ? "" : "s"} · retry` }, this.now());
+      this.log(`${w.changeId}: write-back failed ${what}: ${run.error ?? "unknown error"}`);
+    }
+  }
+
   private async launch(view: ChangeView, key: string, kind: Job["kind"], sessionKind: Exclude<SessionKind, "intent" | "diagnose">, signal: RepeatSignal | null = null): Promise<void> {
     const job = this.opts.jobs.claim({ key, kind, changeId: view.id, cycle: view.cycle, stage: view.stage }, this.now());
     if (!job) return;
@@ -557,4 +618,8 @@ export class Engine {
     const task = view.tasks[0];
     return this.runForSession(this.fakeSession(view, task?.branch ?? `${changeId}/work`, task?.id ?? null), "manual");
   }
+}
+
+export function writebackJobKey(w: RequiredWriteback): string {
+  return `writeback:${w.changeId}:${w.artifact}:${w.kind}:${w.sha.slice(0, 7)}`;
 }

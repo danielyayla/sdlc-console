@@ -8,6 +8,7 @@ import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
 import { evalsGate, evalsHarvest, evalsRun, evalsTrigger, renderGate, renderRun, renderTrigger } from "./commands/evals.js";
 import { proposalCommand } from "./commands/proposal.js";
+import { recordCommand } from "./commands/record.js";
 import { freezeCommand, reproCommand } from "./commands/repro.js";
 import { sessionCommand } from "./commands/session.js";
 import { syncCommand } from "./commands/sync.js";
@@ -51,6 +52,9 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc evals trigger <skill> --prompt <text>            (trigger test: exit 0 iff the harness loaded the skill; the check a skill:<name> case uses)
   sdlc proposal accept <PRP>                            (CLAUDE.md line → branch sdlc/proposals/<PRP> and, in GitHub mode, a PR for the code owners)
   sdlc proposal dismiss <PRP> --reason <text>
+  sdlc record link <CHG> --system <s> --id <id> [--url <u>]   (change.yaml.record; verified through records.connector when set)
+  sdlc record retry <CHG> <artifact>                     (run the outstanding write-back now — "write-back failed · retry")
+  sdlc record status <CHG>                               (mode, synced time and write-back per artifact)
   POST /api/webhooks/github                             (GitHub mode: signed deliveries under GITHUB_WEBHOOK_SECRET; polling stays on as the fallback)
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
@@ -89,6 +93,9 @@ const OPTIONS = {
   role: { type: "string" },
   "no-wait": { type: "boolean", default: false },
   prompt: { type: "string" },
+  system: { type: "string" },
+  id: { type: "string" },
+  url: { type: "string" },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -217,6 +224,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
       }
       case "repro": {
         const r = await reproCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
+        return 0;
+      }
+      case "record": {
+        const r = await recordCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
         return 0;
       }

@@ -141,7 +141,7 @@ ${s.questions}
   );
 }
 
-function changeYaml(id: string, title: string, o: { kind?: "feature" | "fix"; risk?: "routine" | "high"; created: string; origin?: { type: string; ref?: string }; repro?: unknown; cycle?: number }): string {
+function changeYaml(id: string, title: string, o: { kind?: "feature" | "fix"; risk?: "routine" | "high"; created: string; origin?: { type: string; ref?: string }; record?: { system: string; id: string; url?: string }; repro?: unknown; cycle?: number }): string {
   return stringifyYaml({
     schema: 1,
     id,
@@ -150,7 +150,7 @@ function changeYaml(id: string, title: string, o: { kind?: "feature" | "fix"; ri
     risk: o.risk ?? "routine",
     created: { by: PO, at: o.created },
     origin: o.origin ?? { type: "idea" },
-    record: null,
+    record: o.record ?? null,
     cycle: o.cycle ?? 1,
     repro: o.repro ?? null,
     closed: null,
@@ -174,6 +174,14 @@ Working knowledge for agents in this repo. Keep it under one page.
 - Test files: \`test/**/*.test.ts\`
 - Max rounds: 5
 `;
+
+/** `.mcp.json`: the agent tools, and the platform team's records connector (`records.connector`) — a placeholder command the tests replace. */
+export const MCP_JSON = stringifyJson({
+  mcpServers: {
+    sdlc: { command: "sdlc", args: ["mcp"] },
+    records: { command: "sdlc-records-connector", args: ["--system", "servicenow"] },
+  },
+});
 
 export const SETTINGS_JSON = stringifyJson({
   permissions: {
@@ -246,7 +254,7 @@ export const CONFIG_YAML = stringifyYaml({
     { id: SEC, name: "Security lead", roles: ["security"] },
   ],
   thresholds: { autoFilesMax: 12, maxLoopRounds: 5, sessionCeiling: 4, suiteMinSize: 20 },
-  records: { intent: "repo", spec: "repo", plan: "repo", evals: "repo", pr: "repo", incident: "repo" },
+  records: { intent: "repo", spec: "repo", plan: "repo", evals: "repo", pr: "repo", incident: "external", connector: "records" },
   evals: { mode: "continuous", threshold: 0.9 },
   eligibility: { coverage: "lenient" },
   products: [{ name: "invoicing", path: "." }],
@@ -260,6 +268,7 @@ export function seedFiles(): Record<string, string> {
   files["REVIEW.md"] = REVIEW_MD;
   files["bands.yaml"] = BANDS_YAML;
   files[".claude/settings.json"] = SETTINGS_JSON;
+  files[".mcp.json"] = MCP_JSON;
   files[".claude/skills/brand/SKILL.md"] = SKILL_MD;
   files[".claude/agents/reviewer.md"] = AGENT_MD;
   files[".gitattributes"] = "* text=auto eol=lf\nsdlc/**/log.jsonl merge=union\n";
@@ -284,7 +293,7 @@ export function seedFiles(): Record<string, string> {
     const id = "CHG-0012";
     const dir = `sdlc/changes/${id}`;
     const title = "Invoice PDF rendering";
-    put(`${dir}/change.yaml`, changeYaml(id, title, { created: T("08-20", "09:00") }));
+    put(`${dir}/change.yaml`, changeYaml(id, title, { created: T("08-20", "09:00"), record: { system: "servicenow", id: "INC0041207", url: "https://servicenow.example/incident/INC0041207" } }));
     const intentSha = put(`${dir}/intent.md`, intentMd(id, title, T("08-20", "09:00"), { problem: "Invoices render as HTML only; customers ask for PDF.", outcome: "A PDF download per invoice, identical to the HTML layout.", affected: "Customers; invoicing web; storage.", constraints: "No third-party rendering service; PDFs under 1 MB.", questions: "None." }));
     const specSha = put(`${dir}/spec.md`, specMd(id, title, intentSha, T("08-20", "11:00"), { requirements: "Render invoice to PDF server-side; link on invoice page.", design: "Headless browser print pipeline behind a queue.", concerns: "C1 privacy: PDFs contain addresses — resolved with expiring links.", carried: "None." }, [{ id: "C1", policy: "privacy", owner: "legal@veri.example", resolved: true, note: "expiring links" }]));
     const planFiles = ["src/invoice/pdf.ts (new)", "src/invoice/route.ts", "test/invoice/pdf.test.ts (new)"];
@@ -320,6 +329,7 @@ export function seedFiles(): Record<string, string> {
       { at: T("08-23", "09:50"), actor: human(ENG, "eng"), event: "deploy.authorized", data: { env: "production", version: "2026.08.23" } },
       { at: T("08-23", "10:00"), actor: system, event: "deploy.finished", data: { env: "production", version: "2026.08.23" } },
       { at: T("09-02", "07:30"), actor: agent("s-0012-diagnose"), event: "artifact.committed", data: { artifact: 5, path: `${dir}/incident.md`, sha: incidentSha } },
+      { at: T("09-02", "07:31"), actor: system, event: "record.writeback.ok", data: { system: "servicenow", id: "INC0041207", artifact: 5, kind: "committed", sha: incidentSha, url: "https://servicenow.example/incident/INC0041207#work-notes" } },
     ]);
   }
 
@@ -328,7 +338,7 @@ export function seedFiles(): Record<string, string> {
     const id = "CHG-0017";
     const dir = `sdlc/changes/${id}`;
     const title = "Invoice CSV export";
-    put(`${dir}/change.yaml`, changeYaml(id, title, { created: T("08-26", "09:00"), origin: { type: "ticket", ref: "JIRA-4411" } }));
+    put(`${dir}/change.yaml`, changeYaml(id, title, { created: T("08-26", "09:00"), origin: { type: "ticket", ref: "JIRA-4411" }, record: { system: "jira", id: "JIRA-4411", url: "https://jira.example/browse/JIRA-4411" } }));
     const intentSha = put(`${dir}/intent.md`, intentMd(id, title, T("08-26", "09:00"), { problem: "Finance re-keys invoices into spreadsheets every month.", outcome: "One CSV per month with all invoice lines.", affected: "Finance team; invoicing API.", constraints: "No PII beyond invoice ids and totals.", questions: "None." }));
     const specSha = put(`${dir}/spec.md`, specMd(id, title, intentSha, T("08-26", "11:00"), { requirements: "GET /export?month=YYYY-MM returns CSV.", design: "Streaming CSV from the invoice repository.", concerns: "None flagged.", carried: "None." }));
     const planFiles = ["src/export/csv.ts (new)", "src/export/route.ts (new)", "test/export/csv.test.ts (new)"];

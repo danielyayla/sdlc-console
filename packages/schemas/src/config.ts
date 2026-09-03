@@ -47,6 +47,7 @@ export const recordsMapping = z.strictObject({
   evals: recordsMode.optional(),
   pr: recordsMode.optional(),
   incident: recordsMode.optional(),
+  /** Name of the MCP server in `.mcp.json` (`mcpServers.<name>`) that owns the external records: `record_get` and `record_write_back` tools (FR-16). */
   connector: z.string().optional(),
 });
 

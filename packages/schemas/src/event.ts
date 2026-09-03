@@ -17,6 +17,7 @@ import {
   systemActor,
   taskId,
   ulid,
+  writebackKind,
 } from "./common.js";
 
 const base = {
@@ -203,14 +204,22 @@ export const events = {
     z.strictObject({ env: nonEmpty, reason: z.string().optional() }),
     actor,
   ),
+  /** A human linked the change to its external record (FR-16); `change.yaml.record` is written in the same commit. */
+  "record.linked": ev(
+    "record.linked",
+    z.strictObject({ system: nonEmpty, id: nonEmpty, url: z.url().optional() }),
+    humanActor,
+  ),
+  /** The connector accepted the write-back of one artifact fact (`kind`) at `sha`; `syncedAt` derives from `ts`. */
   "record.writeback.ok": ev(
     "record.writeback.ok",
-    z.strictObject({ system: nonEmpty, id: nonEmpty }),
+    z.strictObject({ system: nonEmpty, id: nonEmpty, artifact: artifactIndex.optional(), kind: writebackKind.optional(), sha: gitSha.optional(), url: z.url().optional() }),
     actor,
   ),
+  /** The write-back failed after its retries; the accept it followed stands (FR-16). */
   "record.writeback.failed": ev(
     "record.writeback.failed",
-    z.strictObject({ system: nonEmpty, id: nonEmpty, error: nonEmpty }),
+    z.strictObject({ system: nonEmpty, id: nonEmpty, error: nonEmpty, artifact: artifactIndex.optional(), kind: writebackKind.optional(), sha: gitSha.optional() }),
     actor,
   ),
   "override.mode": ev(
@@ -269,6 +278,7 @@ export const event = z.discriminatedUnion("event", [
   events["deploy.started"],
   events["deploy.finished"],
   events["deploy.failed"],
+  events["record.linked"],
   events["record.writeback.ok"],
   events["record.writeback.failed"],
   events["override.mode"],

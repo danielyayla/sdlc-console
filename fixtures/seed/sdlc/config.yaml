@@ -31,7 +31,8 @@ records:
   plan: repo
   evals: repo
   pr: repo
-  incident: repo
+  incident: external
+  connector: records
 evals:
   mode: continuous
   threshold: 0.9

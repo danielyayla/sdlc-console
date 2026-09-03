@@ -83,10 +83,12 @@ export function describeEvent(e: Event): string {
       return `deploy to ${e.data.env} finished`;
     case "deploy.failed":
       return `deploy to ${e.data.env} failed${e.data.reason ? `: ${e.data.reason}` : ""}`;
+    case "record.linked":
+      return `linked to ${e.data.system} ${e.data.id}`;
     case "record.writeback.ok":
-      return `wrote back to ${e.data.system} ${e.data.id}`;
+      return `wrote back${e.data.kind ? ` ${e.data.kind}${e.data.sha ? ` ${e.data.sha.slice(0, 7)}` : ""}` : ""} to ${e.data.system} ${e.data.id}`;
     case "record.writeback.failed":
-      return `write-back to ${e.data.system} failed · retry`;
+      return `write-back${e.data.kind ? ` of ${e.data.kind}${e.data.sha ? ` ${e.data.sha.slice(0, 7)}` : ""}` : ""} to ${e.data.system} ${e.data.id} failed · retry (${e.data.error})`;
     case "override.mode":
       return `mode ${e.data.from} → ${e.data.to}${e.data.reason ? `: ${e.data.reason}` : ""}`;
     case "consult.tech_lead":

@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "sdlc": {
+      "command": "sdlc",
+      "args": [
+        "mcp"
+      ]
+    },
+    "records": {
+      "command": "sdlc-records-connector",
+      "args": [
+        "--system",
+        "servicenow"
+      ]
+    }
+  }
+}

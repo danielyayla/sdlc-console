@@ -22,6 +22,9 @@ export interface ChangeDetailProps {
   onReproReject?: (reason: string) => void;
   onLiftFreeze?: (path: string, reason: string) => void;
   onDismissAutoFinding?: (path: string, reason: string) => void;
+  /** Records mode (FR-16): link the change to its external record; retry a failed write-back for one artifact. */
+  onLinkRecord?: (system: string, id: string, url?: string) => void;
+  onRetryWriteback?: (artifact: number) => void;
   prompt?: (text: string) => string | null;
 }
 
@@ -62,6 +65,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const techLead = gate?.mode === "via_pr";
   const selectedPr = view.artifactPrs[selected as 0 | 1 | 2 | 3 | 4 | 5] ?? null;
   const reviewPr = gate ? view.artifactPrs[({ 1: 0, 2: 1, 3: 2, 5: 4, 6: 5 } as const)[gate.s]] ?? null : null;
+  const external = STAGE_INDEX.map((i) => view.docs[i as 0 | 1 | 2 | 3 | 4 | 5]).filter((d) => d.record.mode !== "repo");
 
   return (
     <div className="detail">
@@ -100,7 +104,13 @@ export function ChangeDetail(p: ChangeDetailProps) {
             <span className="file">{ARTIFACT_FILES[selected]}</span>
             <span className="chip gray">{viewerState(doc, view)}</span>
             {selectedPr && !selectedPr.merged ? <a className="chip" href={selectedPr.url} target="_blank" rel="noreferrer">PR #{selectedPr.number}</a> : null}
-            {view.record ? <span className="chip">{view.record.system} {view.record.id}</span> : null}
+            {view.record ? (view.record.url ? <a className="chip" href={view.record.url} target="_blank" rel="noreferrer" title="external record">{view.record.system} {view.record.id}</a> : <span className="chip" title="external record">{view.record.system} {view.record.id}</span>) : null}
+            {doc.record.writeback && doc.record.writeback.state !== "ok" ? (
+              <>
+                <span className="chip amber" title={doc.record.writeback.error ?? undefined}>{doc.record.writeback.state === "failed" ? "write-back failed · retry" : "write-back pending"}</span>
+                {doc.record.writeback.state === "failed" && p.onRetryWriteback && (role === "eng" || role === "po") ? <button className="btn" disabled={busy} onClick={() => { setBusy(true); p.onRetryWriteback?.(doc.index); }}>Retry</button> : null}
+              </>
+            ) : null}
           </div>
           {doc.state === "absent" ? (
             <pre className="viewer-body"><span className="viewer-empty">Not committed yet — this artifact is produced when the stage runs.</span></pre>
@@ -124,8 +134,9 @@ export function ChangeDetail(p: ChangeDetailProps) {
                 <div className="waiting">Waiting on tech lead — approval happens via PR review on plan.md.{reviewPr ? <> <a href={reviewPr.url} target="_blank" rel="noreferrer">PR #{reviewPr.number}</a></> : null}</div>
               ) : owned ? (
                 <>
+                  {view.recordBlock ? <div className="waiting" role="note">{view.recordBlock}</div> : null}
                   <div className="actions">
-                    <button className="btn primary" disabled={busy || !view.valid} onClick={() => { setBusy(true); p.onAccept(gate.s); }}>{gate.acceptLabel}</button>
+                    <button className="btn primary" disabled={busy || !view.valid || view.recordBlock !== null} title={view.recordBlock ?? undefined} onClick={() => { setBusy(true); p.onAccept(gate.s); }}>{gate.acceptLabel}</button>
                     <button className="btn" disabled={busy || feedback.trim() === ""} onClick={() => { setBusy(true); p.onSendBack(gate.s, feedback); }}>Send back</button>
                   </div>
                   <textarea className="feedback" placeholder="Feedback (required to send back)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
@@ -147,6 +158,23 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="who">{view.waitingOnYou ? `waiting on you: ${view.waitingOnYou}` : "The next human gate opens when the artifact is committed."}</div>
             </div>
           )}
+          {external.length > 0 ? (
+            <div className="panel records">
+              <div className="eyebrow">Record · {view.record ? `${view.record.system} ${view.record.id}` : "none linked"}</div>
+              <ul className="activity">
+                {external.map((d) => (
+                  <li key={d.index}>
+                    <span className={`glyph ${d.record.writeback?.state === "failed" ? "system" : "human"}`}>{d.record.writeback?.state === "failed" ? "✗" : d.record.writeback?.state === "pending" ? "…" : d.record.syncedAt ? "✓" : "·"}</span>
+                    <span>{d.name} · {d.record.mode}</span>
+                    <span className="when">{d.record.writeback && d.record.writeback.state !== "ok" ? `${d.record.writeback.kind} ${d.record.writeback.sha.slice(0, 7)} · ${d.record.writeback.state === "failed" ? "write-back failed · retry" : "write-back pending"}` : d.record.syncedAt ? `synced ${d.record.syncedAt}` : "not synced"}</span>
+                  </li>
+                ))}
+              </ul>
+              {!view.record && p.onLinkRecord && (role === "eng" || role === "po") ? (
+                <div className="actions"><button className="btn" disabled={busy} title="change.yaml.record; verified through the records connector when one is configured" onClick={() => { const system = prompt("Record system (e.g. jira, servicenow):"); if (!system || system.trim() === "") return; const id = prompt(`Record id in ${system.trim()}:`); if (!id || id.trim() === "") return; const url = prompt("Record URL (optional):"); setBusy(true); p.onLinkRecord?.(system.trim(), id.trim(), url && url.trim() !== "" ? url.trim() : undefined); }}>Link record</button></div>
+              ) : null}
+            </div>
+          ) : null}
           {view.kind === "fix" && (view.stage === 3 || view.stage === 4 || view.repro) ? (
             <div className="panel repro">
               <div className="eyebrow">Repro first · {view.repro?.state === "committed" ? "freeze active" : p.reproDraft ? (p.reproDraft.rejected ? "sent back" : "waiting on you") : "agent writing the failing test"}</div>
