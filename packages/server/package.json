@@ -1,8 +1,8 @@
 {
-  "name": "@sdlc/cli",
+  "name": "@sdlc/server",
   "version": "0.0.0",
   "private": true,
-  "description": "Human-facing sdlc command line.",
+  "description": "sdlc serve: watcher, derived snapshot over WebSocket, HTTP actions, local identity.",
   "type": "module",
   "exports": {
     ".": {
@@ -17,9 +17,9 @@
     "@sdlc/adapter-git": "workspace:*",
     "@sdlc/core": "workspace:*",
     "@sdlc/schemas": "workspace:*",
-    "@sdlc/server": "workspace:*"
+    "ws": "^8.21.3"
   },
-  "bin": {
-    "sdlc": "./dist/bin.js"
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
   }
 }

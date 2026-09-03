@@ -3,6 +3,7 @@ import { auditCommand, renderAudit } from "./commands/audit.js";
 import { changeList, changeNew, changeShow, summarize } from "./commands/change.js";
 import { acceptCommand, parseGate, sendBackCommand } from "./commands/gate.js";
 import { init } from "./commands/init.js";
+import { serveCommand } from "./commands/serve.js";
 import { loopCommand } from "./commands/loop.js";
 import { formatDiagnostic, validateCommand } from "./commands/validate.js";
 import { repoContext } from "./context.js";
@@ -19,6 +20,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc send-back <CHG> --gate n --feedback <text>
   sdlc loop <CHG> [--incident <file>]
   sdlc audit <CHG>
+  sdlc serve [--port n] [--role po|eng]
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
@@ -39,6 +41,9 @@ const OPTIONS = {
   gate: { type: "string" },
   feedback: { type: "string" },
   incident: { type: "string" },
+  port: { type: "string" },
+  role: { type: "string" },
+  "no-wait": { type: "boolean", default: false },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -135,6 +140,19 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (!sub) throw new CliError("usage: sdlc loop <CHG> [--incident <file>]");
         const r = await loopCommand(ctx, sub, values.incident ? { incident: values.incident } : {});
         emit(io, json, r, () => `${r.id}: loop closed → cycle ${r.cycle}, stage ${r.view.stage} (${r.view.status}) · ${r.commits.map((c) => c.slice(0, 7)).join(", ")}`);
+        return 0;
+      }
+      case "serve": {
+        const server = await serveCommand(io, { ...(values.port ? { port: Number(values.port) } : {}), ...(values.role === "eng" ? { role: "eng" as const } : {}) });
+        if (values["no-wait"]) {
+          await server.close();
+          return 0;
+        }
+        await new Promise<void>((resolve) => {
+          process.once("SIGINT", resolve);
+          process.once("SIGTERM", resolve);
+        });
+        await server.close();
         return 0;
       }
       case "audit": {

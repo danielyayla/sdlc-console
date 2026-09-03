@@ -14,7 +14,7 @@ Work one numbered item at a time. Each item is a plan-mode session → `plan.md`
 - [x] 0.9 Fixture repo reproducing the spec seed (8 changes across all stages, 2 triage, 3 findings) + golden tests for acceptance checks (a)–(f) from `docs/source/design-spec.md` §7.
 
 ## Phase 1 — Local MVP (needs Phase 0)
-- [ ] 1.1 `sdlc serve`: watcher, snapshot/patch WebSocket, HTTP actions, local identity + `defaultRole`.
+- [x] 1.1 `sdlc serve`: watcher, snapshot/patch WebSocket, HTTP actions, local identity + `defaultRole`.
 - [ ] 1.2 Web: top bar, Pipeline, Change detail, Gates, tokens from spec §6.
 - [ ] 1.3 Web: Loop (file-backed triage), Security (file-backed + CSV/MD import), Metrics from git + ledger.
 - [ ] 1.4 Hooks package: `plan-sync`, `test-freeze`, `verify-before-done` → `sdlc hook <name>`; installed by init.

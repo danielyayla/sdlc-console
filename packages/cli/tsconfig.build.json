@@ -5,10 +5,21 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../adapters/git/tsconfig.build.json" },
-    { "path": "../core/tsconfig.build.json" },
-    { "path": "../schemas/tsconfig.build.json" }
+    {
+      "path": "../adapters/git/tsconfig.build.json"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../schemas/tsconfig.build.json"
+    },
+    {
+      "path": "../server/tsconfig.build.json"
+    }
   ]
 }

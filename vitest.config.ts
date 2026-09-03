@@ -14,6 +14,7 @@ export default defineConfig({
       "@sdlc/schemas": src("schemas"),
       "@sdlc/core": src("core"),
       "@sdlc/adapter-git": src("adapters/git"),
+      "@sdlc/server": src("server"),
       "@sdlc/cli": src("cli"),
       "@sdlc/fixtures": fixtures,
     },
