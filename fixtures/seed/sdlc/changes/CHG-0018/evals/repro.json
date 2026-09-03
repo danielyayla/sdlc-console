@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "testPath": "test/export/zero-total.test.ts",
+  "failureReason": "expected 4 rows, received 3",
+  "sha": "e4a6f2d5a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5",
+  "output": "AssertionError: expected 4 rows, received 3\n  at test/export/zero-total.test.ts:12:5",
+  "confirmedBy": "eng@veri.example",
+  "confirmedAt": "2026-09-02T09:00:00Z"
+}

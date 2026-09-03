@@ -1,0 +1,10 @@
+schema: 1
+id: SEC-0118
+scannerId: claude-security:7f3a91
+sev: high
+conf: 0.94
+validated: true
+repo: invoicing
+title: SQL injection in invoice filter
+desc: User-supplied `sort` reaches the query builder unescaped in src/invoice/list.ts.
+status: new

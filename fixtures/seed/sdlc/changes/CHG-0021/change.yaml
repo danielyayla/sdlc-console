@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0021
+title: Customer portal invoice search
+kind: feature
+risk: routine
+created:
+  by: po@veri.example
+  at: 2026-09-01T09:00:00Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null

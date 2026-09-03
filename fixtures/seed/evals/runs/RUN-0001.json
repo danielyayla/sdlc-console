@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "id": "RUN-0001",
+  "trigger": "schedule",
+  "configRef": {
+    "claudeMdSha": "56c1747b05154ff91dbd64fdf6dff59e12465a8e",
+    "skills": [
+      {
+        "name": "brand",
+        "version": "a74c76fd9e99d651acca91e10f8c28ccd6ce3b41"
+      }
+    ],
+    "hooksSha": "a913fb3eee604f92e9cfbbce14f0c537819163e2",
+    "model": "claude-opus-5"
+  },
+  "results": [
+    {
+      "caseId": "CASE-0001",
+      "pass": true,
+      "output": "1 passed"
+    },
+    {
+      "caseId": "CASE-0002",
+      "pass": true,
+      "output": "1 passed"
+    }
+  ],
+  "passRate": 1,
+  "threshold": 0.9,
+  "verdict": "pass",
+  "cost": 1.42,
+  "startedAt": "2026-09-02T03:00:00Z",
+  "finishedAt": "2026-09-02T03:09:00Z"
+}

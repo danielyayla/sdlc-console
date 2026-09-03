@@ -1,0 +1,23 @@
+schema: 1
+changeId: CHG-0017
+cycle: 1
+tasks:
+  - id: export
+    title: Work in src/export
+    files:
+      - src/export/csv.ts
+      - src/export/route.ts
+    sequential: false
+    target: GET /export?month=2026-08 returns 3 fixture invoices as CSV; tests pass
+    worktree: CHG-0017/export
+    branch: CHG-0017/export
+    state: done
+  - id: test
+    title: Work in test/export
+    files:
+      - test/export/csv.test.ts
+    sequential: false
+    target: tests pass
+    worktree: CHG-0017/test
+    branch: CHG-0017/test
+    state: done

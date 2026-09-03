@@ -11,7 +11,7 @@ Work one numbered item at a time. Each item is a plan-mode session → `plan.md`
 - [x] 0.6 Validation engine: blocking rules from blueprint §11.1 that need no adapters (schema, completeness, SHA chaining, gate ownership + human actor, risk/kind immutability, duplicate ids, active-case-has-checks, linked-mode fields).
 - [x] 0.7 Git adapter: read tree at ref, apply write-plan as commit with identity + trailers, diff files, worktree add/remove/list, `log.jsonl` union across branches, install `.gitattributes` merge=union.
 - [x] 0.8 CLI: `sdlc init`, `validate`, `change new|list|show`, `accept`, `send-back`, `loop`, `audit`; all with `--json`; refuse mutations when `SDLC_ACTOR_TYPE=agent`.
-- [ ] 0.9 Fixture repo reproducing the spec seed (8 changes across all stages, 2 triage, 3 findings) + golden tests for acceptance checks (a)–(f) from `docs/source/design-spec.md` §7.
+- [x] 0.9 Fixture repo reproducing the spec seed (8 changes across all stages, 2 triage, 3 findings) + golden tests for acceptance checks (a)–(f) from `docs/source/design-spec.md` §7.
 
 ## Phase 1 — Local MVP (needs Phase 0)
 - [ ] 1.1 `sdlc serve`: watcher, snapshot/patch WebSocket, HTTP actions, local identity + `defaultRole`.

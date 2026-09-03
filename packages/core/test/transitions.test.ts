@@ -2,22 +2,26 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { validate } from "@sdlc/schemas";
 import {
   accept,
+  acceptTriage,
   applyWritePlan,
   confirmRepro,
   confirmTasks,
   createChange,
-  deriveChange,
+  dismissFinding,
+  dismissTriage,
+  escalateFinding,
   intentFromIncident,
   loadRepo,
   mergeOverlaps,
   nextChangeId,
+  patchFinding,
   proposeTasks,
   sendBack,
-  type Tree,
+  withFiles as withFilesT,
   type TransitionContext,
   type WritePlan,
 } from "../src/index.js";
-import { AGENT, SHA, SYSTEM, acceptedThrough, baseTree, ev, resetSeq, withChange } from "./helpers.js";
+import { AGENT, SHA, SYSTEM, acceptedThrough, baseTree, ev, resetSeq, viewOf, withChange } from "./helpers.js";
 
 let n = 0;
 const ctxFor = (actorId: string, extra: Partial<TransitionContext> = {}): TransitionContext => ({
@@ -28,13 +32,6 @@ const ctxFor = (actorId: string, extra: Partial<TransitionContext> = {}): Transi
 });
 const PO_CTX = () => ctxFor("po@example.com");
 const ENG_CTX = () => ctxFor("eng@example.com");
-
-function viewOf(tree: Tree, id: string) {
-  const repo = loadRepo(tree);
-  const files = repo.changes.get(id);
-  if (!files) throw new Error(`no ${id}`);
-  return { repo, view: deriveChange(repo, files) };
-}
 
 function expectOk(r: ReturnType<typeof accept>): WritePlan {
   if (!r.ok) throw new Error(JSON.stringify(r.diagnostics));
@@ -301,5 +298,50 @@ describe("confirmRepro (acceptance k)", () => {
     const r = confirmRepro(repo, view, { testPath: "t", failureReason: "r", sha: SHA, output: "" }, ENG_CTX());
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.diagnostics[0]?.rule).toBe("repro.not-fix");
+  });
+});
+
+describe("triage and finding routing", () => {
+  const triageTree = () =>
+    withFilesT(baseTree(), {
+      "sdlc/loop/triage/TRI-0042.md": "---\nschema: 1\nid: TRI-0042\ntier: 3σ\nsrc: metric:p95\ntitle: Slow export\nevidence: e\ncreatedAt: 2026-09-03T10:00:00Z\nstatus: open\n---\n# Intent: Slow export\n\n## Problem\np\n\n## Proposed outcome\no\n\n## Affected users and systems\na\n\n## Constraints\nc\n\n## Open questions\nq\n",
+      "sdlc/security/findings/SEC-0118.yaml": "schema: 1\nid: SEC-0118\nscannerId: s\nsev: high\nconf: 0.9\nrepo: invoicing\ntitle: SQL injection\ndesc: d\nstatus: new\n",
+    });
+  it("acceptTriage creates the change from the item body and removes the item", () => {
+    const tree = triageTree();
+    const repo = loadRepo(tree);
+    expect(acceptTriage(repo, "TRI-0042", ENG_CTX()).ok).toBe(false);
+    const plan = expectOk(acceptTriage(repo, "TRI-0042", PO_CTX()));
+    expect(plan.files.some((f) => f.path === "sdlc/loop/triage/TRI-0042.md" && f.content === null)).toBe(true);
+    const after = loadRepo(applyWritePlan(tree, plan));
+    expect(after.triage).toEqual([]);
+    expect(viewOf(after.tree, "CHG-0001").view).toMatchObject({ stage: 1, origin: { type: "triage", ref: "TRI-0042" }, status: "Intent drafted via TRI-0042" });
+    expect(dismissTriage(after, "TRI-0042", "gone", PO_CTX()).ok).toBe(false);
+  });
+  it("dismissTriage needs a reason and keeps the file as history", () => {
+    const tree = triageTree();
+    const repo = loadRepo(tree);
+    expect(dismissTriage(repo, "TRI-0042", " ", PO_CTX()).ok).toBe(false);
+    const plan = expectOk(dismissTriage(repo, "TRI-0042", "noise after deploy", PO_CTX(), "raise 3σ to 4σ"));
+    expect(plan.changeId).toBeNull();
+    const after = loadRepo(applyWritePlan(tree, plan));
+    expect(after.triage[0]?.data).toMatchObject({ status: "dismissed", dismissal: { by: "po@example.com", reason: "noise after deploy", bandTune: "raise 3σ to 4σ" } });
+  });
+  it("patch / escalate / dismiss a finding", () => {
+    const tree = triageTree();
+    const repo = loadRepo(tree);
+    expect(patchFinding(repo, "SEC-0118", PO_CTX()).ok).toBe(false);
+    const patched = loadRepo(applyWritePlan(tree, expectOk(patchFinding(repo, "SEC-0118", ENG_CTX(), { number: 12 }))));
+    expect(patched.findings[0]).toMatchObject({ status: "patch_pr", patchPr: { number: 12 } });
+    expect(escalateFinding(patched, "SEC-0118", ENG_CTX()).ok).toBe(false);
+
+    const escalated = loadRepo(applyWritePlan(tree, expectOk(escalateFinding(repo, "SEC-0118", ENG_CTX()))));
+    expect(escalated.findings[0]).toMatchObject({ status: "escalated", escalatedTo: "CHG-0001" });
+    expect(viewOf(escalated.tree, "CHG-0001").view).toMatchObject({ kind: "fix", risk: "high", origin: { type: "security", ref: "SEC-0118" } });
+    expect(escalated.evalCases.map((c) => c.id)).toEqual(["CASE-SEC-0118"]);
+
+    expect(dismissFinding(repo, "SEC-0118", "", ENG_CTX()).ok).toBe(false);
+    const dismissed = loadRepo(applyWritePlan(tree, expectOk(dismissFinding(repo, "SEC-0118", "false positive: parameterised", ENG_CTX()))));
+    expect(dismissed.findings[0]).toMatchObject({ status: "dismissed", dismissal: { reason: "false positive: parameterised" } });
   });
 });

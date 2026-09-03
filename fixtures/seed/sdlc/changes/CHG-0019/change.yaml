@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0019
+title: Payment provider migration
+kind: feature
+risk: high
+created:
+  by: po@veri.example
+  at: 2026-08-30T09:00:00Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null

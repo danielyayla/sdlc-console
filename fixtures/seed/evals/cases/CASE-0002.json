@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "CASE-0002",
+  "prompt": "Render the three fixture invoices to PDF and verify size and layout.",
+  "checks": [
+    {
+      "name": "test",
+      "cmd": "pnpm test -- test/invoice/pdf",
+      "healthyOutput": "passed"
+    }
+  ],
+  "source": {
+    "type": "change",
+    "ref": "CHG-0012"
+  },
+  "owner": "platform@veri.example",
+  "added": "2026-08-23T12:00:00Z",
+  "status": "active",
+  "paths": [
+    "src/invoice/pdf.ts",
+    "src/invoice/route.ts",
+    "test/invoice/pdf.test.ts"
+  ]
+}

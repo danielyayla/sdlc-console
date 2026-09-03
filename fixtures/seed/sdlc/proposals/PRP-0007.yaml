@@ -1,0 +1,9 @@
+schema: 1
+id: PRP-0007
+type: claude-md-line
+text: Never filter invoice rows by truthiness of the total; zero is a valid amount.
+citations:
+  - CHG-0018
+  - CHG-0004
+status: open
+createdAt: 2026-09-02T09:40:00Z

@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "n": 1,
+  "changeId": "CHG-0012",
+  "cycle": 1,
+  "worktree": "CHG-0012/pdf",
+  "headSha": "b1f3c9a2d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+  "fileSet": [
+    "src/invoice/pdf.ts",
+    "src/invoice/route.ts",
+    "test/invoice/pdf.test.ts"
+  ],
+  "configRef": {
+    "claudeMdSha": "56c1747b05154ff91dbd64fdf6dff59e12465a8e",
+    "skills": [
+      {
+        "name": "brand",
+        "version": "a74c76fd9e99d651acca91e10f8c28ccd6ce3b41"
+      }
+    ],
+    "hooksSha": "a913fb3eee604f92e9cfbbce14f0c537819163e2",
+    "model": "claude-opus-5"
+  },
+  "results": [
+    {
+      "caseId": "CASE-0002",
+      "pass": true,
+      "output": "1 passed"
+    }
+  ],
+  "commandResults": [
+    {
+      "name": "build",
+      "cmd": "pnpm build",
+      "exitCode": 0,
+      "pass": true,
+      "output": "tsc -b\n"
+    },
+    {
+      "name": "test",
+      "cmd": "pnpm test",
+      "exitCode": 0,
+      "pass": true,
+      "output": "Tests 41 passed (41)\n"
+    },
+    {
+      "name": "lint",
+      "cmd": "pnpm lint",
+      "exitCode": 0,
+      "pass": true,
+      "output": ""
+    }
+  ],
+  "verdict": "green",
+  "startedAt": "2026-08-22T14:00:00Z",
+  "finishedAt": "2026-08-22T14:06:00Z"
+}

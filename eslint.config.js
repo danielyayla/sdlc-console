@@ -10,7 +10,7 @@ const NO_IO_MESSAGE =
 const nodeBuiltins = builtinModules.filter((name) => !name.startsWith("_"));
 
 export default defineConfig([
-  globalIgnores(["**/dist/**", "**/node_modules/**", "**/*.tsbuildinfo"]),
+  globalIgnores(["**/dist/**", "**/node_modules/**", "**/*.tsbuildinfo", "fixtures/seed/**"]),
   js.configs.recommended,
   ...tseslint.configs.strict,
   {

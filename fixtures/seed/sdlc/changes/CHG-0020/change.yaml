@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0020
+title: Export column order matches the finance template
+kind: feature
+risk: routine
+created:
+  by: po@veri.example
+  at: 2026-08-31T09:00:00Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null

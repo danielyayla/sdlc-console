@@ -46,9 +46,11 @@ export async function changeNew(ctx: CliContext, opts: NewChangeOptions): Promis
     transitionContext(who, { knownIds: Object.values(idsByRef).flat() }),
   );
   if (!r.ok) throw new CliError("change new refused", 2, r.diagnostics);
+  const id = r.plan.changeId;
+  if (!id) throw new CliError("createChange produced no change id");
   const commit = await commitPlan(ctx, repo, r.plan, who);
   const after = await loadCommitted(ctx);
-  return { id: r.plan.changeId, commit, view: viewOf(after.repo, r.plan.changeId) };
+  return { id, commit, view: viewOf(after.repo, id) };
 }
 
 export interface ListOptions {

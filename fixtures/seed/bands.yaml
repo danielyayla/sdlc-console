@@ -1,0 +1,19 @@
+baselineWindow: 30d
+metrics:
+  - metric: p95_latency_ms
+    baseline: 310
+    unit: ms
+    rules: [western-electric]
+    tiers:
+      1sigma: { action: log }
+      2sigma: { action: diagnose, tools: [Read, Grep, "Bash(gh run view *)"] }
+      3sigma: { action: propose, routes: [pr, "runbook:rollback"] }
+  - metric: error_rate_pct
+    baseline: 0.4
+    unit: "%"
+    rules: [western-electric]
+    tiers:
+      1sigma: { action: log }
+      2sigma: { action: diagnose, tools: [Read, Grep] }
+      3sigma: { action: propose, routes: [pr] }
+runbooks: [rollback]

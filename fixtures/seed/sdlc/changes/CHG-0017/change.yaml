@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0017
+title: Invoice CSV export
+kind: feature
+risk: routine
+created:
+  by: po@veri.example
+  at: 2026-08-26T09:00:00Z
+origin:
+  type: ticket
+  ref: JIRA-4411
+record: null
+cycle: 1
+repro: null
+closed: null

@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "CASE-0003",
+  "prompt": "Search invoices by number on the portal.",
+  "checks": [],
+  "source": {
+    "type": "manual"
+  },
+  "owner": "platform@veri.example",
+  "added": "2026-09-01T12:00:00Z",
+  "status": "draft",
+  "paths": [
+    "src/portal/search.ts"
+  ]
+}

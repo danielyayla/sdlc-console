@@ -104,7 +104,7 @@ export function validateWritePlan(repo: Repo, plan: WritePlan): ValidationReport
     if (!r.ok) out.push(...r.diagnostics.map((d) => ({ ...d, blocking: true, changeId })));
   }
   const after = loadRepo(applyWritePlan(repo.tree, plan));
-  const touched = new Set<string>([plan.changeId, ...plan.events.map((e) => e.changeId)]);
+  const touched = new Set<string>([...(plan.changeId ? [plan.changeId] : []), ...plan.events.map((e) => e.changeId)]);
   for (const f of plan.files) {
     const m = /^sdlc\/changes\/(CHG-\d{4})\//.exec(f.path);
     if (m?.[1]) touched.add(m[1]);

@@ -1,0 +1,12 @@
+schema: 1
+id: SEC-0120
+scannerId: claude-security:9be442
+sev: low
+conf: 0.66
+validated: true
+repo: invoicing
+title: Verbose error page in staging
+desc: Stack traces returned on 500 in the staging environment.
+status: patch_pr
+patchPr:
+  number: 418

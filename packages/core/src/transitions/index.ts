@@ -5,3 +5,5 @@ export * from "./send-back.js";
 export * from "./loop.js";
 export * from "./tasks.js";
 export * from "./repro.js";
+export * from "./triage.js";
+export * from "./finding.js";

@@ -1,0 +1,7 @@
+schema: 1
+env: production
+version: 2026.08.23
+at: 2026-08-23T10:00:00Z
+status: succeeded
+authorizedBy: eng@veri.example
+authorizedAt: 2026-08-23T09:50:00Z

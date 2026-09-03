@@ -1,0 +1,16 @@
+schema: 1
+provider: local
+branch: CHG-0017/export
+baseBranch: main
+headSha: d3f5e1c4f9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4
+openedAt: 2026-09-01T16:10:00Z
+reviewers:
+  - eng@veri.example
+findings:
+  high: 0
+  medium: 0
+  low: 1
+checks:
+  - name: evidence
+    verdict: pass
+planMatches: true

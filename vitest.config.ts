@@ -6,6 +6,7 @@ import { defineConfig } from "vitest/config";
 // `dist/` exports is proven separately (see sdlc/changes/CHG-0001/plan.md).
 const src = (dir: string): string =>
   fileURLToPath(new URL(`./packages/${dir}/src/index.ts`, import.meta.url));
+const fixtures = fileURLToPath(new URL("./fixtures/src/index.ts", import.meta.url));
 
 export default defineConfig({
   resolve: {
@@ -14,10 +15,11 @@ export default defineConfig({
       "@sdlc/core": src("core"),
       "@sdlc/adapter-git": src("adapters/git"),
       "@sdlc/cli": src("cli"),
+      "@sdlc/fixtures": fixtures,
     },
   },
   test: {
-    include: ["packages/**/test/**/*.test.ts"],
+    include: ["packages/**/test/**/*.test.ts", "fixtures/test/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/dist/**"],
   },
 });

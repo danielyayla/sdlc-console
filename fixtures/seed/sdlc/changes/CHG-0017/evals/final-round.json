@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "n": 2,
+  "ts": "2026-09-01T15:50:00Z",
+  "results": [
+    {
+      "name": "build",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "tsc -b"
+    },
+    {
+      "name": "test",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "44 passed"
+    },
+    {
+      "name": "lint",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": ""
+    }
+  ]
+}

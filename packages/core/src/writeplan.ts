@@ -18,7 +18,8 @@ export interface EventWrite {
  * tree with `applyWritePlan`.
  */
 export interface WritePlan {
-  changeId: string;
+  /** The change this plan is about; null for plans that touch no change (e.g. a triage dismissal). */
+  changeId: string | null;
   files: FileWrite[];
   /** Appended, in order, to `sdlc/changes/<changeId>/log.jsonl`. */
   events: EventWrite[];

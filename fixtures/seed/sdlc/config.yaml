@@ -1,0 +1,42 @@
+schema: 1
+defaultRole: po
+defaultBranch: main
+codeHost: local
+identities:
+  - id: po@veri.example
+    name: Priya Owens
+    roles:
+      - po
+  - id: eng@veri.example
+    name: Eli Ng
+    roles:
+      - eng
+      - tech_lead
+  - id: platform@veri.example
+    name: Platform team
+    roles:
+      - platform
+  - id: security@veri.example
+    name: Security lead
+    roles:
+      - security
+thresholds:
+  autoFilesMax: 12
+  maxLoopRounds: 5
+  sessionCeiling: 4
+  suiteMinSize: 20
+records:
+  intent: repo
+  spec: repo
+  plan: repo
+  evals: repo
+  pr: repo
+  incident: repo
+evals:
+  mode: continuous
+  threshold: 0.9
+eligibility:
+  coverage: lenient
+products:
+  - name: invoicing
+    path: .

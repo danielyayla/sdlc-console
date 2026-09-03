@@ -1,0 +1,10 @@
+schema: 1
+id: SEC-0119
+scannerId: claude-security:2c8d10
+sev: medium
+conf: 0.81
+validated: true
+repo: invoicing
+title: PDF links do not expire for admin role
+desc: Admin-generated PDF links are signed without an expiry claim.
+status: new

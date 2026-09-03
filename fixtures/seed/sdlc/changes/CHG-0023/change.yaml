@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0023
+title: Dunning reminders schedule
+kind: feature
+risk: routine
+created:
+  by: po@veri.example
+  at: 2026-09-02T10:00:00Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null

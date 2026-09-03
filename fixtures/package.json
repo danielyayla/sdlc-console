@@ -1,0 +1,28 @@
+{
+  "name": "@sdlc/fixtures",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fixture repositories reproducing the spec seed; the test oracle for Phase 1.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "seed"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate.mjs"
+  },
+  "dependencies": {
+    "@sdlc/adapter-git": "workspace:*",
+    "@sdlc/core": "workspace:*",
+    "@sdlc/schemas": "workspace:*"
+  },
+  "devDependencies": {
+    "@sdlc/cli": "workspace:*"
+  }
+}

@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0012
+title: Invoice PDF rendering
+kind: feature
+risk: routine
+created:
+  by: po@veri.example
+  at: 2026-08-20T09:00:00Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null

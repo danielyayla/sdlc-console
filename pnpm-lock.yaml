@@ -30,6 +30,22 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
 
+  fixtures:
+    dependencies:
+      '@sdlc/adapter-git':
+        specifier: workspace:*
+        version: link:../packages/adapters/git
+      '@sdlc/core':
+        specifier: workspace:*
+        version: link:../packages/core
+      '@sdlc/schemas':
+        specifier: workspace:*
+        version: link:../packages/schemas
+    devDependencies:
+      '@sdlc/cli':
+        specifier: workspace:*
+        version: link:../packages/cli
+
   packages/adapters/git:
     dependencies:
       '@sdlc/core':

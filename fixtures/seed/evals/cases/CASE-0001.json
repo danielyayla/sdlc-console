@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "id": "CASE-0001",
+  "prompt": "Export a month of invoices as CSV and verify every invoice appears once with the template column order.",
+  "checks": [
+    {
+      "name": "test",
+      "cmd": "pnpm test -- test/export",
+      "healthyOutput": "passed"
+    }
+  ],
+  "source": {
+    "type": "change",
+    "ref": "CHG-0017"
+  },
+  "owner": "platform@veri.example",
+  "added": "2026-08-27T12:00:00Z",
+  "status": "active",
+  "paths": [
+    "src/export/csv.ts",
+    "src/export/route.ts",
+    "test/export/csv.test.ts"
+  ]
+}

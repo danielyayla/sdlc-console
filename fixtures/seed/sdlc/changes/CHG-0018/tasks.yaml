@@ -1,0 +1,14 @@
+schema: 1
+changeId: CHG-0018
+cycle: 1
+tasks:
+  - id: export-fix
+    title: Fix zero-total filter
+    files:
+      - src/export/csv.ts
+      - test/export/zero-total.test.ts
+    sequential: false
+    target: test/export/zero-total.test.ts passes; no other test changes
+    worktree: CHG-0018/export-fix
+    branch: CHG-0018/export-fix
+    state: running

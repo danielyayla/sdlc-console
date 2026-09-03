@@ -1,0 +1,19 @@
+schema: 1
+id: CHG-0018
+title: Export drops invoices with zero total
+kind: fix
+risk: routine
+created:
+  by: po@veri.example
+  at: 2026-08-29T09:00:00Z
+origin:
+  type: channel
+  ref: slack:#finance
+record: null
+cycle: 1
+repro:
+  state: committed
+  testPath: test/export/zero-total.test.ts
+  failureReason: expected 4 rows, received 3
+  sha: e4a6f2d5a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5
+closed: null
