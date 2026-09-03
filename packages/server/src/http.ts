@@ -1,7 +1,9 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
+import { gitRaw } from "@sdlc/adapter-git";
 import { readFile, type Tree } from "@sdlc/core";
+import { readRounds } from "@sdlc/mcp";
 import { parseFrontMatter, type GateNumber } from "@sdlc/schemas";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
@@ -23,7 +25,7 @@ import {
 } from "./actions.js";
 import type { Engine, JobStore } from "./engine/index.js";
 import { receiveWebhook, type DeliveryLog } from "./github/webhooks.js";
-import { launchSession, stopSession, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
+import { downgradeSession, launchSession, stopSession, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { ActionError, type StateStore } from "./store.js";
 
 type Body = Record<string, unknown>;
@@ -223,6 +225,20 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         json(res, 200, artifact(repo.tree, id, Number(parts[4])));
         return;
       }
+      if (method === "GET" && parts[3] === "design" && parts[4] !== undefined && parts.length === 5) {
+        // the change's design mock, bytes straight from git (read-only; the console never edits design/)
+        await store.refresh();
+        const repo = store.currentRepo;
+        if (!repo) throw new ActionError(502, "repository not loaded", [], true);
+        const path = `sdlc/changes/${id}/design/${parts[4]}`;
+        const file = repo.changes.get(id)?.design.find((d) => d.path === path);
+        if (!file) throw new ActionError(404, `${path} not found`);
+        const blob = await gitRaw(store.root, ["cat-file", "blob", file.sha], { binary: true });
+        if (blob.code !== 0) throw new ActionError(404, `${path} not readable`);
+        res.writeHead(200, { "content-type": MIME[extname(parts[4]).toLowerCase()] ?? "application/octet-stream", "content-length": blob.buffer.length, "cache-control": "private, max-age=3600" });
+        res.end(blob.buffer);
+        return;
+      }
       if (method !== "POST") throw new ActionError(404, "not found");
       const body = await readBody(req);
       const action = parts.slice(3).join("/");
@@ -305,6 +321,20 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
       json(res, 200, { ok: true, sync: summary, toast, revision: store.current?.revision ?? 0 });
       return;
     }
+    if (parts[1] === "sessions" && method === "GET" && parts[2] && parts[3] === "rounds" && parts[4] && parts[5] === "screenshot" && parts.length === 6) {
+      // a round's screenshot as the session saved it (screenshotRef, relative to the worktree); nothing outside the worktree is served
+      const registry = options.registry;
+      const s = registry?.get(parts[2]);
+      if (!s) throw new ActionError(404, `${parts[2]} not found`);
+      const round = (readRounds(s.worktreePath, s.id) as { n: number; screenshotRef?: string }[]).find((r) => r.n === Number(parts[4]));
+      if (!round?.screenshotRef) throw new ActionError(404, `round ${parts[4]} of ${s.id} has no screenshot`);
+      const base = resolve(s.worktreePath);
+      const abs = resolve(base, round.screenshotRef);
+      if (!abs.startsWith(base + sep) || !existsSync(abs) || !statSync(abs).isFile()) throw new ActionError(404, `screenshot ${round.screenshotRef} is not in the worktree`);
+      res.writeHead(200, { "content-type": MIME[extname(abs).toLowerCase()] ?? "application/octet-stream", "content-length": statSync(abs).size, "cache-control": "private, max-age=60" });
+      createReadStream(abs).pipe(res);
+      return;
+    }
     if (parts[1] === "sessions" && method === "POST") {
       const registry = options.registry;
       if (!registry || !options.sdlcBin) throw new ActionError(409, "sessions are unavailable: the server was started without a session registry");
@@ -322,6 +352,12 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         const s = stopSession(registry, id, action === "stop" ? "stopped" : "taken_over");
         store.rebuild();
         json(res, 200, { ok: true, session: s, toast: action === "stop" ? `${id} stopped` : `${id} taken over — worktree ${s.worktreePath}`, revision: store.current?.revision ?? 0 });
+        return;
+      }
+      if (action === "downgrade") {
+        const r = await downgradeSession({ store, registry, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}) }, id, str(body, "reason", false) || undefined);
+        store.rebuild();
+        json(res, 200, { ok: true, commit: r.commit, changeId: r.session.changeId, session: r.session, toast: `${id} downgraded to SUPERVISED — run the command from the card`, revision: store.current?.revision ?? 0 });
         return;
       }
       if (action === "raise-cap") {

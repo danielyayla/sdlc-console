@@ -1,6 +1,6 @@
-import type { Change, Diagnostic, Event, EvalCase, GateNumber, PerChangeRun, Pr, RecordsMode } from "@sdlc/schemas";
+import type { Change, Diagnostic, Event, EvalCase, GateNumber, PerChangeRun, Pr, RecordsMode, VerificationContract } from "@sdlc/schemas";
 import { activityFeed, type ActivityEntry } from "./activity.js";
-import { deriveEligibility, type Eligibility } from "./eligibility.js";
+import { deriveEligibility, uiPaths, type Eligibility } from "./eligibility.js";
 import { eventsNamed, eventsOfCycle, firstEvent, indexOf, lastEvent, latestOf } from "./events.js";
 import { fingerprintMatches } from "./fingerprint.js";
 import type { ChangeFiles, Repo } from "./repo.js";
@@ -15,6 +15,24 @@ import {
   type GateRole,
   type StageNumber,
 } from "./stages.js";
+
+export interface VisualView {
+  uiPaths: string[];
+  tool: VerificationContract["visualTool"] | null;
+  /** First image under `design/`, served read-only beside round screenshots. */
+  mock: { path: string; sha: string } | null;
+  warning: string | null;
+}
+
+const MOCK_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
+
+export function deriveVisual(files: ChangeFiles, planFiles: readonly string[], verification: VerificationContract | null): VisualView {
+  const ui = uiPaths(planFiles);
+  const tool = verification?.visualTool ?? null;
+  const mock = files.design.find((d) => MOCK_EXT.test(d.path)) ?? null;
+  const warning = ui.length > 0 && tool === null ? `UI work without a visual check — ${ui.length} UI path${ui.length === 1 ? "" : "s"} in plan and no Visual: line in CLAUDE.md` : null;
+  return { uiPaths: ui, tool, mock, warning };
+}
 
 export type DocState = "absent" | "draft" | "pending-review" | "committed" | "stale";
 
@@ -102,6 +120,8 @@ export interface ChangeView {
   findings: ReviewFindingView[];
   /** The eval case this change was harvested into (post-merge "Add as eval"), if any. */
   harvested: { id: string; status: "draft" | "active" | "retired" } | null;
+  /** Visual check inputs (spec 5B): UI paths in the plan, the CLAUDE.md visual tool, the design mock, and the warning when UI work has no visual check. */
+  visual: VisualView;
   waitingOnYou: string | null;
   activity: ActivityEntry[];
   tasks: NonNullable<ChangeFiles["tasks"]>["tasks"];
@@ -348,6 +368,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     artifactPrs,
     pr: files.pr,
     findings,
+    visual: deriveVisual(files, planFiles, repo.verification),
     harvested: (() => {
       const c = repo.evalCases.find((x) => x.source.type === "change" && x.source.ref === change.id);
       return c ? { id: c.id, status: c.status } : null;
@@ -397,6 +418,7 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     artifactPrs: {},
     findings: [],
     harvested: null,
+    visual: { uiPaths: [], tool: null, mock: null, warning: null },
     waitingOnYou: null,
     activity: activityFeed(files.events),
     tasks: [],

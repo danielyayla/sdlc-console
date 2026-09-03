@@ -15,7 +15,8 @@ export const thresholds = z.strictObject({
   autoFilesMax: z.number().int().min(1).optional(),
   evalPassThreshold: ratio.optional(),
   maxLoopRounds: z.number().int().min(1).optional(),
-  sessionCeiling: z.number().int().min(1).optional(),
+  /** Review backlog above which no new session starts; `null` = no ceiling (header shows counts only). */
+  sessionCeiling: z.number().int().min(1).nullable().optional(),
   suiteMinSize: z.number().int().min(0).optional(),
   noDiscriminationRuns: z.number().int().min(1).optional(),
   brokenCheckRuns: z.number().int().min(1).optional(),

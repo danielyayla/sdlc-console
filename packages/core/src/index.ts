@@ -9,6 +9,7 @@ export const PACKAGE_NAME = "@sdlc/core" as const;
 
 export * from "./tree.js";
 export * from "./stages.js";
+export * from "./modes.js";
 export * from "./config.js";
 export * from "./fingerprint.js";
 export * from "./events.js";

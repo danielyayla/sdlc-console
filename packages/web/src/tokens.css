@@ -191,3 +191,13 @@ a { color: inherit; }
 .findings li { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: baseline; font-size: 12px; }
 .findings li .when { grid-column: 2; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 .findings li .detail { grid-column: 1 / -1; margin: 2px 0 0; padding: 6px 8px; font-family: var(--font-mono); font-size: 10px; white-space: pre-wrap; border: 1px solid var(--border-default); border-radius: var(--radius-chip); color: var(--text-muted); }
+
+/* sessions · visual rounds strip (2.6): one chip per round with a screenshot, colour by the reported diff; click opens it beside the mock */
+.vstrip { display: flex; gap: 4px; margin: 6px 0; flex-wrap: wrap; align-items: center; }
+.vstrip .chip { cursor: pointer; }
+.compare { margin-top: 8px; border: 1px solid var(--border-default); border-radius: var(--radius-card); padding: 8px; background: var(--bg-raised); }
+.compare-head { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.compare-panes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.compare-panes figure { margin: 0; }
+.compare-panes img { width: 100%; border: 1px solid var(--border-default); border-radius: var(--radius-chip); background: #fff; }
+.compare-panes figcaption { font-size: 11px; color: var(--text-muted); margin-top: 4px; }

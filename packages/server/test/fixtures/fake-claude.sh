@@ -2,6 +2,8 @@
 # Fake Claude Code: echoes a stream-json init line, records its arguments, then a result line.
 # FAKE_CLAUDE_FAIL=1 makes it report an error result and exit 1.
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"11111111-2222-3333-4444-555555555555","model":"fake-model","tools":[]}'
+# FAKE_CLAUDE_SLEEP=<s> keeps the harness alive (a downgrade or stop ends it).
+if [ -n "$FAKE_CLAUDE_SLEEP" ]; then sleep "$FAKE_CLAUDE_SLEEP"; fi
 printf '%s\n' "$*" > "${FAKE_CLAUDE_ARGS:-/dev/null}"
 printf '%s\n' "git-author=${GIT_AUTHOR_NAME} <${GIT_AUTHOR_EMAIL}>" >> "${FAKE_CLAUDE_ARGS:-/dev/null}"
 if [ -n "$FAKE_CLAUDE_FAIL" ]; then

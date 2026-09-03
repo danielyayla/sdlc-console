@@ -65,6 +65,8 @@ describe("Change detail (spec §4)", () => {
     expect(html).toContain("Evals red — agent fixing");
     expect(html).toContain("The next human gate opens when the artifact is committed.");
     expect(html).toContain("Auto mode");
+    // 2.6: the design mock is named beside the rationale; CLAUDE.md has no Visual: line
+    expect(html).toContain("mock export-dialog.svg · no visual tool in CLAUDE.md");
   });
 });
 
@@ -118,7 +120,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
 describe("Sessions (spec §4)", () => {
   it("renders the header counts, four seed cards with mode chips, waiting-on-you, rationale and the footer callout", () => {
     const html = render({ ...initialState("eng"), view: "sessions" });
-    expect(html).toContain("2 active · review backlog 2"); // running + waiting; two done sessions on changes before stage 6
+    expect(html).toContain("2 active · review backlog 2 · ceiling 4"); // running + waiting; the done plan (CHG-0019 at stage 3) and design (CHG-0021 at stage 2) sessions await their gates
     expect(html).toContain("CHG-0018/export-fix");
     expect(html).toContain("PLAN MODE");
     expect(html).toContain("HEADLESS");
@@ -126,6 +128,17 @@ describe("Sessions (spec §4)", () => {
     expect(html).toContain("test edit attempts: 1");
     expect(html).toContain("New session");
     expect(html).toContain("Sessions run Claude Code headless in a worktree per task");
+  });
+  it("renders the visual rounds strip from the session's screenshot rounds and offers Downgrade only on running AUTO/HEADLESS cards", () => {
+    const html = render({ ...initialState("eng"), view: "sessions" });
+    expect(html).toContain('aria-label="visual rounds"');
+    expect(html).toContain("round 1 · 14.2%");
+    expect(html).toContain("round 2 · 3.1%");
+    expect(html).toContain("chip red");
+    expect(html).toContain("chip amber");
+    // the seed's running session is SUPERVISED and the AUTO/HEADLESS ones are done: nothing to downgrade
+    expect(html).not.toContain("Downgrade to SUPERVISED");
+    expect(html).toContain("AUTO can be taken away, never granted");
   });
 });
 

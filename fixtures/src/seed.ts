@@ -370,6 +370,7 @@ export function seedFiles(): Record<string, string> {
     const intentSha = put(`${dir}/intent.md`, intentMd(id, title, T("08-29", "09:00"), { problem: "Invoices with a zero total are missing from the CSV export.", outcome: "Every invoice of the month appears, zero totals included.", affected: "Finance; export API.", constraints: "Failing test first; no other test changes.", questions: "None." }));
     const specSha = put(`${dir}/spec.md`, specMd(id, title, intentSha, T("08-29", "10:00"), { requirements: "Rows with total 0 are exported.", design: "Remove the truthiness filter in the row mapper.", concerns: "None flagged.", carried: "None." }));
     put(`${dir}/plan.md`, planMd(id, title, specSha, 1, ["src/export/csv.ts", "test/export/zero-total.test.ts (new)"], "test/export/zero-total.test.ts passes; no other test changes", { by: ENG, at: T("08-29", "11:00") }, { order: ["repro test", "fix filter"], risks: "None.", proof: "repro test green, unchanged in diff" }));
+    put(`${dir}/design/export-dialog.svg`, exportDialogMock());
     put(`${dir}/evals/repro.json`, stringifyJson({ schema: 1, testPath: "test/export/zero-total.test.ts", failureReason: "expected 4 rows, received 3", sha: reproSha, output: "AssertionError: expected 4 rows, received 3\n  at test/export/zero-total.test.ts:12:5", confirmedBy: ENG, confirmedAt: T("09-02", "09:00") }));
     put(`${dir}/evals/run-1.json`, stringifyJson({ schema: 1, n: 1, changeId: id, cycle: 1, worktree: `${id}/export-fix`, headSha: "f5b7a3e6b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6", fileSet: ["src/export/csv.ts"], configRef: fingerprint, results: [{ caseId: "CASE-0001", pass: false, output: "1 failed: zero-total row missing" }], commandResults: [{ name: "build", cmd: "pnpm build", exitCode: 0, pass: true, output: "tsc -b\n" }, { name: "test", cmd: "pnpm test", exitCode: 1, pass: false, output: "Tests 1 failed | 44 passed (45)\n  ✗ zero-total row missing\n" }, { name: "lint", cmd: "pnpm lint", exitCode: 0, pass: true, output: "" }], verdict: "red", startedAt: T("09-02", "09:30"), finishedAt: T("09-02", "09:34") }));
     files[`${dir}/log.jsonl`] = eventsFor(id, [
@@ -544,3 +545,19 @@ Idempotency key at the API edge or in the numbering service?
 }
 
 export const SEED_CHANGE_IDS = ["CHG-0012", "CHG-0017", "CHG-0018", "CHG-0019", "CHG-0020", "CHG-0021", "CHG-0022", "CHG-0023"] as const;
+
+/** The seed's one design mock (spec §5B: "click opens screenshot beside mock"): the export dialog CHG-0018 fixes. */
+function exportDialogMock(): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="240" viewBox="0 0 480 240">
+  <rect width="480" height="240" rx="8" fill="#f6f5f0" stroke="#c9c5b8"/>
+  <text x="24" y="40" font-family="sans-serif" font-size="18" fill="#2a2a2a">Export invoices · August 2026</text>
+  <rect x="24" y="64" width="432" height="112" rx="4" fill="#ffffff" stroke="#c9c5b8"/>
+  <text x="36" y="92" font-family="monospace" font-size="12" fill="#2a2a2a">INV-2026-0801   Acme Ltd        1,240.00</text>
+  <text x="36" y="116" font-family="monospace" font-size="12" fill="#2a2a2a">INV-2026-0802   Birch GmbH          0.00</text>
+  <text x="36" y="140" font-family="monospace" font-size="12" fill="#2a2a2a">INV-2026-0803   Cedar Inc         980.00</text>
+  <text x="36" y="164" font-family="monospace" font-size="12" fill="#2a2a2a">INV-2026-0804   Dune SAS        3,115.50</text>
+  <rect x="352" y="192" width="104" height="32" rx="4" fill="#2f6f4f"/>
+  <text x="404" y="213" font-family="sans-serif" font-size="13" fill="#ffffff" text-anchor="middle">Download CSV</text>
+</svg>
+`;
+}

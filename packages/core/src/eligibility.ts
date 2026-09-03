@@ -32,6 +32,32 @@ function coveredByCases(path: string, cases: readonly EvalCase[]): boolean {
   return false;
 }
 
+const UI_EXT = /\.(tsx|jsx|vue|svelte|astro|html?|css|scss|sass|less|styl)$/i;
+const UI_DIR = /(^|\/)(web|ui|frontend|client|components?|views?|pages|screens|layouts?|styles?)\//i;
+
+/** Planned paths that are UI work (spec 5B: "no visual tool + plan touches UI paths → UI work without a visual check"). */
+export function uiPaths(planFiles: readonly string[]): string[] {
+  return planFiles.filter((f) => UI_EXT.test(f) || UI_DIR.test(f));
+}
+
+/**
+ * The verification term (FR-34, spec 5B.1): not just a block, a loop the
+ * session can actually run — every command single-target, a test target, and a
+ * visual tool when the plan touches UI paths.
+ */
+export function verificationTerm(verification: VerificationContract | null, planFiles: readonly string[] | null): EligibilityTerm {
+  const name = "verification block present";
+  const commands = verification?.commands ?? [];
+  if (!verification || commands.length === 0) return { name, ok: false, detail: "no feedback loop — set up verification in CLAUDE.md" };
+  const multi = commands.filter((c) => !c.singleTarget);
+  if (multi.length > 0) return { name, ok: false, detail: `${multi.map((c) => c.name).join(", ")} chain${multi.length === 1 ? "s" : ""} commands — wrap in one target` };
+  if (!commands.some((c) => c.name === "test")) return { name, ok: false, detail: "no test target in CLAUDE.md — the loop cannot tell red from green" };
+  const ui = uiPaths(planFiles ?? []);
+  if (ui.length > 0 && verification.visualTool === null) return { name, ok: false, detail: `UI work without a visual check — ${ui.length} UI path${ui.length === 1 ? "" : "s"} in plan and no Visual: line in CLAUDE.md` };
+  const n = commands.length;
+  return { name, ok: true, detail: `${n} single-target command${n === 1 ? "" : "s"} in CLAUDE.md, test target present${ui.length > 0 ? `, visual tool ${verification.visualTool} for ${ui.length} UI path${ui.length === 1 ? "" : "s"}` : ""}` };
+}
+
 /** AUTO eligibility (FR-34): derived, never a toggle. */
 export function deriveEligibility(i: EligibilityInputs): Eligibility {
   const t = i.config.thresholds;
@@ -62,26 +88,24 @@ export function deriveEligibility(i: EligibilityInputs): Eligibility {
     const uncovered = files.filter((f) => !coveredByCases(f, i.activeCases));
     const strict = uncovered.length === 0;
     const hasTestCommand = i.verification?.commands.some((c) => c.name === "test") ?? false;
+    const hasGlobs = (i.verification?.testGlobs.length ?? 0) > 0;
     if (i.config.eligibility.coverage === "strict") {
       coverageOk = strict;
       coverageDetail = strict ? "every planned path has an active eval case" : `${uncovered.length} path${uncovered.length === 1 ? "" : "s"} without an active eval case`;
     } else {
-      coverageOk = strict || hasTestCommand;
+      coverageOk = strict || (hasTestCommand && hasGlobs);
       coverageDetail = strict
         ? "every planned path has an active eval case"
-        : hasTestCommand
-          ? "verification includes a test target (lenient coverage)"
-          : "no active eval case for planned paths and no test target";
+        : hasTestCommand && hasGlobs
+          ? "verification includes a test target and test globs (lenient coverage)"
+          : hasTestCommand
+            ? "no active eval case for planned paths and no test globs declared in CLAUDE.md"
+            : "no active eval case for planned paths and no test target";
     }
   }
   terms.push({ name: "eval coverage for paths", ok: coverageOk, detail: coverageDetail });
 
-  const verificationPresent = (i.verification?.commands.length ?? 0) > 0;
-  terms.push({
-    name: "verification block present",
-    ok: verificationPresent,
-    detail: verificationPresent ? `${i.verification?.commands.length} command${i.verification?.commands.length === 1 ? "" : "s"} in CLAUDE.md` : "no feedback loop — set up verification in CLAUDE.md",
-  });
+  terms.push(verificationTerm(i.verification, files));
 
   return { value: terms.every((x) => x.ok), terms };
 }

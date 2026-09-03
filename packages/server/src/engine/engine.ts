@@ -1,6 +1,6 @@
 import { deriveChange, proposeTasks, confirmTasks, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
 import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, type GitIdentity } from "@sdlc/adapter-git";
-import { launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
+import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
@@ -52,6 +52,8 @@ export class Engine {
   private inflight: Promise<SyncSummary | null> | null = null;
   private warnedNoToken = false;
   private closed = false;
+  /** Changes whose build session is held by the capacity ceiling; logged once per hold. */
+  private readonly ceilingLogged = new Set<string>();
   private readonly unsubscribe: () => void;
 
   constructor(private readonly opts: EngineOptions) {
@@ -305,7 +307,17 @@ export class Engine {
       const sessions = this.opts.registry.list().filter((s) => s.changeId === view.id && s.kind === "build" && s.cycle === view.cycle);
       const live = sessions.some((s) => s.status === "running" || s.status === "waiting" || s.status === "awaiting_engineer");
       const runs = repo.changes.get(view.id)?.runs.filter((r) => r.cycle === view.cycle).length ?? 0;
-      if (!live && (view.evalsState === "running" || sessions.length === 0)) await this.launch(view, `${view.id}:${view.cycle}:4:${sha(2)}:build:run-${runs}`, "build-session", "build");
+      if (!live && (view.evalsState === "running" || sessions.length === 0)) {
+        // FR-35: over the ceiling nothing is claimed, so the next tick after the backlog clears launches it
+        const capacity = capacityOf(this.opts.registry.list(), repo);
+        if (capacity.over) {
+          if (!this.ceilingLogged.has(view.id)) this.log(`${view.id}: build session held — review backlog ${capacity.backlog} over the ceiling ${capacity.ceiling}`);
+          this.ceilingLogged.add(view.id);
+        } else {
+          this.ceilingLogged.delete(view.id);
+          await this.launch(view, `${view.id}:${view.cycle}:4:${sha(2)}:build:run-${runs}`, "build-session", "build");
+        }
+      }
     }
     // stage 5: one review per PR head; `pr.review.headSha` (in git) is what makes this idempotent across restarts
     if (view.stage === 5 && view.pr && view.pr.mergedAt === undefined && view.pr.review?.headSha !== view.pr.headSha) {
@@ -355,7 +367,8 @@ export class Engine {
     // the job that launched this session is finished with it
     for (const job of this.opts.jobs.list()) {
       if (job.sessionId === session.id && job.state === "running") {
-        this.opts.jobs.update(job.key, { state: session.status === "done" ? "done" : "failed", ...(session.error ? { error: session.error } : {}) }, this.now());
+        const downgraded = session.status === "awaiting_engineer";
+        this.opts.jobs.update(job.key, { state: session.status === "done" || downgraded ? "done" : "failed", ...(downgraded ? { note: "downgraded to SUPERVISED — the engineer continues" } : {}), ...(session.error ? { error: session.error } : {}) }, this.now());
       }
     }
     if (session.kind === "review" && session.status === "done") {

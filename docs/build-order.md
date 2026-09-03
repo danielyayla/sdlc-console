@@ -30,7 +30,7 @@ Exit: one change travels 1→6→1 with real files, hooks and a real Claude Code
 - [x] 2.3 Review findings mirror + check runs: review job findings → `review.finding` events and `pr.yaml.findings`; evidence, severity tally and eval verdict published as statuses; PR panel in Change detail.
 - [x] 2.4 Webhooks: signature-verified receiver (PR opened/synchronize/review/merged, check completed, push) with polling fallback; merge detected → stage 6; idempotent job keys on replay.
 - [x] 2.5 Eval suite in CI: generated workflows, config-change gate (verdict ≥ threshold, `incomplete` ≠ pass), run history strip, budget, harvest actions, retire/broken-check signals → triage.
-- [ ] 2.6 Build-stage depth: capacity ceiling, auto-eligibility with verification term, AUTO→SUPERVISED override, visual rounds strip with mock comparison.
+- [x] 2.6 Build-stage depth: capacity ceiling, auto-eligibility with verification term, AUTO→SUPERVISED override, visual rounds strip with mock comparison.
 - [ ] 2.7 Repro-first fix flow end-to-end: repro confirm/reject, freeze lift once, fallback auto-finding blocking merge, PR repro proof.
 - [ ] 2.8 CLAUDE.md repeat-mistake proposals (accept → PR); skills pass % from trigger-test set; backed-by column.
 - [ ] 2.9 Records mode (`external`/`linked`) with MCP write-back and retry.

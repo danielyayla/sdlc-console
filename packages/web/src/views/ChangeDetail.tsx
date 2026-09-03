@@ -183,6 +183,8 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="eyebrow">Auto mode</div>
               <div className="who">{view.autoEligible.value ? "eligible" : "not eligible"}</div>
               <ul className="activity">{view.autoEligible.terms.map((t) => <li key={t.name}><span className={`glyph ${t.ok ? "human" : "system"}`}>{t.ok ? "✓" : "✗"}</span><span>{t.name}</span><span className="when">{t.detail}</span></li>)}</ul>
+              {view.visual.warning ? <div className="warn">{view.visual.warning}</div> : null}
+              {view.visual.mock ? <div className="card-status">mock {view.visual.mock.path.split("/").pop()}{view.visual.tool ? ` · visual tool ${view.visual.tool}` : " · no visual tool in CLAUDE.md"}</div> : null}
             </div>
           ) : null}
           <div className="panel">

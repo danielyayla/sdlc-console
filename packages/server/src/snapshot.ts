@@ -15,6 +15,7 @@ import {
   type RuleDiagnostic,
 } from "@sdlc/core";
 import type { Bands, EvalCase, EvalRun, Finding, HookRow, ParsedAgent, ParsedClaudeMd, ParsedSkill, Proposal, Triage } from "@sdlc/schemas";
+import { sessionCapacity, type Capacity } from "./sessions/capacity.js";
 
 export interface Identity {
   id: string;
@@ -61,6 +62,8 @@ export interface Snapshot {
   /** Suite banner: pass vs threshold, config-change gate, rolling budget, strip with config diffs. */
   evals: SuiteStatus;
   sessions: SessionRecord[];
+  /** FR-35: active count, review backlog and the ceiling — one definition for the header, the launcher and the engine. */
+  capacity: Capacity;
   config: ResolvedConfig;
   claudeMd: ParsedClaudeMd | null;
   hooks: HookRow[];
@@ -92,6 +95,7 @@ export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionR
     evalRuns: repo.evalRuns,
     evals: suiteStatus(repo, now.toISOString().replace(/\.\d{3}Z$/, "Z")),
     sessions,
+    capacity: sessionCapacity(sessions, (id) => all.changes.find((c) => c.id === id) ?? null, repo.config.thresholds.sessionCeiling),
     config: repo.config,
     claudeMd: repo.claudeMd,
     hooks: repo.settings?.hooks ?? [],

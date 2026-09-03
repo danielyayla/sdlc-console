@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { enrich, launchSession, SessionRegistry, stopSession, type LaunchInput, type StoredSession } from "@sdlc/server";
+import { downgradeSession, enrich, launchSession, SessionRegistry, StateStore, stopSession, type LaunchInput, type StoredSession } from "@sdlc/server";
 import { actingIdentity, assertHuman, loadCommitted, repoContext, type CliContext } from "../context.js";
 import { CliError, type Io } from "../io.js";
 
@@ -59,6 +59,20 @@ export async function sessionStop(ctx: CliContext, id: string): Promise<StoredSe
   }
 }
 
+/** `sdlc session downgrade <id>`: AUTO → SUPERVISED, recorded on the ledger by the engineer; the harness ends and the resume command is printed. */
+export async function sessionDowngrade(ctx: CliContext, id: string, reason?: string): Promise<{ session: StoredSession; commit: string }> {
+  assertHuman(ctx.io);
+  const who = await actingIdentity(ctx);
+  const registry = new SessionRegistry(ctx.root);
+  try {
+    const store = new StateStore({ root: ctx.root, identity: who, sessions: () => registry.list() });
+    await store.refresh();
+    return await downgradeSession({ store, registry, claudeBin: ctx.io.env["SDLC_CLAUDE_BIN"] }, id, reason);
+  } finally {
+    registry.close();
+  }
+}
+
 export async function sessionCommand(io: Io, sub: string | undefined, rest: string[], values: Record<string, string | boolean | undefined>, json: boolean): Promise<{ value: unknown; text: string }> {
   const ctx = await repoContext(io, json);
   if (sub === "start") {
@@ -83,5 +97,11 @@ export async function sessionCommand(io: Io, sub: string | undefined, rest: stri
     const s = await sessionStop(ctx, id);
     return { value: s, text: `${s.id} ${s.status}` };
   }
-  throw new CliError("usage: sdlc session start|list|stop");
+  if (sub === "downgrade") {
+    const id = rest[0];
+    if (!id) throw new CliError("usage: sdlc session downgrade <id> [--reason <text>]");
+    const r = await sessionDowngrade(ctx, id, typeof values["reason"] === "string" ? values["reason"] : undefined);
+    return { value: r, text: `${r.session.id} ${r.session.mode} (${r.session.status}) · ${r.commit.slice(0, 7)}\nrun:\n  ${r.session.command}` };
+  }
+  throw new CliError("usage: sdlc session start|list|stop|downgrade");
 }

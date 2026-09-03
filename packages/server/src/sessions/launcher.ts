@@ -7,6 +7,7 @@ import { deriveChange, loadRepo, logPath, stageDef, type ChangeView, type Repo, 
 import { buildContext, type ContextBundle } from "@sdlc/mcp";
 import type { Event } from "@sdlc/schemas";
 import { ActionError } from "../store.js";
+import { capacityOf } from "./capacity.js";
 import { observe } from "./observer.js";
 import { promptFor } from "./prompts.js";
 import type { SessionKind, SessionRegistry, StoredSession } from "./registry.js";
@@ -129,9 +130,8 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     throw new ActionError(409, `AUTO is not eligible for ${view.id}: ${view.autoEligible.terms.filter((t) => !t.ok).map((t) => `${t.name} (${t.detail})`).join("; ")}`);
   }
   if (kind === "plan") mode = "PLAN";
-  const ceiling = repo.config.thresholds.sessionCeiling;
-  const backlog = deps.registry.list().filter((s) => s.status === "done" && !s.reviewed).length;
-  if (backlog > ceiling) throw new ActionError(409, `review backlog ${backlog} exceeds the ceiling ${ceiling} — review finished sessions before starting another`);
+  const capacity = capacityOf(deps.registry.list(), repo);
+  if (capacity.over) throw new ActionError(409, `review backlog ${capacity.backlog} exceeds the ceiling ${capacity.ceiling} — review finished sessions before starting another`);
 
   const branch = branchFor(kind, view, taskId);
   if (kind === "review" && !(await branchExists(deps.root, branch))) throw new ActionError(409, `the PR branch ${branch} is not in this clone; the review reads the pushed head, it never recreates it`);
@@ -173,7 +173,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     ...bundle.allowedTools,
     ...(resuming ? ["--resume", harnessSessionId] : ["--session-id", harnessSessionId]),
   ];
-  const command = `cd ${worktree} && SDLC_SESSION=${id} SDLC_CHANGE=${view.id} GIT_AUTHOR_NAME=${AGENT.name} GIT_AUTHOR_EMAIL=${AGENT.id} GIT_COMMITTER_NAME=${AGENT.name} GIT_COMMITTER_EMAIL=${AGENT.id} ${claudeBin} ${resuming ? `--resume ${harnessSessionId}` : `--session-id ${harnessSessionId}`} --mcp-config ${mcpConfig} --permission-mode ${permissionMode(mode, kind)}`;
+  const command = engineerCommand({ worktreePath: worktree, id, changeId: view.id, harnessSessionId, kind, mode }, claudeBin, resuming !== null);
 
   const record: StoredSession = {
     ...(existing ?? {}),
@@ -240,7 +240,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
       const files2 = after.changes.get(view.id);
       const alreadyStopped = files2?.events.some((e) => e.event === "session.stopped" && e.data.session === id) ?? false;
       if (!alreadyStopped) {
-        const reason = status === "done" ? "done" : status === "taken_over" ? "taken_over" : status === "stopped" ? "stopped" : "error";
+        const reason = status === "done" ? "done" : status === "taken_over" || status === "awaiting_engineer" ? "taken_over" : status === "stopped" ? "stopped" : "error";
         const stopped: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(after, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.stopped", data: { session: id, reason } } as Event;
         await systemEventCommit(ledgerDir, view.id, stopped, `sdlc(${view.id}): session ${id} ${reason}`, SYSTEM).catch(() => undefined);
       }
@@ -267,3 +267,9 @@ export function stopSession(registry: SessionRegistry, id: string, status: "stop
 }
 
 export { stageDef };
+
+/** The interactive command handed to the engineer for a SUPERVISED session (or one downgraded to it): same worktree, same MCP config, same harness session. */
+export function engineerCommand(s: Pick<StoredSession, "worktreePath" | "id" | "changeId" | "harnessSessionId" | "kind" | "mode">, claudeBin = "claude", resume = false): string {
+  const mcpConfig = join(s.worktreePath, ".sdlc-state", "sessions", s.id, "mcp.json");
+  return `cd ${s.worktreePath} && SDLC_SESSION=${s.id} SDLC_CHANGE=${s.changeId} GIT_AUTHOR_NAME=${AGENT.name} GIT_AUTHOR_EMAIL=${AGENT.id} GIT_COMMITTER_NAME=${AGENT.name} GIT_COMMITTER_EMAIL=${AGENT.id} ${claudeBin} ${resume ? `--resume ${s.harnessSessionId}` : `--session-id ${s.harnessSessionId}`} --mcp-config ${mcpConfig} --permission-mode ${permissionMode(s.mode, s.kind)}`;
+}

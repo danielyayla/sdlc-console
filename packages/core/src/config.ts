@@ -5,7 +5,8 @@ export interface ResolvedThresholds {
   autoFilesMax: number;
   evalPassThreshold: number;
   maxLoopRounds: number;
-  sessionCeiling: number;
+  /** `null` = no ceiling. */
+  sessionCeiling: number | null;
   suiteMinSize: number;
   noDiscriminationRuns: number;
   brokenCheckRuns: number;
@@ -45,7 +46,7 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
       autoFilesMax: t.autoFilesMax ?? d.autoFilesMax,
       evalPassThreshold: t.evalPassThreshold ?? d.evalPassThreshold,
       maxLoopRounds: t.maxLoopRounds ?? d.maxLoopRounds,
-      sessionCeiling: t.sessionCeiling ?? d.sessionCeiling,
+      sessionCeiling: t.sessionCeiling === undefined ? d.sessionCeiling : t.sessionCeiling,
       suiteMinSize: t.suiteMinSize ?? d.suiteMinSize,
       noDiscriminationRuns: t.noDiscriminationRuns ?? d.noDiscriminationRuns,
       brokenCheckRuns: t.brokenCheckRuns ?? d.brokenCheckRuns,

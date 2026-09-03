@@ -32,11 +32,18 @@ Task: turn the accepted intent.md into spec.md following sdlc/templates/spec.md 
       return `${COMMON(p)}
 
 Task: read the accepted intent.md and spec.md and this codebase (read-only), then write plan.md following sdlc/templates/plan.md with sections "Files that change" (one path per line, new files marked (new)), "Order of work" (numbered), "Risks", "Proof". Submit drafts with mcp__sdlc__submit_plan_revision (final=false); when you are confident an engineer who never saw this conversation could implement it, submit with final=true and an acceptanceLine (a quantifiable done criterion). Ask the engineer with mcp__sdlc__request_input only if a decision genuinely blocks you. Do not edit files other than through the tool.${guidance}`;
-    case "build":
+    case "build": {
+      const v = p.view.visual;
+      const visual = v.mock
+        ? `\nVisual check: a design mock is at ${v.mock.path}.${v.tool ? ` After every round that changes what the user sees, take a screenshot with the visual tool from CLAUDE.md, save it under .sdlc-state/sessions/${p.sessionId}/screenshots/round-<n>.png, and pass screenshotRef (that path, relative to the worktree) and diffPct (your estimate of how far the screenshot is from the mock, 0–100) to mcp__sdlc__report_round.` : " No visual tool is configured in CLAUDE.md, so the screen cannot be verified here; say so in your notes and keep the mock as the reference."}`
+        : v.warning
+          ? `\nVisual check: ${v.warning}. UI changes cannot be verified visually in this session; keep them minimal and describe them in your notes.`
+          : "";
       return `${COMMON(p)}
 
-Task: implement the accepted plan.md in this worktree on the current branch. Target (done criterion): ${p.target ?? "see plan.md acceptance line"}.
+Task: implement the accepted plan.md in this worktree on the current branch. Target (done criterion): ${p.target ?? "see plan.md acceptance line"}.${visual}
 Rules: stay within the files listed in plan.md (the plan-sync hook blocks commits outside it — update plan.md in the same commit if the plan must change); never edit tests under a test freeze (the test-freeze hook blocks it — use mcp__sdlc__request_input to propose test changes); run the verification commands from CLAUDE.md after every meaningful step and record each run with mcp__sdlc__report_round (one result per command, verbatim output excerpt); commit your work on this branch with messages like "sdlc(${p.view.id}): <what>"; when the last round is all green, call mcp__sdlc__report_done. Done is only accepted when the latest round is green with output.${guidance}`;
+    }
     case "review":
       return `${COMMON(p)}
 

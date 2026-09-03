@@ -3,6 +3,7 @@ import { holdsRole } from "../config.js";
 import type { ChangeView } from "../derive.js";
 import { eventsNamed, eventsOfCycle, lastEvent } from "../events.js";
 import type { ChangeFiles, Repo } from "../repo.js";
+import { isDowngrade } from "../modes.js";
 import { gateOwner, STAGES } from "../stages.js";
 
 /** A diagnostic with the engine's blocking verdict (blueprint §11.1). */
@@ -78,6 +79,11 @@ export function changeRules(repo: Repo, files: ChangeFiles, view: ChangeView): R
         out.push(block(id, `${dir}/log.jsonl`, "gate.actor-not-owner", `${e.actor.id} recorded ${e.event} on gate ${e.data.gate} but does not hold the ${owner.role} role`));
       }
     }
+  }
+
+  // autonomy only goes down (P9): an override that raises a session's mode is not a decision the ledger accepts
+  for (const e of eventsNamed(files.events, "override.mode")) {
+    if (!isDowngrade(e.data.from, e.data.to)) out.push(block(id, `${dir}/log.jsonl`, "override.upward", `${e.actor.id} recorded mode ${e.data.from} → ${e.data.to}; autonomy is derived and can only be reduced`));
   }
 
   // linked mode: past an artifact's stage the record must be present

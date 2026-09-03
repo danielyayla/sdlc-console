@@ -54,6 +54,8 @@ export interface ChangeFiles {
   runs: PerChangeRun[];
   finalRound: Round | null;
   repro: ReproProof | null;
+  /** Files under `design/` (optional mocks, blueprint §12: Claude Design export or an attached image). */
+  design: { path: string; sha: string }[];
   /** Blob shas of artifact files present, by artifact file name. */
   shas: Partial<Record<"intent.md" | "spec.md" | "plan.md" | "pr.yaml" | "incident.md" | "change.yaml", string>>;
   present: { intent: boolean; spec: boolean; plan: boolean; evals: boolean; pr: boolean; incident: boolean };
@@ -119,6 +121,7 @@ export function loadChange(tree: Tree, id: string): ChangeFiles {
     runs: [],
     finalRound: null,
     repro: null,
+    design: [],
     shas: {},
     present: { intent: false, spec: false, plan: false, evals: false, pr: false, incident: false },
     archivedCycles: [],
@@ -211,6 +214,7 @@ export function loadChange(tree: Tree, id: string): ChangeFiles {
     }
   }
   files.runs.sort((a, b) => a.n - b.n);
+  files.design = filesUnder(tree, at("design")).map((path) => ({ path, sha: readFile(tree, path)?.sha ?? "" }));
 
   files.archivedCycles = childDirs(tree, at("cycles"))
     .map((n) => Number(n))

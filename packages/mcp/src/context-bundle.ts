@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PATHS, readFile, type ChangeView, type Repo } from "@sdlc/core";
+import { PATHS, filesUnder, readFile, type ChangeView, type Repo } from "@sdlc/core";
 
 export type JobKind = "intent-session" | "design-pass" | "plan-session" | "build-session" | "review" | "diagnose";
 
@@ -44,6 +44,7 @@ export function buildContext(repo: Repo, view: ChangeView): ContextBundle {
   };
   const files: BundleFile[] = [];
   for (const name of ["intent.md", "spec.md", "plan.md", "incident.md", "change.yaml", "tasks.yaml"]) add(files, `${dir}/${name}`);
+  for (const path of filesUnder(repo.tree, `${dir}/design`)) add(files, path);
   add(files, PATHS.claudeMd);
   add(files, PATHS.reviewMd);
   for (const s of repo.skills) add(files, `${PATHS.skillsDir}/${s.name}/SKILL.md`);

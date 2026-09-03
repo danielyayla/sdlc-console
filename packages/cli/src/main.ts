@@ -35,7 +35,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
   sdlc mcp                                              (agent tools over stdio)
   sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose)
-  sdlc session list | stop <id>
+  sdlc session list | stop <id> | downgrade <id> [--reason r]   (downgrade: AUTO → SUPERVISED, never upward)
   sdlc run <CHG>                                        (per-change run: verification + intersecting evals; green opens the PR)
   sdlc serve --engine                                   (launch sessions and runs automatically on transitions)
   sdlc sync                                             (GitHub mode: open artifact PRs, record merges done on GitHub, refresh the records PR)

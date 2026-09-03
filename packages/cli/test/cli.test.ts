@@ -347,3 +347,20 @@ describe("eval suite in CI (2.5)", () => {
     expect(harvest.err).toContain("not merged (stage 1)");
   }, 30_000);
 });
+
+describe("session downgrade (2.6)", () => {
+  it("is wired: usage without an id, not-found for an unknown session, and the usage line names it", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    const usage = await sdlc(dir, ["session", "downgrade"]);
+    expect(usage.code).toBe(1);
+    expect(usage.err).toContain("usage: sdlc session downgrade <id> [--reason <text>]");
+    const missing = await sdlc(dir, ["session", "downgrade", "sess-nope", "--reason", "x"]);
+    expect(missing.code).toBe(1);
+    expect(missing.err).toContain("sess-nope not found");
+    const agent = await sdlc(dir, ["session", "downgrade", "sess-nope"], { SDLC_ACTOR_TYPE: "agent" });
+    expect(agent.code).toBe(2);
+    const help = await sdlc(dir, ["nope"]);
+    expect(help.err).toContain("downgrade <id> [--reason r]   (downgrade: AUTO → SUPERVISED, never upward)");
+  });
+});
