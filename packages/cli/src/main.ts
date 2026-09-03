@@ -2,6 +2,7 @@ import { parseArgs } from "node:util";
 import { auditCommand, renderAudit } from "./commands/audit.js";
 import { changeList, changeNew, changeShow, summarize } from "./commands/change.js";
 import { acceptCommand, parseGate, sendBackCommand } from "./commands/gate.js";
+import { hookCommand } from "./commands/hook.js";
 import { init } from "./commands/init.js";
 import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
@@ -26,6 +27,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc triage accept|dismiss <TRI> [--reason <text>] [--tune <note>]
   sdlc security patch|escalate|dismiss <SEC> [--reason <text>]
   sdlc security import <file|->
+  sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
@@ -77,7 +79,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
     switch (cmd) {
       case "init": {
         const r = await init(io, { ...(values.product ? { product: values.product } : {}), ...(values["intent-home"] ? { intentHome: values["intent-home"] } : {}) });
-        emit(io, json, r, () => [...r.created.map((c) => `created  ${c}`), ...r.skipped.map((s) => `kept     ${s}`)].join("\n"));
+        emit(io, json, r, () => [...r.created.map((c) => `created  ${c}`), ...r.skipped.map((s) => `kept     ${s}`), ...(r.hooksSnippet ? ["", ".claude/settings.json exists — add these hooks to it:", r.hooksSnippet] : [])].join("\n"));
         return 0;
       }
       case "validate": {
@@ -170,6 +172,10 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const r = await securityCommand(ctx, sub, id, values.reason);
         emit(io, json, r, () => (r.changeId ? `${r.id} escalated → ${r.changeId} at the Plan gate · ${r.commit.slice(0, 7)}` : `${r.id} ${sub === "patch" ? "patch in PR gate" : "dismissed"} · ${r.commit.slice(0, 7)}`));
         return 0;
+      }
+      case "hook": {
+        if (!sub) throw new CliError("usage: sdlc hook <name>");
+        return await hookCommand(io, sub);
       }
       case "serve": {
         const server = await serveCommand(io, { ...(values.port ? { port: Number(values.port) } : {}), ...(values.role === "eng" ? { role: "eng" as const } : {}) });

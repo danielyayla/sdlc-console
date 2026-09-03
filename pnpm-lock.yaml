@@ -63,6 +63,9 @@ importers:
       '@sdlc/core':
         specifier: workspace:*
         version: link:../core
+      '@sdlc/hooks':
+        specifier: workspace:*
+        version: link:../hooks
       '@sdlc/schemas':
         specifier: workspace:*
         version: link:../schemas
@@ -72,6 +75,18 @@ importers:
 
   packages/core:
     dependencies:
+      '@sdlc/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+
+  packages/hooks:
+    dependencies:
+      '@sdlc/adapter-git':
+        specifier: workspace:*
+        version: link:../adapters/git
+      '@sdlc/core':
+        specifier: workspace:*
+        version: link:../core
       '@sdlc/schemas':
         specifier: workspace:*
         version: link:../schemas

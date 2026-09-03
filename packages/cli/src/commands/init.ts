@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { identity as gitIdentity, installMergeUnion, isRepo, repoRoot } from "@sdlc/adapter-git";
+import { installHooks } from "@sdlc/hooks";
 import { stringifyYaml } from "@sdlc/schemas";
 import { CliError, type Io } from "../io.js";
 import { TEMPLATES } from "../templates.js";
@@ -13,6 +15,16 @@ export interface InitOptions {
 export interface InitResult {
   created: string[];
   skipped: string[];
+  /** settings.json snippet when .claude/settings.json already existed. */
+  hooksSnippet: string | null;
+}
+
+function binPath(): string | null {
+  try {
+    return fileURLToPath(new URL("../bin.js", import.meta.url));
+  } catch {
+    return null;
+  }
 }
 
 /** FR-01: idempotent; never overwrites; prints what it created. */
@@ -58,5 +70,10 @@ export async function init(io: Io, opts: InitOptions): Promise<InitResult> {
     writeFileSync(gi, `${existing}${existing === "" || existing.endsWith("\n") ? "" : "\n"}.sdlc-state/\n`, "utf8");
     created.push(".gitignore (.sdlc-state/)");
   } else skipped.push(".gitignore");
-  return { created, skipped };
+
+  // hook wrappers + settings.json, create-only (the console never edits .claude/**)
+  const hooks = installHooks(root, binPath());
+  created.push(...hooks.created);
+  skipped.push(...hooks.skipped);
+  return { created, skipped, hooksSnippet: hooks.snippet };
 }

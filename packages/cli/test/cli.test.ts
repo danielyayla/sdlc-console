@@ -71,7 +71,7 @@ describe("sdlc init", () => {
     const first = await sdlc(dir, ["init", "--json"]);
     expect(first.code).toBe(0);
     const created = first.json<{ created: string[]; skipped: string[] }>();
-    expect(created.created).toEqual(expect.arrayContaining(["sdlc/config.yaml", "sdlc/templates/intent.md", "sdlc/templates/plan.md", "sdlc/loop/triage/.gitkeep", "evals/cases/.gitkeep", ".gitattributes", ".gitignore (.sdlc-state/)"]));
+    expect(created.created).toEqual(expect.arrayContaining(["sdlc/config.yaml", "sdlc/templates/intent.md", "sdlc/templates/plan.md", "sdlc/loop/triage/.gitkeep", "evals/cases/.gitkeep", ".gitattributes", ".gitignore (.sdlc-state/)", ".claude/hooks/plan-sync.sh", ".claude/settings.json"]));
     expect(created.skipped).toEqual([]);
     const second = await sdlc(dir, ["init", "--json"]);
     expect(second.json<{ created: string[] }>().created).toEqual([]);
@@ -187,7 +187,7 @@ describe("change new / list / show / validate / accept / send-back / audit", () 
     put(dir, `${chg}/intent.md`, `---\nid: CHG-0001\nartifact: intent\ncycle: 1\nauthor: po@example.com\ncreated: 2026-09-01T09:00:00Z\nschema: 1\n---\n${FULL_INTENT}`);
     put(dir, `${chg}/spec.md`, `---\nid: CHG-0001\nartifact: spec\ncycle: 1\nintent_sha: ${sha}\nskills: []\nconcerns: []\ncreated: 2026-09-01T10:00:00Z\nschema: 1\n---\n# Spec: Export\n\n## Requirements\nr\n\n## Design\nd\n\n## Areas of concern\nnone\n\n## Open questions carried forward\nnone\n`);
     put(dir, `${chg}/plan.md`, `---\nid: CHG-0001\nartifact: plan\ncycle: 1\nspec_sha: ${sha}\nrev: 1\naccepted_by: eng@example.com\naccepted_at: 2026-09-01T11:00:00Z\nacceptance_line: "tests pass"\nschema: 1\n---\n# Plan: Export\n\n## Files that change\nsrc/export.ts (new)\n\n## Order of work\n1. do\n\n## Risks\nnone\n\n## Proof\ntests\n`);
-    const fp = { claudeMdSha: (await git(dir, ["rev-parse", "HEAD:CLAUDE.md"])).trim(), skills: [], hooksSha: "0".repeat(40), model: "claude-opus-5" };
+    const fp = { claudeMdSha: (await git(dir, ["rev-parse", "HEAD:CLAUDE.md"])).trim(), skills: [], hooksSha: (await git(dir, ["rev-parse", "HEAD:.claude/settings.json"])).trim(), model: "claude-opus-5" };
     put(dir, `${chg}/evals/run-1.json`, JSON.stringify({ schema: 1, n: 1, changeId: "CHG-0001", cycle: 1, worktree: "CHG-0001/src", headSha: sha, fileSet: ["src/export.ts"], configRef: fp, results: [], commandResults: [{ name: "test", cmd: "pnpm test", exitCode: 0, pass: true, output: "ok" }], verdict: "green", startedAt: "2026-09-01T12:00:00Z" }));
     put(dir, `${chg}/pr.yaml`, `schema: 1\nprovider: local\nbranch: CHG-0001/src\nbaseBranch: main\nheadSha: ${sha}\nopenedAt: 2026-09-01T12:30:00Z\nmergedAt: 2026-09-01T13:00:00Z\nmergeSha: ${sha}\nreviewers: []\nchecks: []\nplanMatches: true\n`);
     const ev = (seq: number, actor: object, event: string, data: object) => JSON.stringify({ schema: 1, id: `01J8Z6Q7Y2K3M4N5P6Q7R8S9${seq.toString(36).toUpperCase().padStart(2, "0")}`.replace(/[ILOU]/g, "X"), ts: `2026-09-01T09:${String(seq).padStart(2, "0")}:00Z`, seq, cycle: 1, actor, event, data });
@@ -259,5 +259,17 @@ describe("triage and security", () => {
     const list = await sdlc(dir, ["change", "list", "--json"]);
     expect(list.json<{ id: string; origin: { ref?: string } }[]>().map((c) => c.origin.ref)).toEqual(["TRI-0001", "SEC-0001"]);
     expect((await sdlc(dir, ["validate"])).code).toBe(0);
+  });
+});
+
+describe("sdlc hook", () => {
+  it("reads harness JSON from stdin and exits 2 on a block, 0 otherwise", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    const stopJson = JSON.stringify({ session_id: "s", cwd: dir, hook_event_name: "Stop" });
+    // main branch → no change context → allow
+    expect((await sdlc(dir, ["hook", "verify-before-done"], {}, stopJson)).code).toBe(0);
+    expect((await sdlc(dir, ["hook", "nope"], {}, "{}")).code).toBe(1);
+    expect((await sdlc(dir, ["hook", "test-freeze"], {}, "not json")).code).toBe(0);
   });
 });

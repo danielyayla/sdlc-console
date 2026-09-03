@@ -11,6 +11,9 @@
       "path": "packages/adapters/git/tsconfig.build.json"
     },
     {
+      "path": "packages/hooks/tsconfig.build.json"
+    },
+    {
       "path": "packages/server/tsconfig.build.json"
     },
     {

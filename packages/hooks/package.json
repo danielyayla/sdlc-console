@@ -1,8 +1,8 @@
 {
-  "name": "@sdlc/cli",
+  "name": "@sdlc/hooks",
   "version": "0.0.0",
   "private": true,
-  "description": "Human-facing sdlc command line.",
+  "description": "Managed hooks plan-sync, test-freeze, verify-before-done: thin adapters over core checks, invoked as `sdlc hook <name>`.",
   "type": "module",
   "exports": {
     ".": {
@@ -16,11 +16,6 @@
   "dependencies": {
     "@sdlc/adapter-git": "workspace:*",
     "@sdlc/core": "workspace:*",
-    "@sdlc/schemas": "workspace:*",
-    "@sdlc/server": "workspace:*",
-    "@sdlc/hooks": "workspace:*"
-  },
-  "bin": {
-    "sdlc": "./dist/bin.js"
+    "@sdlc/schemas": "workspace:*"
   }
 }
