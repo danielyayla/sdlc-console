@@ -1,4 +1,4 @@
-import { blobSha, commitWritePlan, GitError, headSha, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
+import { blobSha, commitWritePlan, GitError, headSha, newUlid, readTreeWithBranches, type ArtifactBranch, type GitIdentity } from "@sdlc/adapter-git";
 import { loadRepo, rolesOf, validateWritePlan, type Repo, type TransitionContext, type TransitionResult, type Tree } from "@sdlc/core";
 import type { Diagnostic } from "@sdlc/schemas";
 import { buildSnapshot, type Identity, type SessionRecord, type Snapshot } from "./snapshot.js";
@@ -34,6 +34,7 @@ export class StateStore {
   private tree: Tree | null = null;
   private repo: Repo | null = null;
   private snapshot: Snapshot | null = null;
+  private branches: ArtifactBranch[] = [];
   private revision = 0;
   private lastHead: string | null = null;
   private readonly listeners = new Set<(s: Snapshot) => void>();
@@ -73,12 +74,16 @@ export class StateStore {
     this.refreshing = (async () => {
       try {
         const head = await headSha(this.opts.root, this.opts.ref ?? "HEAD");
-        if (!force && head === this.lastHead && this.snapshot) return this.snapshot;
-        this.tree = await readTree(this.opts.root, this.opts.ref ?? "HEAD");
+        // unmerged artifact branches (drafts in review) are part of what the console shows
+        const read = await readTreeWithBranches(this.opts.root, this.opts.ref ?? "HEAD");
+        const key = `${head}|${read.branches.map((b) => `${b.branch}@${b.head}`).join(",")}`;
+        if (!force && key === this.lastHead && this.snapshot) return this.snapshot;
+        this.tree = read.tree;
+        this.branches = read.branches;
         this.repo = loadRepo(this.tree);
-        this.lastHead = head;
+        this.lastHead = key;
         this.revision += 1;
-        this.snapshot = buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date());
+        this.snapshot = { ...buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date()), branches: this.branches };
         for (const fn of this.listeners) fn(this.snapshot);
         return this.snapshot;
       } finally {
@@ -92,7 +97,7 @@ export class StateStore {
   rebuild(): Snapshot {
     if (!this.repo) throw new Error("store not loaded");
     this.revision += 1;
-    this.snapshot = buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date());
+    this.snapshot = { ...buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date()), branches: this.branches };
     for (const fn of this.listeners) fn(this.snapshot);
     return this.snapshot;
   }

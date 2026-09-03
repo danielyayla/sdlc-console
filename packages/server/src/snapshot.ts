@@ -1,3 +1,4 @@
+import type { ArtifactBranch } from "@sdlc/adapter-git";
 import {
   badges,
   computeMetrics,
@@ -41,6 +42,8 @@ export interface RoleQueues {
 
 export interface Snapshot {
   revision: number;
+  /** Unmerged `sdlc/<CHG>/<artifact>` branches overlaid on the snapshot (drafts in review). */
+  branches?: ArtifactBranch[];
   ref: string | null;
   generatedAt: string;
   identity: Identity;

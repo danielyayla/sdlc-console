@@ -46,6 +46,16 @@ export function incCaseIdFor(changeId: string, cycle: number): string | null {
   return cycle > 1 ? `INC-${changeId}-${cycle - 1}` : null;
 }
 
+/** An artifact draft in review as a pull request (GitHub mode), from `pr.opened{artifact}` on its branch. */
+export interface ArtifactPrView {
+  number: number;
+  url: string;
+  branch: string;
+  headSha: string;
+  /** The gate this PR carries has been accepted (merged). */
+  merged: boolean;
+}
+
 export interface ChangeView {
   id: string;
   title: string;
@@ -75,6 +85,7 @@ export interface ChangeView {
   intersectingCases: string[];
   incCase: { id: string; status: "draft" | "active" | "retired" | "missing" } | null;
   pr: Pr | null;
+  artifactPrs: Partial<Record<ArtifactIndex, ArtifactPrView>>;
   waitingOnYou: string | null;
   activity: ActivityEntry[];
   tasks: NonNullable<ChangeFiles["tasks"]>["tasks"];
@@ -192,7 +203,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     const sentBack = lastEvent(events, "gate.sent_back", (e) => e.data.gate === g);
     const planFinal = g === 3 ? lastEvent(events, "plan.final") : null;
     const planDrafted = g === 3 ? lastEvent(events, "plan.drafted") : null;
-    const prOpened = g === 5 ? lastEvent(events, "pr.opened") : null;
+    const prOpened = g === 5 ? lastEvent(events, "pr.opened", (e) => e.data.artifact === undefined) : null;
     const latest = latestOf(events, [committed, sentBack, planFinal, planDrafted, prOpened]);
     let open = false;
     let since = change.created.at;
@@ -273,6 +284,14 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     incomplete,
   });
 
+  const artifactPrs: Partial<Record<ArtifactIndex, ArtifactPrView>> = {};
+  for (const e of eventsNamed(events, "pr.opened")) {
+    const idx = e.data.artifact;
+    if (idx === undefined || e.data.number === undefined || e.data.url === undefined || e.data.branch === undefined) continue;
+    const gateOf = { 0: 1, 1: 2, 2: 3, 5: 6 }[idx];
+    artifactPrs[idx as ArtifactIndex] = { number: e.data.number, url: e.data.url, branch: e.data.branch, headSha: e.data.headSha, merged: gateOf !== undefined && accepted.has(gateOf as GateNumber) };
+  }
+
   const valid = errors.length === 0;
   return {
     id: change.id,
@@ -302,6 +321,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     latestRun,
     intersectingCases: cases.map((c) => c.id),
     incCase: incCaseId ? { id: incCaseId, status: incCase?.status ?? "missing" } : null,
+    artifactPrs,
     pr: files.pr,
     waitingOnYou,
     activity: activityFeed(files.events),
@@ -345,6 +365,7 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     intersectingCases: [],
     incCase: null,
     pr: null,
+    artifactPrs: {},
     waitingOnYou: null,
     activity: activityFeed(files.events),
     tasks: [],

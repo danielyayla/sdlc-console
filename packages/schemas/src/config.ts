@@ -6,6 +6,8 @@ export const identity = z.strictObject({
   name: z.string().optional(),
   roles: z.array(role).min(1),
   skillsOwned: z.array(nonEmpty).optional(),
+  /** Code-host login, so a merge performed on GitHub can be attributed to this identity. */
+  github: nonEmpty.optional(),
 });
 
 export const thresholds = z.strictObject({

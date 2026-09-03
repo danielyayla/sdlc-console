@@ -41,6 +41,8 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const owned = ownsGate(view, role);
   const gate = view.gate;
   const techLead = gate?.mode === "via_pr";
+  const selectedPr = view.artifactPrs[selected as 0 | 1 | 2 | 3 | 4 | 5] ?? null;
+  const reviewPr = gate ? view.artifactPrs[({ 1: 0, 2: 1, 3: 2, 5: 4, 6: 5 } as const)[gate.s]] ?? null : null;
 
   return (
     <div className="detail">
@@ -78,6 +80,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
           <div className="viewer-head">
             <span className="file">{ARTIFACT_FILES[selected]}</span>
             <span className="chip gray">{viewerState(doc, view)}</span>
+            {selectedPr && !selectedPr.merged ? <a className="chip" href={selectedPr.url} target="_blank" rel="noreferrer">PR #{selectedPr.number}</a> : null}
             {view.record ? <span className="chip">{view.record.system} {view.record.id}</span> : null}
           </div>
           {doc.state === "absent" ? (
@@ -97,8 +100,9 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="eyebrow">Human gate · {waitingFor(gate.since, p.now)}</div>
               <h3>{gate.label}</h3>
               <div className="who">owner: {gate.ownerLabel}</div>
+              {reviewPr ? <div className="who">in review as <a href={reviewPr.url} target="_blank" rel="noreferrer">PR #{reviewPr.number}</a> · merging it is the decision</div> : null}
               {techLead ? (
-                <div className="waiting">Waiting on tech lead — approval happens via PR review on plan.md.</div>
+                <div className="waiting">Waiting on tech lead — approval happens via PR review on plan.md.{reviewPr ? <> <a href={reviewPr.url} target="_blank" rel="noreferrer">PR #{reviewPr.number}</a></> : null}</div>
               ) : owned ? (
                 <>
                   <div className="actions">

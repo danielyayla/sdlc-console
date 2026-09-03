@@ -11,6 +11,12 @@ export interface ResolvedThresholds {
   brokenCheckRuns: number;
 }
 
+/** Identity whose `github` login matches (case-insensitive), for attributing merges done on the code host. */
+export function identityForGitHubLogin(config: ResolvedConfig, login: string): Identity | null {
+  const wanted = login.toLowerCase();
+  return config.identities.find((i) => i.github?.toLowerCase() === wanted) ?? null;
+}
+
 export interface ResolvedConfig {
   present: boolean;
   defaultRole: "po" | "eng";

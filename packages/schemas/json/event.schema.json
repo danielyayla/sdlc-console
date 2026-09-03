@@ -2856,6 +2856,15 @@
             "headSha": {
               "type": "string",
               "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+            },
+            "artifact": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1
             }
           },
           "required": [

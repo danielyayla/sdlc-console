@@ -210,7 +210,7 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
           reply(res, await acceptGate(store, id, gateOf(body), options.env ?? process.env));
           return;
         case "send-back":
-          reply(res, await sendBackGate(store, id, gateOf(body), str(body, "feedback")));
+          reply(res, await sendBackGate(store, id, gateOf(body), str(body, "feedback"), options.env ?? process.env));
           return;
         case "loop":
           reply(res, await loopChange(store, id));
@@ -224,6 +224,14 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         default:
           throw new ActionError(404, `unknown action ${action}`);
       }
+    }
+    if (parts[1] === "sync" && method === "POST") {
+      if (!options.engine) throw new ActionError(409, "sync needs the engine (start the server with sdlcBin)");
+      const summary = await options.engine.sync();
+      if (!summary) throw new ActionError(409, "GitHub sync is off: config.codeHost is not github or GITHUB_TOKEN is not set");
+      const toast = `sync: ${summary.opened.length} PR(s) opened · ${summary.merges.filter((m) => m.recorded).length} merge(s) recorded · records ${summary.records.pushed ? `PR #${summary.records.number ?? "?"} (${summary.records.ahead} ahead)` : summary.records.error ? `failed: ${summary.records.error}` : "in sync"}${summary.errors.length > 0 ? ` · ${summary.errors.length} error(s)` : ""}`;
+      json(res, 200, { ok: true, sync: summary, toast, revision: store.current?.revision ?? 0 });
+      return;
     }
     if (parts[1] === "sessions" && method === "POST") {
       const registry = options.registry;

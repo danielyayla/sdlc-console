@@ -66,7 +66,7 @@ export function describeEvent(e: Event): string {
     case "evals.red":
       return `evals red (${e.data.passed}/${e.data.total})`;
     case "pr.opened":
-      return `PR opened${e.data.number ? ` #${e.data.number}` : ""}`;
+      return e.data.artifact !== undefined ? `${["intent.md", "spec.md", "plan.md", "evals", "pr.yaml", "incident.md"][e.data.artifact] ?? "artifact"} in review${e.data.number ? ` as PR #${e.data.number}` : ""}` : `PR opened${e.data.number ? ` #${e.data.number}` : ""}`;
     case "pr.merged":
       return `PR merged${e.data.number ? ` #${e.data.number}` : ""}`;
     case "review.finding":

@@ -155,7 +155,14 @@ export const events = {
   ),
   "pr.opened": ev(
     "pr.opened",
-    z.strictObject({ number: z.number().int().min(1).optional(), url: z.string().optional(), headSha: gitSha }),
+    z.strictObject({
+      number: z.number().int().min(1).optional(),
+      url: z.string().optional(),
+      headSha: gitSha,
+      /** Present for an artifact PR (GitHub mode): which artifact is in review, and on which branch. */
+      artifact: artifactIndex.optional(),
+      branch: nonEmpty.optional(),
+    }),
     actor,
   ),
   "pr.merged": ev(

@@ -11,6 +11,8 @@ export interface PullRequest {
   headRef: string;
   baseRef: string;
   reviewers: string[];
+  /** Login of whoever merged it, when GitHub reports one. */
+  mergedBy: string | null;
   draft: boolean;
   /** GitHub's `mergeable_state` (clean, blocked, dirty, unstable, …) when known. */
   mergeableState: string | null;
@@ -25,6 +27,7 @@ interface RawPull {
   head: { sha: string; ref: string };
   base: { ref: string };
   requested_reviewers?: { login: string }[];
+  merged_by?: { login: string } | null;
   draft?: boolean;
   mergeable_state?: string | null;
 }
@@ -40,6 +43,7 @@ function normalise(raw: RawPull): PullRequest {
     headRef: raw.head.ref,
     baseRef: raw.base.ref,
     reviewers: (raw.requested_reviewers ?? []).map((r) => r.login),
+    mergedBy: raw.merged_by?.login ?? null,
     draft: raw.draft ?? false,
     mergeableState: raw.mergeable_state ?? null,
   };
@@ -63,6 +67,13 @@ export async function openPull(client: GitHubClient, repo: GitHubRepo, input: Op
 export async function getPull(client: GitHubClient, repo: GitHubRepo, number: number): Promise<PullRequest> {
   const r = await client.get<RawPull>(`${base(repo)}/pulls/${number}`);
   return normalise(r.data);
+}
+
+/** The open PR whose head is `headBranch`, or null. */
+export async function findOpenPull(client: GitHubClient, repo: GitHubRepo, headBranch: string): Promise<PullRequest | null> {
+  const r = await client.get<RawPull[]>(`${base(repo)}/pulls?state=open&head=${encodeURIComponent(`${repo.owner}:${headBranch}`)}&per_page=10`);
+  const hit = r.data.find((p) => p.head.ref === headBranch);
+  return hit ? normalise(hit) : null;
 }
 
 export interface MergePullInput {

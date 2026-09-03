@@ -26,7 +26,7 @@ function hostError(e: unknown): CodeHostError {
  */
 export class GitHubCodeHost implements CodeHost {
   readonly provider = "github" as const;
-  private readonly client: GitHubClient;
+  readonly client: GitHubClient;
   private readonly remote: string;
 
   constructor(private readonly opts: GitHubCodeHostOptions) {

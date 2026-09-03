@@ -1,5 +1,6 @@
 import { git, mergeIfUnmerged } from "@sdlc/adapter-git";
-import { codeHostFor } from "@sdlc/server";
+import { StateStore, acceptViaPr, artifactPrFor, codeHostFor, sendBackViaPr, ActionError } from "@sdlc/server";
+import type { GitHubCodeHost } from "@sdlc/adapter-github";
 import { accept, sendBack, type ChangeView } from "@sdlc/core";
 import type { GateNumber } from "@sdlc/schemas";
 import { actingIdentity, assertHuman, baseBranch, commitPlan, loadCommitted, transitionContext, viewOf, type CliContext } from "../context.js";
@@ -13,6 +14,20 @@ export interface GateResult {
   view: ChangeView;
 }
 
+function cliError(e: unknown): CliError {
+  if (e instanceof ActionError) return new CliError(e.message, 2, e.diagnostics);
+  return new CliError((e as Error).message, 2);
+}
+
+/** GitHub mode: when the gate's artifact is a pull request, gate actions go through it; returns the store to act with. */
+async function githubArtifactPr(ctx: CliContext, codeHost: "local" | "github", who: { id: string; name: string }, id: string, gate: GateNumber): Promise<StateStore | null> {
+  if (codeHost !== "github" || gate === 5) return null;
+  const store = new StateStore({ root: ctx.root, identity: who });
+  const snap = await store.refresh();
+  const v = snap.changes.find((c) => c.id === id);
+  return v && artifactPrFor(v, gate, snap.branches) ? store : null;
+}
+
 export function parseGate(raw: string | undefined): GateNumber {
   const n = Number(raw);
   if (![1, 2, 3, 5, 6].includes(n)) throw new CliError("--gate must be 1, 2, 3, 5 or 6");
@@ -24,6 +39,17 @@ export async function acceptCommand(ctx: CliContext, id: string, gate: GateNumbe
   const who = await actingIdentity(ctx);
   const { repo } = await loadCommitted(ctx);
   const view = viewOf(repo, id);
+  const viaPr = await githubArtifactPr(ctx, repo.config.codeHost, who, id, gate);
+  if (viaPr) {
+    try {
+      const host = codeHostFor("github", ctx.io.env) as GitHubCodeHost;
+      const r = await acceptViaPr({ host, identity: who }, viaPr, id, gate);
+      const after = await loadCommitted(ctx);
+      return { id, gate, commit: r.commit, mergeSha: r.mergeSha, view: viewOf(after.repo, id) };
+    } catch (e) {
+      throw cliError(e);
+    }
+  }
   let mergeSha: string | undefined;
   let source: "cli" | "pr.merge" = "cli";
   if (gate === 5) {
@@ -61,6 +87,17 @@ export async function sendBackCommand(ctx: CliContext, id: string, gate: GateNum
   const who = await actingIdentity(ctx);
   const { repo } = await loadCommitted(ctx);
   const view = viewOf(repo, id);
+  const viaPr = await githubArtifactPr(ctx, repo.config.codeHost, who, id, gate);
+  if (viaPr) {
+    try {
+      const host = codeHostFor("github", ctx.io.env) as GitHubCodeHost;
+      const r = await sendBackViaPr({ host, identity: who }, viaPr, id, gate, feedback);
+      const after = await loadCommitted(ctx);
+      return { id, gate, commit: r.commit, view: viewOf(after.repo, id) };
+    } catch (e) {
+      throw cliError(e);
+    }
+  }
   const r = sendBack(repo, view, gate, feedback, transitionContext(who));
   if (!r.ok) throw new CliError(`send-back refused`, 2, r.diagnostics);
   const commit = await commitPlan(ctx, repo, r.plan, who);

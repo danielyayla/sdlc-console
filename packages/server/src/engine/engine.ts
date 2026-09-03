@@ -4,6 +4,8 @@ import { launchSession, worktreePathFor, type SessionRegistry, type StoredSessio
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
+import { gitHubCodeHostFrom } from "@sdlc/adapter-github";
+import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
 
 export interface EngineOptions {
   store: StateStore;
@@ -19,6 +21,8 @@ export interface EngineOptions {
   log?: (line: string) => void;
   /** Environment for the code host (`GITHUB_TOKEN`); defaults to the process environment. */
   env?: Record<string, string | undefined>;
+  /** GitHub mode: minimum gap between PR polls on ticks (default 30 s). */
+  syncIntervalMs?: number;
 }
 
 /**
@@ -30,6 +34,9 @@ export interface EngineOptions {
 export class Engine {
   private ticking = false;
   private pending = false;
+  private lastSync = 0;
+  private syncing = false;
+  private warnedNoToken = false;
   private closed = false;
   private readonly unsubscribe: () => void;
 
@@ -66,12 +73,39 @@ export class Engine {
         if (!view.valid || view.closed) continue;
         await this.forChange(repo, view).catch((e: unknown) => this.log(`${view.id}: ${(e as Error).message}`));
       }
+      if (repo.config.codeHost === "github" && Date.now() - this.lastSync >= (this.opts.syncIntervalMs ?? 30_000)) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
     } finally {
       this.ticking = false;
       if (this.pending) {
         this.pending = false;
         await this.tick();
       }
+    }
+  }
+
+  /**
+   * GitHub mode pass: artifact branches become PRs, merges done on GitHub are
+   * recorded, the records PR is refreshed. Null when not in GitHub mode or
+   * without a token.
+   */
+  async sync(): Promise<SyncSummary | null> {
+    await this.opts.store.refresh();
+    const repo = this.opts.store.currentRepo;
+    if (!repo || repo.config.codeHost !== "github" || this.syncing || this.closed) return null;
+    const host = gitHubCodeHostFrom(this.opts.env ?? process.env);
+    if (!host) {
+      if (!this.warnedNoToken) this.log("config.codeHost is github but GITHUB_TOKEN is not set; artifact PRs and merge detection are off");
+      this.warnedNoToken = true;
+      return null;
+    }
+    this.syncing = true;
+    this.lastSync = Date.now();
+    try {
+      const summary = await syncGitHub({ host, identity: this.opts.identity, ...(this.opts.now ? { now: this.opts.now } : {}), log: (l) => this.log(l) }, this.opts.store);
+      if (summary.opened.length > 0 || summary.merges.some((m) => m.recorded)) this.opts.store.rebuild();
+      return summary;
+    } finally {
+      this.syncing = false;
     }
   }
 
