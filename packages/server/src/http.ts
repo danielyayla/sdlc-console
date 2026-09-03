@@ -101,6 +101,8 @@ export interface AppOptions {
   claudeBin?: string;
   engine?: Engine;
   jobs?: JobStore;
+  /** Environment for the code host (`GITHUB_TOKEN`). */
+  env?: Record<string, string | undefined>;
 }
 
 export interface HttpApp {
@@ -205,7 +207,7 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
           return;
         }
         case "accept":
-          reply(res, await acceptGate(store, id, gateOf(body)));
+          reply(res, await acceptGate(store, id, gateOf(body), options.env ?? process.env));
           return;
         case "send-back":
           reply(res, await sendBackGate(store, id, gateOf(body), str(body, "feedback")));

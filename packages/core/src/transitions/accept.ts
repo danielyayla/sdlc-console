@@ -37,7 +37,7 @@ export function accept(repo: Repo, view: ChangeView, gate: GateNumber, ctx: Tran
   const writes: FileWrite[] = [];
   const events = [];
 
-  events.push(ev.human("gate.accepted", check.role, cycle, { gate, artifactSha: sha, source: "cli" }));
+  events.push(ev.human("gate.accepted", check.role, cycle, { gate, artifactSha: sha, source: ctx.source ?? "cli" }));
 
   if (gate === 3) {
     const planText = readFile(repo.tree, `${dir}/plan.md`)?.content ?? "";
@@ -51,6 +51,7 @@ export function accept(repo: Repo, view: ChangeView, gate: GateNumber, ctx: Tran
   if (gate === 5) {
     if (!files.pr) return refuse("pr.missing", "pr.yaml is missing", `${dir}/pr.yaml`);
     if (!ctx.mergeSha) return refuse("merge.sha-missing", "gate 5 needs the merge commit sha (the adapter merges first)");
+    if (repo.config.codeHost === "github" && ctx.source !== "pr.merge") return refuse("gate.via-code-host", "in github mode gate 5 is the pull request merge (source pr.merge)");
     const merged = { ...files.pr, mergedAt: ctx.now, mergeSha: ctx.mergeSha };
     writes.push({ path: `${dir}/pr.yaml`, content: stringifyYaml(merged) });
     const number = files.pr.number;
