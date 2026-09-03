@@ -6,3 +6,14 @@
  * that no runtime dependency outside the `@sdlc/` scope is declared.
  */
 export const PACKAGE_NAME = "@sdlc/core" as const;
+
+export * from "./tree.js";
+export * from "./stages.js";
+export * from "./config.js";
+export * from "./fingerprint.js";
+export * from "./events.js";
+export * from "./activity.js";
+export * from "./eligibility.js";
+export * from "./repo.js";
+export * from "./derive.js";
+export * from "./queues.js";

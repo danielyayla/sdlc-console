@@ -12,5 +12,8 @@
   },
   "files": [
     "dist"
-  ]
+  ],
+  "dependencies": {
+    "@sdlc/schemas": "workspace:*"
+  }
 }

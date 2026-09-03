@@ -22,3 +22,4 @@ export * from "./bands.js";
 export * from "./registry.js";
 export * from "./validate.js";
 export * from "./parse/index.js";
+export * from "./glob.js";
