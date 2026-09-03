@@ -10,6 +10,7 @@ import {
   dismissFinding,
   dismissTriage,
   escalateFinding,
+  importFindings,
   intentFromIncident,
   loadRepo,
   mergeOverlaps,
@@ -343,5 +344,25 @@ describe("triage and finding routing", () => {
     expect(dismissFinding(repo, "SEC-0118", "", ENG_CTX()).ok).toBe(false);
     const dismissed = loadRepo(applyWritePlan(tree, expectOk(dismissFinding(repo, "SEC-0118", "false positive: parameterised", ENG_CTX()))));
     expect(dismissed.findings[0]).toMatchObject({ status: "dismissed", dismissal: { reason: "false positive: parameterised" } });
+  });
+});
+
+describe("importFindings", () => {
+  it("allocates ids for new scanner ids, updates known ones, keeps dismissed dismissed", () => {
+    const tree = withFilesT(baseTree(), {
+      "sdlc/security/findings/SEC-0118.yaml": "schema: 1\nid: SEC-0118\nscannerId: cs:1\nsev: high\nconf: 0.9\nrepo: invoicing\ntitle: SQL injection\ndesc: d\nstatus: dismissed\ndismissal: { by: eng@example.com, reason: parameterised }\n",
+    });
+    const repo = loadRepo(tree);
+    const rows = [
+      { scannerId: "cs:1", sev: "high" as const, conf: 0.95, repo: "invoicing", title: "SQL injection", desc: "still reported" },
+      { scannerId: "cs:2", sev: "low" as const, conf: 0.5, repo: "invoicing", title: "Verbose errors", desc: "" },
+    ];
+    expect(importFindings(repo, rows, PO_CTX()).ok).toBe(false);
+    const plan = expectOk(importFindings(repo, rows, ENG_CTX()));
+    expect(plan.commitMessage).toBe("sdlc(security): import 1 new finding, 1 updated");
+    const after = loadRepo(applyWritePlan(tree, plan));
+    expect(after.findings.map((f) => [f.id, f.scannerId, f.status])).toEqual([["SEC-0118", "cs:1", "dismissed"], ["SEC-0119", "cs:2", "new"]]);
+    expect(after.findings[0]?.desc).toBe("still reported");
+    expect(importFindings(after, rows, ENG_CTX()).ok).toBe(false);
   });
 });

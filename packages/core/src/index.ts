@@ -21,3 +21,4 @@ export * from "./ids.js";
 export * from "./writeplan.js";
 export * from "./transitions/index.js";
 export * from "./validate/index.js";
+export * from "./metrics.js";

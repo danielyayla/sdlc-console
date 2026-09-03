@@ -81,3 +81,36 @@ describe("Gates (acceptance e)", () => {
     expect(eng).toContain('class="badge">2<');
   });
 });
+
+describe("Loop, Security, Metrics (spec §4)", () => {
+  it("Loop shows the bands table, the tier footer and both triage cards with their actions", () => {
+    const html = render({ ...initialState("po"), view: "loop" });
+    expect(html).toContain("p95_latency_ms");
+    expect(html).toContain("no data · needs detection snapshots");
+    expect(html).toContain("1σ log, 2σ diagnose read-only, 3σ propose via PR or pre-approved runbook.");
+    expect(html).toContain("TRI-0042");
+    expect(html).toContain("TRI-0043");
+    expect(html).toContain("Accept → Plan");
+    expect(html).toContain("Dismiss · tune band");
+    expect(html).not.toContain("Queue clear");
+  });
+  it("Security shows severity chips, statuses, actions only while new, and the governance footer", () => {
+    const html = render({ ...initialState("eng"), view: "security" });
+    expect(html).toContain("SEC-0118");
+    expect(html).toContain("SEC-0120");
+    expect(html).toContain("patch in PR gate");
+    expect(html).toContain("Patch → PR gate");
+    expect(html).toContain("Wider than one patch → intent.md");
+    expect(html).toContain("Dismiss with reason");
+    expect((html.match(/Wider than one patch/g) ?? []).length).toBe(2);
+    expect(html).toContain("the proposing agent cannot approve its own fix");
+  });
+  it("Metrics renders six stage cards with leading/lagging halves and n/a notes", () => {
+    const html = render({ ...initialState("po"), view: "metrics" });
+    expect((html.match(/class="half"/g) ?? []).length).toBe(12);
+    expect(html).toContain("intents committed");
+    expect(html).toContain("n/a · needs PR metadata");
+    expect(html).toContain("first-pass green");
+    expect(html).toContain("67%");
+  });
+});

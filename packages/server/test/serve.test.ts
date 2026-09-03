@@ -46,6 +46,7 @@ describe("sdlc serve", () => {
     expect(snap.badges).toEqual({ po: { gates: 3, loop: 2, security: 2 }, eng: { gates: 2, loop: 2, security: 2 } });
     expect(snap.sessions).toHaveLength(4);
     expect(snap.hooks.filter((h) => h.source === "hooks")).toHaveLength(3);
+    expect(snap.metrics.map((m) => m.stage)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(snap.validation.blocking).toBe(false);
     const one = (await (await fetch(`${server.url}/api/changes/CHG-0020`)).json()) as { autoEligible: { value: boolean } };
     expect(one.autoEligible.value).toBe(true);
@@ -114,6 +115,8 @@ describe("sdlc serve", () => {
 
     const esc = await post(`${server.url}/api/findings/SEC-0118/escalate`);
     expect(esc.status).toBe(403); // po identity cannot route findings
+    expect((await post(`${server.url}/api/findings/import`, { text: "scannerId,sev,title\nx,high,T" })).status).toBe(403);
+    expect((await post(`${server.url}/api/findings/import`, { text: "" })).status).toBe(400);
     const created = await post(`${server.url}/api/changes`, { title: "Dunning reminders", kind: "feature", risk: "routine", origin: "idea" });
     expect(created.status).toBe(200);
     expect(created.body["changeId"]).toBe("CHG-0025");

@@ -1,8 +1,10 @@
 import {
   badges,
+  computeMetrics,
   deriveAll,
   gateQueues,
   validateTree,
+  type StageMetrics,
   type Badges,
   type ChangeView,
   type Repo,
@@ -58,6 +60,7 @@ export interface Snapshot {
   skills: ParsedSkill[];
   agents: ParsedAgent[];
   bands: Bands | null;
+  metrics: StageMetrics[];
   validation: { blocking: boolean; diagnostics: RuleDiagnostic[] };
 }
 
@@ -87,6 +90,7 @@ export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionR
     skills: repo.skills,
     agents: repo.agents,
     bands: repo.bands,
+    metrics: computeMetrics(repo, all.changes, { now: now.toISOString() }),
     validation: { blocking: validation.blocking, diagnostics: validation.diagnostics },
   };
 }

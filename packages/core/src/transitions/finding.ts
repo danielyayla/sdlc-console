@@ -1,4 +1,5 @@
-import { stringifyJson, stringifyYaml, type EvalCase, type Finding } from "@sdlc/schemas";
+import { stringifyJson, stringifyYaml, type EvalCase, type Finding, type FindingRow } from "@sdlc/schemas";
+import { nextId } from "../ids.js";
 import { holdsRole } from "../config.js";
 import type { Repo } from "../repo.js";
 import { refuse, type TransitionResult } from "../writeplan.js";
@@ -110,6 +111,61 @@ export function dismissFinding(repo: Repo, id: string, reason: string, ctx: Tran
       files: [{ path: findingPath(id), content: stringifyYaml(next) }],
       events: [],
       commitMessage: `sdlc(${id}): dismiss — ${reason.trim()}`,
+      trailers: { "SDLC-Actor": `human:${ctx.actor.id}` },
+      actor: { type: "human", id: ctx.actor.id },
+    },
+  };
+}
+
+/**
+ * Ingest scanner rows (CSV/MD import or webhook): new scanner ids get the next
+ * SEC-NNNN; known ids keep their routing status so a dismissed finding never
+ * returns as `new` (FR-62, decisions Q12).
+ */
+export function importFindings(repo: Repo, rows: readonly FindingRow[], ctx: TransitionContext): TransitionResult {
+  const denied = requireSecurity(repo, ctx);
+  if (denied) return denied;
+  if (rows.length === 0) return refuse("import.empty", "no findings to import");
+  const known = new Map(repo.findings.map((f) => [f.scannerId, f]));
+  const ids = new Set(repo.findings.map((f) => f.id));
+  const files: { path: string; content: string }[] = [];
+  let created = 0;
+  let updated = 0;
+  for (const row of rows) {
+    const existing = known.get(row.scannerId);
+    if (existing) {
+      const next: Finding = { ...existing, sev: row.sev, conf: row.conf, title: row.title, desc: row.desc, ...(row.validated !== undefined ? { validated: row.validated } : {}) };
+      if (JSON.stringify(next) !== JSON.stringify(existing)) {
+        files.push({ path: findingPath(existing.id), content: stringifyYaml(next) });
+        updated++;
+      }
+      continue;
+    }
+    const id = nextId("SEC", ids);
+    ids.add(id);
+    const finding: Finding = {
+      schema: 1,
+      id,
+      scannerId: row.scannerId,
+      sev: row.sev,
+      conf: row.conf,
+      ...(row.validated !== undefined ? { validated: row.validated } : {}),
+      repo: row.repo,
+      title: row.title,
+      desc: row.desc,
+      status: "new",
+    };
+    files.push({ path: findingPath(id), content: stringifyYaml(finding) });
+    created++;
+  }
+  if (files.length === 0) return refuse("import.nothing-new", "every finding is already known and unchanged");
+  return {
+    ok: true,
+    plan: {
+      changeId: null,
+      files,
+      events: [],
+      commitMessage: `sdlc(security): import ${created} new finding${created === 1 ? "" : "s"}${updated ? `, ${updated} updated` : ""}`,
       trailers: { "SDLC-Actor": `human:${ctx.actor.id}` },
       actor: { type: "human", id: ctx.actor.id },
     },

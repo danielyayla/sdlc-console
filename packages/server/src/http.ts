@@ -11,6 +11,7 @@ import {
   findingDismiss,
   findingEscalate,
   findingPatch,
+  findingsImport,
   loopChange,
   newChange,
   sendBackGate,
@@ -207,6 +208,10 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
       const body = await readBody(req);
       if (parts[3] === "accept") return reply(res, await triageAccept(store, parts[2]));
       if (parts[3] === "dismiss") return reply(res, await triageDismiss(store, parts[2], str(body, "reason"), str(body, "bandTune", false) || undefined));
+    }
+    if (parts[1] === "findings" && parts[2] === "import" && method === "POST") {
+      const body = await readBody(req);
+      return reply(res, await findingsImport(store, str(body, "text")));
     }
     if (parts[1] === "findings" && parts[2] && method === "POST") {
       const body = await readBody(req);

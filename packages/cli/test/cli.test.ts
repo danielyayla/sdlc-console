@@ -231,3 +231,33 @@ describe("usage", () => {
     expect(h.out).toContain("sdlc audit <CHG>");
   });
 });
+
+describe("triage and security", () => {
+  it("imports findings, routes them, and accepts/dismisses triage items", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    put(dir, "scan.csv", "scannerId,sev,conf,repo,title,desc\ncs:1,high,0.9,invoicing,SQL injection,unescaped\ncs:2,low,0.4,invoicing,Verbose errors,traces\n");
+    const imported = await sdlc(dir, ["security", "import", "scan.csv", "--json"], { SDLC_IDENTITY: "eng@example.com" });
+    expect(imported.code).toBe(0);
+    expect(imported.json<{ imported: number }>().imported).toBe(2);
+    expect((await sdlc(dir, ["security", "patch", "SEC-0002"], { SDLC_IDENTITY: "eng@example.com" })).code).toBe(0);
+    expect((await sdlc(dir, ["security", "dismiss", "SEC-0002"], { SDLC_IDENTITY: "eng@example.com" })).code).toBe(2);
+    const esc = await sdlc(dir, ["security", "escalate", "SEC-0001", "--json"], { SDLC_IDENTITY: "eng@example.com" });
+    expect(esc.code).toBe(0);
+    expect(esc.json<{ changeId: string }>().changeId).toBe("CHG-0001");
+    expect((await sdlc(dir, ["security", "escalate", "SEC-0001"], { SDLC_IDENTITY: "po@example.com" })).code).toBe(2);
+
+    put(dir, "sdlc/loop/triage/TRI-0001.md", "---\nschema: 1\nid: TRI-0001\ntier: 3σ\nsrc: metric:p95\ntitle: Slow export\nevidence: e\ncreatedAt: 2026-09-03T10:00:00Z\nstatus: open\n---\n" + FULL_INTENT);
+    put(dir, "sdlc/loop/triage/TRI-0002.md", "---\nschema: 1\nid: TRI-0002\ntier: incident\nsrc: s\ntitle: Dup numbers\nevidence: e\ncreatedAt: 2026-09-03T10:00:00Z\nstatus: open\n---\nbody\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "triage items"]);
+    const acc = await sdlc(dir, ["triage", "accept", "TRI-0001", "--json"]);
+    expect(acc.code).toBe(0);
+    expect(acc.json<{ changeId: string }>().changeId).toBe("CHG-0002");
+    expect((await sdlc(dir, ["triage", "dismiss", "TRI-0002"])).code).toBe(2);
+    expect((await sdlc(dir, ["triage", "dismiss", "TRI-0002", "--reason", "duplicate", "--tune", "n/a"])).code).toBe(0);
+    const list = await sdlc(dir, ["change", "list", "--json"]);
+    expect(list.json<{ id: string; origin: { ref?: string } }[]>().map((c) => c.origin.ref)).toEqual(["TRI-0001", "SEC-0001"]);
+    expect((await sdlc(dir, ["validate"])).code).toBe(0);
+  });
+});

@@ -3,7 +3,9 @@ import { auditCommand, renderAudit } from "./commands/audit.js";
 import { changeList, changeNew, changeShow, summarize } from "./commands/change.js";
 import { acceptCommand, parseGate, sendBackCommand } from "./commands/gate.js";
 import { init } from "./commands/init.js";
+import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
+import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
 import { loopCommand } from "./commands/loop.js";
 import { formatDiagnostic, validateCommand } from "./commands/validate.js";
 import { repoContext } from "./context.js";
@@ -21,6 +23,9 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc loop <CHG> [--incident <file>]
   sdlc audit <CHG>
   sdlc serve [--port n] [--role po|eng]
+  sdlc triage accept|dismiss <TRI> [--reason <text>] [--tune <note>]
+  sdlc security patch|escalate|dismiss <SEC> [--reason <text>]
+  sdlc security import <file|->
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
@@ -42,6 +47,8 @@ const OPTIONS = {
   feedback: { type: "string" },
   incident: { type: "string" },
   port: { type: "string" },
+  reason: { type: "string" },
+  tune: { type: "string" },
   role: { type: "string" },
   "no-wait": { type: "boolean", default: false },
 } as const;
@@ -140,6 +147,28 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (!sub) throw new CliError("usage: sdlc loop <CHG> [--incident <file>]");
         const r = await loopCommand(ctx, sub, values.incident ? { incident: values.incident } : {});
         emit(io, json, r, () => `${r.id}: loop closed → cycle ${r.cycle}, stage ${r.view.stage} (${r.view.status}) · ${r.commits.map((c) => c.slice(0, 7)).join(", ")}`);
+        return 0;
+      }
+      case "triage": {
+        const ctx = await repoContext(io, json);
+        const id = rest[0];
+        if (!id || (sub !== "accept" && sub !== "dismiss")) throw new CliError("usage: sdlc triage accept|dismiss <TRI>");
+        const r = sub === "accept" ? await triageAcceptCommand(ctx, id) : await triageDismissCommand(ctx, id, values.reason ?? "", values.tune);
+        emit(io, json, r, () => (r.changeId ? `${r.id} accepted → ${r.changeId} at the Plan gate · ${r.commit.slice(0, 7)}` : `${r.id} dismissed · ${r.commit.slice(0, 7)}`));
+        return 0;
+      }
+      case "security": {
+        const ctx = await repoContext(io, json);
+        const id = rest[0];
+        if (sub === "import") {
+          if (!id) throw new CliError("usage: sdlc security import <file|->");
+          const r = await securityImportCommand(ctx, id);
+          emit(io, json, r, () => `imported ${r.imported} finding${r.imported === 1 ? "" : "s"} · ${r.commit.slice(0, 7)}`);
+          return 0;
+        }
+        if (!id || (sub !== "patch" && sub !== "escalate" && sub !== "dismiss")) throw new CliError("usage: sdlc security patch|escalate|dismiss <SEC>");
+        const r = await securityCommand(ctx, sub, id, values.reason);
+        emit(io, json, r, () => (r.changeId ? `${r.id} escalated → ${r.changeId} at the Plan gate · ${r.commit.slice(0, 7)}` : `${r.id} ${sub === "patch" ? "patch in PR gate" : "dismissed"} · ${r.commit.slice(0, 7)}`));
         return 0;
       }
       case "serve": {

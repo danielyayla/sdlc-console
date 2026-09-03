@@ -9,6 +9,7 @@ import {
   dismissFinding,
   dismissTriage,
   escalateFinding,
+  importFindings,
   loop,
   patchFinding,
   proposeTasks,
@@ -20,7 +21,7 @@ import {
   type Repo,
   type TaskInput,
 } from "@sdlc/core";
-import type { GateNumber } from "@sdlc/schemas";
+import { parseFindingsImport, type GateNumber } from "@sdlc/schemas";
 import { ActionError, type StateStore } from "./store.js";
 import type { Snapshot } from "./snapshot.js";
 
@@ -132,4 +133,13 @@ export async function findingEscalate(store: StateStore, findingId: string): Pro
 export async function findingDismiss(store: StateStore, findingId: string, reason: string): Promise<ActionResult> {
   const r = await store.act((repo, ctx) => dismissFinding(repo, findingId, reason, ctx));
   return { ...r, toast: `${findingId} dismissed`, changeId: null };
+}
+
+export async function findingsImport(store: StateStore, text: string): Promise<ActionResult> {
+  const parsed = parseFindingsImport(text, "import");
+  if (!parsed.ok || !parsed.value) throw new ActionError(400, parsed.diagnostics[0]?.message ?? "nothing to import", parsed.diagnostics);
+  const rows = parsed.value;
+  const r = await store.act((repo, ctx) => importFindings(repo, rows, ctx));
+  const created = r.snapshot.findings.length;
+  return { ...r, toast: `imported ${rows.length} finding${rows.length === 1 ? "" : "s"} · ${created} on file`, changeId: null };
 }

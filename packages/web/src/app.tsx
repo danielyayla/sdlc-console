@@ -5,6 +5,9 @@ import type { Role } from "./lib/format";
 import { initialState, reduce, type UIState } from "./state";
 import { ChangeDetail } from "./views/ChangeDetail";
 import { Gates } from "./views/Gates";
+import { Loop } from "./views/Loop";
+import { Metrics } from "./views/Metrics";
+import { Security } from "./views/Security";
 import { Pipeline } from "./views/Pipeline";
 import { Placeholder } from "./views/Placeholder";
 import { Toast } from "./views/Toast";
@@ -17,9 +20,11 @@ export interface AppProps {
   now?: Date;
   loadArtifact?: (id: string, index: number) => Promise<Artifact>;
   live?: boolean;
+  /** Injected prompt for tests; defaults to window.prompt. */
+  promptImpl?: (text: string) => string | null;
 }
 
-export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true }: AppProps) {
+export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true, promptImpl }: AppProps) {
   const [state, dispatch] = useReducer(reduce, initial ?? initialState());
   const [snapshot, setSnapshot] = useState<Snapshot | null>(injected);
   const [connected, setConnected] = useState(injected !== null);
@@ -78,9 +83,26 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
   else if (state.view === "gates") body = <Gates changes={changes} queues={snapshot.queues[state.role]} role={state.role} now={now} onSelect={(id) => dispatch({ type: "select", id })} />;
   else if (state.view === "sessions") body = <Placeholder title="Sessions" item="1.6" />;
   else if (state.view === "config") body = <Placeholder title="Config" item="1.8" />;
-  else if (state.view === "loop") body = <Placeholder title="Loop" item="1.3" />;
-  else if (state.view === "security") body = <Placeholder title="Security" item="1.3" />;
-  else if (state.view === "metrics") body = <Placeholder title="Metrics" item="1.3" />;
+  else if (state.view === "loop")
+    body = (
+      <Loop
+        snapshot={snapshot}
+        onAccept={(id) => void run(`/triage/${id}/accept`, {})}
+        onDismiss={(id, reason, tune) => void run(`/triage/${id}/dismiss`, { reason, bandTune: tune })}
+        {...(promptImpl ? { prompt: promptImpl } : {})}
+      />
+    );
+  else if (state.view === "security")
+    body = (
+      <Security
+        snapshot={snapshot}
+        onPatch={(id) => void run(`/findings/${id}/patch`, {})}
+        onEscalate={(id) => void run(`/findings/${id}/escalate`, {})}
+        onDismiss={(id, reason) => void run(`/findings/${id}/dismiss`, { reason })}
+        {...(promptImpl ? { prompt: promptImpl } : {})}
+      />
+    );
+  else if (state.view === "metrics") body = <Metrics metrics={snapshot.metrics} />;
   else body = <Pipeline changes={changes} now={now} onSelect={(id) => dispatch({ type: "select", id })} />;
 
   const blocking = snapshot?.validation.blocking ?? false;

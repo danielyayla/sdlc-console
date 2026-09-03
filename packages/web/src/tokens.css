@@ -143,3 +143,25 @@ a { color: inherit; }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--bg-raised); color: var(--text-primary); border: 1px solid var(--border-default); border-radius: 999px; padding: 8px 16px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5); display: flex; gap: 8px; align-items: center; }
 .toast .check { color: var(--green); }
 .placeholder { max-width: 920px; color: var(--text-faint); }
+
+/* loop / security */
+.loop, .security { max-width: 920px; }
+.bands { width: 100%; border-collapse: collapse; background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-panel); overflow: hidden; }
+.bands th { text-align: left; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); background: var(--bg-raised); padding: 8px 10px; }
+.bands td { padding: 8px 10px; border-top: 1px solid var(--border-subtle); font-size: 13px; }
+.bands td.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--text-muted); }
+.footer { color: var(--text-faint); font-size: 12px; margin: 10px 0 22px; }
+.subhead { font-size: 12px; margin-bottom: 14px; }
+.tcard { background: var(--bg-panel); border: 1px solid var(--border-default); border-radius: var(--radius-card); padding: 12px; margin-bottom: 10px; }
+.tcard.dismissed { opacity: 0.5; }
+.tcard .actions { margin-top: 10px; }
+
+/* metrics */
+.metrics { max-width: 1020px; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.halves { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.metric { padding: 6px 0; border-top: 1px solid var(--border-subtle); }
+.metric-head { display: flex; align-items: center; gap: 6px; }
+.metric-name { font-size: 12px; color: var(--text-muted); flex: 1; }
+.metric-value { font-size: 19px; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.metric-note { font-size: 11px; color: var(--text-faint); }
