@@ -32,7 +32,7 @@ const JOBS: Record<number, { job: JobKind; promptRef: string; allowedTools: stri
   2: { job: "design-pass", promptRef: "prompts/design-pass@1", allowedTools: ["Read", "Grep", "Skill", "mcp__sdlc__propose_artifact", "mcp__sdlc__log_note"], output: "spec.md (index 1) via propose_artifact with flagged concerns" },
   3: { job: "plan-session", promptRef: "prompts/plan-session@1", allowedTools: ["Read", "Grep", "Glob", "mcp__sdlc__submit_plan_revision", "mcp__sdlc__log_note", "mcp__sdlc__request_input"], output: "plan.md via submit_plan_revision (final=true opens gate 3)" },
   4: { job: "build-session", promptRef: "prompts/build-session@1", allowedTools: ["Read", "Edit", "Write", "Grep", "Glob", "Bash", "mcp__sdlc__report_round", "mcp__sdlc__report_done", "mcp__sdlc__request_input", "mcp__sdlc__log_note"], output: "commits on the task branch; rounds via report_round; report_done only when green" },
-  5: { job: "review", promptRef: "prompts/review@1", allowedTools: ["Read", "Grep", "mcp__sdlc__log_note"], output: "review findings via log_note; never approve or merge" },
+  5: { job: "review", promptRef: "prompts/review@1", allowedTools: ["Read", "Grep", "Glob", "mcp__sdlc__report_finding", "mcp__sdlc__log_note"], output: "review findings via report_finding, ranked by severity; never approve or merge" },
   6: { job: "diagnose", promptRef: "prompts/diagnose@1", allowedTools: ["Read", "Grep", "mcp__sdlc__propose_artifact", "mcp__sdlc__log_note"], output: "incident.md (index 5) via propose_artifact" },
 };
 

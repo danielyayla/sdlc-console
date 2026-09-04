@@ -62,11 +62,11 @@ async function sdlc(dir: string, args: string[], identity = PO): Promise<{ code:
 const INTENT = "# Intent: Dunning reminders schedule\n\n## Problem\nOverdue invoices get no reminders.\n\n## Proposed outcome\nThree reminders at 7, 14 and 30 days.\n\n## Affected users and systems\nFinance; email service.\n\n## Constraints\nBrand voice; no reminders on disputed invoices.\n\n## Open questions\nEscalate after 30 days?\n";
 
 describe("sdlc-mcp tools", () => {
-  it("lists the nine tools and no accept/merge/approve", async () => {
+  it("lists the ten tools and no accept/merge/approve", async () => {
     const dir = await seeded();
     const c = await client(dir);
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "report_done", "report_round", "request_input", "submit_plan_revision"]);
+    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "report_done", "report_finding", "report_round", "request_input", "submit_plan_revision"]);
   });
 
   it("list_work, get_change, get_context describe the awaited artifact and the bundle", async () => {
@@ -172,4 +172,27 @@ describe("sdlc-mcp tools", () => {
     expect(v2.activity[0]?.text).toBe("filter removed in csv.ts");
     expect(v2.activity[1]?.text).toContain("Keep zero-total rows");
   }, 20_000);
+
+  it("report_finding keeps findings with the session (no commit, PR head untouched) and refuses a change without a PR", async () => {
+    const dir = await seeded();
+    const head = (await git(dir, ["rev-parse", "HEAD"])).trim();
+    const c = await client(dir, { SDLC_SESSION: "sess-review01" });
+    // CHG-0018 is at stage 4 without pr.yaml
+    const refused = await call(c, "report_finding", { changeId: "CHG-0018", severity: "high", title: "unguarded null" });
+    expect(refused.isError).toBe(true);
+    expect(String(refused.value["error"])).toContain("no pull request");
+    // CHG-0017 is in Deploy with an open PR
+    const one = await call(c, "report_finding", { changeId: "CHG-0017", severity: "high", title: "CSV export ignores the header row", path: "src/export/csv.ts", detail: "line 12: rows.slice(1) drops the header before the truthiness filter" });
+    expect(one.isError).toBe(false);
+    expect(one.value).toMatchObject({ n: 1, changeId: "CHG-0017", tally: { high: 1, medium: 0, low: 0 } });
+    const two = await call(c, "report_finding", { changeId: "CHG-0017", severity: "low", title: "naming: exportCsv vs export_csv" });
+    expect(two.value).toMatchObject({ n: 2, tally: { high: 1, medium: 0, low: 1 } });
+    const lines = readFileSync(join(dir, ".sdlc-state", "sessions", "sess-review01", "findings.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as { n: number; severity: string; title: string; path?: string });
+    expect(lines.map((l) => [l.n, l.severity, l.path ?? null])).toEqual([[1, "high", "src/export/csv.ts"], [2, "low", null]]);
+    // nothing was committed: the system mirrors findings when the session ends
+    expect((await git(dir, ["rev-parse", "HEAD"])).trim()).toBe(head);
+    const merged = await call(c, "report_finding", { changeId: "CHG-0012", severity: "low", title: "late" });
+    expect(merged.isError).toBe(true);
+    expect(String(merged.value["error"])).toContain("already merged");
+  });
 });

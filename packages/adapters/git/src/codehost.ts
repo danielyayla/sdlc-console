@@ -15,10 +15,24 @@ export interface OpenPrInput {
   planMatches: boolean | null;
   nextSeq: number;
   now: string;
-  /** Verdict of the run that opened the PR; published as the evidence check. */
-  evidence?: "pass" | "fail";
-  /** Literal output excerpt for the evidence check description. */
-  evidenceSummary?: string;
+  /** Checks carried by the run that opened the PR (`evidence`, `evals`); each becomes a `pr.yaml` check and, on GitHub, a commit status `sdlc/<name>`. */
+  checks: PrCheck[];
+}
+
+export interface PrCheck {
+  name: string;
+  verdict: "pass" | "fail" | "pending";
+  /** One line, literal (a count, a verdict); never a summary of the output. */
+  summary: string;
+}
+
+/** What a finished review job reports to the code host: the tally as a check, the findings verbatim. */
+export interface ReviewReport {
+  headSha: string;
+  session: string;
+  findings: { severity: "high" | "medium" | "low"; title: string; path?: string; detail?: string }[];
+  tally: { high: number; medium: number; low: number };
+  verdict: "pass" | "fail";
 }
 
 export interface OpenPrResult {
@@ -37,6 +51,8 @@ export interface CodeHost {
   openPr(input: OpenPrInput): Promise<OpenPrResult>;
   /** Merge the PR as the acting human; returns the merge commit sha now on the local base branch. */
   merge(root: string, pr: Pr, message: string, who: GitIdentity): Promise<string>;
+  /** Publish a review job's outcome on the PR (tally check + findings). Findings inform; nothing here approves. */
+  reportReview(root: string, pr: Pr, report: ReviewReport): Promise<void>;
 }
 
 /** Error from the code host; `retryable` maps to HTTP 502 with retry in the console. */
@@ -83,10 +99,15 @@ export class LocalCodeHost implements CodeHost {
       headSha: input.headSha,
       openedAt: input.now,
       reviewers: [],
-      checks: [{ name: "evidence", verdict: input.evidence ?? "pass" }],
+      checks: input.checks.map((c) => ({ name: c.name, verdict: c.verdict })),
       planMatches: input.planMatches,
     };
     return recordOpenedPr(input, pr);
+  }
+
+  /** Local mode has no PR surface: the write-plan (`pr.yaml`, ledger) is the whole record. */
+  reportReview(): Promise<void> {
+    return Promise.resolve();
   }
 
   async merge(root: string, pr: Pr, message: string, who: GitIdentity): Promise<string> {

@@ -8,6 +8,8 @@ export interface PromptInput {
   sessionId: string;
   target: string | null;
   guidance?: string | null;
+  /** REVIEW.md verbatim (review sessions); the console parses it, never edits it. */
+  reviewPolicy?: string | null;
 }
 
 const COMMON = (p: PromptInput) => `You are working on change ${p.view.id} ("${p.view.title}", cycle ${p.view.cycle}) in an AI-native SDLC. Files in git are the source of truth; humans decide at gates; you never accept, merge or approve anything.
@@ -35,6 +37,14 @@ Task: read the accepted intent.md and spec.md and this codebase (read-only), the
 
 Task: implement the accepted plan.md in this worktree on the current branch. Target (done criterion): ${p.target ?? "see plan.md acceptance line"}.
 Rules: stay within the files listed in plan.md (the plan-sync hook blocks commits outside it — update plan.md in the same commit if the plan must change); never edit tests under a test freeze (the test-freeze hook blocks it — use mcp__sdlc__request_input to propose test changes); run the verification commands from CLAUDE.md after every meaningful step and record each run with mcp__sdlc__report_round (one result per command, verbatim output excerpt); commit your work on this branch with messages like "sdlc(${p.view.id}): <what>"; when the last round is all green, call mcp__sdlc__report_done. Done is only accepted when the latest round is green with output.${guidance}`;
+    case "review":
+      return `${COMMON(p)}
+
+Task: review the pull request for this change${p.view.pr ? ` (${p.view.pr.url ?? p.view.pr.branch} → ${p.view.pr.baseBranch}, head ${p.view.pr.headSha.slice(0, 7)})` : ""}. This worktree is the PR branch; read-only. Compare the diff against spec.md and plan.md (planMatches: ${p.view.planMatches === null ? "unknown" : p.view.planMatches ? "yes" : "no"}) and the evidence under sdlc/changes/${p.view.id}/evals/.
+Review policy (REVIEW.md, verbatim):
+${p.reviewPolicy ?? "(no REVIEW.md in this repository — review for bugs, security and compliance with spec.md and plan.md)"}
+
+Report every finding with mcp__sdlc__report_finding (severity high|medium|low, title, path, detail with the exact evidence). Rank by severity; do not pad. Do not edit files, do not push, do not approve, request changes or merge — the code owner decides on the PR. When you have reported everything, stop.${guidance}`;
     case "diagnose":
       return `${COMMON(p)}
 

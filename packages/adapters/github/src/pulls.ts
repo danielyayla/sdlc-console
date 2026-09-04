@@ -101,9 +101,16 @@ export async function mergePull(client: GitHubClient, repo: GitHubRepo, number: 
   return r.data;
 }
 
+export type ReviewEvent = "COMMENT" | "REQUEST_CHANGES";
+
+/** Post a review on the PR. `APPROVE` is deliberately not an option: nothing the console runs approves. */
+export async function reviewPull(client: GitHubClient, repo: GitHubRepo, number: number, input: { event: ReviewEvent; body: string }): Promise<void> {
+  await client.post(`${base(repo)}/pulls/${number}/reviews`, { event: input.event, body: input.body });
+}
+
 /** Send-back in GitHub mode: a "request changes" review carrying the feedback. */
 export async function requestChanges(client: GitHubClient, repo: GitHubRepo, number: number, body: string): Promise<void> {
-  await client.post(`${base(repo)}/pulls/${number}/reviews`, { event: "REQUEST_CHANGES", body });
+  await reviewPull(client, repo, number, { event: "REQUEST_CHANGES", body });
 }
 
 export async function commentOnPull(client: GitHubClient, repo: GitHubRepo, number: number, body: string): Promise<void> {

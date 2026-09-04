@@ -3163,6 +3163,9 @@
             },
             "path": {
               "type": "string"
+            },
+            "detail": {
+              "type": "string"
             }
           },
           "required": [

@@ -25,6 +25,14 @@ export const pr = z.strictObject({
     z.strictObject({ name: nonEmpty, verdict: z.enum(["pass", "fail", "pending"]) }),
   ),
   planMatches: z.boolean().nullable(),
+  /** The review job that ran against `headSha`; absent until a review session has finished. */
+  review: z
+    .strictObject({
+      session: nonEmpty,
+      headSha: gitSha,
+      at: isoTimestamp,
+    })
+    .optional(),
 });
 
 export type Pr = z.infer<typeof pr>;

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CodeHostError, git, initRepo, isAncestor, readTree } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo } from "@sdlc/core";
 import { PO, writeSeed } from "@sdlc/fixtures";
+import { appendFinding } from "@sdlc/mcp";
 import { ActionError, Engine, JobStore, SessionRegistry, StateStore, acceptGate, codeHostFor, launchSession, type Exec } from "../src/index.js";
 import { startFakeGitHub, type FakeGitHub } from "../../adapters/github/test/fake-github.js";
 
@@ -81,12 +82,15 @@ describe("GitHub mode (2.1): green run pushes the branch, opens a real PR, gate 
 
     const view = await viewOf(dir, "CHG-0018");
     expect(view.stage).toBe(5);
-    expect(view.pr).toMatchObject({ provider: "github", number: 1, url: "https://github.example/acme/widgets/pull/1", branch: "CHG-0018/export-fix", baseBranch: "main", checks: [{ name: "evidence", verdict: "pass" }] });
+    expect(view.pr).toMatchObject({ provider: "github", number: 1, url: "https://github.example/acme/widgets/pull/1", branch: "CHG-0018/export-fix", baseBranch: "main", checks: [{ name: "evidence", verdict: "pass" }, { name: "evals", verdict: "pass" }] });
     const pushed = (await git(gh.bare, ["rev-parse", "refs/heads/CHG-0018/export-fix"])).trim();
     expect(view.pr?.headSha).toBe(pushed);
     expect(gh.state.pulls[0]).toMatchObject({ head: "CHG-0018/export-fix", base: "main", title: expect.stringContaining("sdlc(CHG-0018)") });
     expect(gh.state.pulls[0]?.body).toContain("sdlc/changes/CHG-0018/plan.md");
-    expect(gh.state.statuses).toEqual([{ sha: pushed, body: { state: "success", context: "sdlc/evidence", description: expect.stringContaining("green"), target_url: "https://github.example/acme/widgets/pull/1" } }]);
+    expect(gh.state.statuses).toEqual([
+      { sha: pushed, body: { state: "success", context: "sdlc/evidence", description: expect.stringContaining("green"), target_url: "https://github.example/acme/widgets/pull/1" } },
+      { sha: pushed, body: { state: "success", context: "sdlc/evals", description: expect.stringContaining("eval cases"), target_url: "https://github.example/acme/widgets/pull/1" } },
+    ]);
     const opened = view.activity.find((a) => a.event === "pr.opened");
     expect(opened?.text).toContain("#1");
     // the lifecycle records stay on the console's local default branch; origin main is untouched until the merge
@@ -328,6 +332,69 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     expect(g2.toast).toContain("Build");
     expect((await viewOf(dir, "CHG-0022")).stage).toBe(3);
   }, 60_000);
+});
+
+describe("review findings mirror + check runs in GitHub mode (2.3)", () => {
+  it("evidence and evals statuses at open; a review session's findings become events, tally, findings status and a COMMENT review — and never block the code owner", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const h = await buildAndRun(dir, env);
+    expect(h.job?.state).toBe("done");
+    const pushed = (await git(gh.bare, ["rev-parse", "refs/heads/CHG-0018/export-fix"])).trim();
+    expect(gh.state.statuses.map((s) => s.body["context"])).toEqual(["sdlc/evidence", "sdlc/evals"]);
+
+    // the review session reads the PR branch worktree and commits nothing there: the PR head stays the tested head
+    const review = await launchSession({ changeId: "CHG-0018", kind: "review", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
+    expect(review.session.worktreePath).toBe(h.worktree);
+    expect(review.session.branch).toBe("CHG-0018/export-fix");
+    expect((await git(h.worktree, ["rev-parse", "HEAD"])).trim()).toBe(pushed);
+    const startedOnMain = (await git(dir, ["log", "-1", "--format=%s", "main"])).trim();
+    expect(startedOnMain).toContain(`session ${review.session.id} started`);
+
+    appendFinding(h.worktree, review.session.id, { n: 1, ts: "2026-09-04T09:05:00Z", severity: "high", title: "export drops rows whose amount is 0", path: "src/export/csv.ts", detail: "rows.filter(Boolean) removes { amount: 0 } — spec §2 requires zero-total rows" });
+    appendFinding(h.worktree, review.session.id, { n: 2, ts: "2026-09-04T09:06:00Z", severity: "low", title: "no test for the empty export" });
+    h.registry.patch(review.session.id, { status: "done" });
+    const job = await h.engine.mirrorForSession({ ...review.session, status: "done" });
+    expect(job?.state).toBe("done");
+    expect(job?.note).toBe(`review of ${pushed.slice(0, 7)}: 1 high · 0 medium · 1 low`);
+
+    const view = await viewOf(dir, "CHG-0018");
+    expect(view.stage).toBe(5);
+    expect(view.pr?.findings).toEqual({ high: 1, medium: 0, low: 1 });
+    expect(view.pr?.checks).toEqual([{ name: "evidence", verdict: "pass" }, { name: "evals", verdict: "pass" }, { name: "findings", verdict: "fail" }]);
+    expect(view.pr?.review).toEqual({ session: review.session.id, headSha: pushed, at: "2026-09-04T09:00:00Z" });
+    expect(view.findings.map((f) => [f.severity, f.title, f.path, f.session])).toEqual([
+      ["high", "export drops rows whose amount is 0", "src/export/csv.ts", review.session.id],
+      ["low", "no test for the empty export", null, review.session.id],
+    ]);
+    const events = view.activity.filter((a) => a.event === "review.finding");
+    expect(events).toHaveLength(2);
+    expect(events.every((a) => a.actor === "agent")).toBe(true);
+    // the commit is the system's; the PR head did not move
+    expect((await git(dir, ["log", "-1", "--format=%an <%ae>", "main"])).trim()).toBe("sdlc-bot <sdlc-bot@sdlc.local>");
+    expect((await git(gh.bare, ["rev-parse", "refs/heads/CHG-0018/export-fix"])).trim()).toBe(pushed);
+    // on GitHub: the tally as a failing status on the reviewed head, the findings verbatim as a COMMENT review (never an approval)
+    expect(gh.state.statuses.at(-1)).toEqual({ sha: pushed, body: { state: "failure", context: "sdlc/findings", description: `review of ${pushed.slice(0, 7)}: 1 high · 0 medium · 1 low`, target_url: "https://github.example/acme/widgets/pull/1" } });
+    expect(gh.state.reviews).toHaveLength(1);
+    expect(gh.state.reviews[0]?.body["event"]).toBe("COMMENT");
+    const body = String(gh.state.reviews[0]?.body["body"]);
+    expect(body).toContain("- **high** export drops rows whose amount is 0 — `src/export/csv.ts`");
+    expect(body).toContain("rows.filter(Boolean) removes { amount: 0 }");
+    expect(body).toContain("- **low** no test for the empty export");
+    expect(gh.state.reviews.some((r) => r.body["event"] === "APPROVE")).toBe(false);
+
+    // mirroring the same session again is a no-op job; a second review of the same head is refused by the record
+    expect(await h.engine.mirrorForSession({ ...review.session, status: "done" })).toBeNull();
+    const again = await launchSession({ changeId: "CHG-0018", kind: "review", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
+    h.registry.patch(again.session.id, { status: "done" });
+    const dup = await h.engine.mirrorForSession({ ...again.session, status: "done" });
+    expect(dup?.state).toBe("failed");
+    expect(dup?.error).toContain("already reviewed");
+
+    // findings inform: the code owner still merges through the API
+    const r = await acceptGate(h.store, "CHG-0018", 5, env);
+    expect(r.toast).toContain("Maintain");
+    expect((await viewOf(dir, "CHG-0018")).stage).toBe(6);
+  }, 40_000);
 });
 
 async function gitRawShow(dir: string, spec: string): Promise<string | null> {

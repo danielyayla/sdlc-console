@@ -122,7 +122,13 @@ export async function runPerChange(input: RunInput, repo: Repo): Promise<RunOutc
   if (green) {
     const planMatches = view.planMatches ?? check.planSync(fileSet, view.planFiles, `${files.dir}/plan.md`).allowed;
     const host = input.codeHost ?? codeHostFor(repo.config.codeHost, input.env);
-    const opened = await host.openPr({ root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now(), evidence: "pass", evidenceSummary: `per-change run ${n} green · ${passed}/${total} checks passed` });
+    const cmdPassed = commandResults.filter((r) => r.pass).length;
+    const casesPassed = results.filter((r) => r.pass).length;
+    const checks = [
+      { name: "evidence", verdict: "pass" as const, summary: `per-change run ${n} green · ${cmdPassed}/${commandResults.length} verification commands passed` },
+      { name: "evals", verdict: "pass" as const, summary: results.length === 0 ? `per-change run ${n} · no eval cases intersect the diff` : `per-change run ${n} · ${casesPassed}/${results.length} intersecting eval cases passed` },
+    ];
+    const opened = await host.openPr({ root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now(), checks });
     prCommit = opened.commit;
   } else {
     for (let i = files.runs.length - 1; i >= 0 && files.runs[i]?.verdict === "red"; i--) reds++;
