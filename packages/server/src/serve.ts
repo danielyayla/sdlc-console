@@ -1,6 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { identity as gitIdentity, isRepo, repoRoot, type GitIdentity } from "@sdlc/adapter-git";
 import { Engine, JobStore } from "./engine/index.js";
+import { collectSources, FactsCache } from "./metrics/index.js";
 import { DeliveryLog } from "./github/webhooks.js";
 import { createApp } from "./http.js";
 import { enrich, SessionRegistry } from "./sessions/registry.js";
@@ -38,6 +39,7 @@ export interface RunningServer {
   jobs: JobStore;
   /** Webhook deliveries (null without the engine). */
   deliveries: DeliveryLog | null;
+  facts: FactsCache;
   close: () => Promise<void>;
 }
 
@@ -49,14 +51,15 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
   if (!who) throw new Error("no git identity — set user.email before serving");
   const registry = new SessionRegistry(root);
   const sessions = opts.sessions ? () => opts.sessions?.() ?? [] : (repo: import("@sdlc/core").Repo | null) => registry.list().map((s) => enrich(s, repo));
-  const store = new StateStore({ root, identity: who, sessions });
+  const facts = new FactsCache(registry.database);
+  const store = new StateStore({ root, identity: who, sessions, facts: (repo) => collectSources(repo, facts) });
   await store.refresh();
   const jobs = new JobStore(registry.database);
   const engine = opts.sdlcBin
-    ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, ...(opts.log ? { log: opts.log } : {}), ...(opts.env ? { env: opts.env } : {}) })
+    ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, facts, ...(opts.log ? { log: opts.log } : {}), ...(opts.env ? { env: opts.env } : {}) })
     : null;
   const deliveries = engine ? new DeliveryLog(registry.database) : null;
-  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(engine ? { engine, jobs } : {}), ...(deliveries ? { deliveries } : {}), ...(opts.env ? { env: opts.env } : {}) });
+  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(engine ? { engine, jobs } : {}), facts, ...(deliveries ? { deliveries } : {}), ...(opts.env ? { env: opts.env } : {}) });
   if (engine && opts.engine) void engine.tick();
   const watcher = opts.watch === false ? null : watchRepo(root, () => void store.refresh().catch(() => undefined));
   const host = opts.host ?? "127.0.0.1";
@@ -71,6 +74,7 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     engine,
     jobs,
     deliveries,
+    facts,
     close: async () => {
       watcher?.close();
       engine?.close();

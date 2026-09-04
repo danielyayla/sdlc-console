@@ -116,13 +116,20 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect((html.match(/Wider than one patch/g) ?? []).length).toBe(2);
     expect(html).toContain("the proposing agent cannot approve its own fix");
   });
-  it("Metrics renders six stage cards with leading/lagging halves and n/a notes", () => {
+  it("Metrics renders six stage cards with leading/lagging halves, source chips, the feeds header and % trend chips", () => {
     const html = render({ ...initialState("po"), view: "metrics" });
     expect((html.match(/class="half"/g) ?? []).length).toBe(12);
     expect(html).toContain("intents committed");
-    expect(html).toContain("n/a · needs PR metadata");
+    expect(html).toContain("n/a · needs detection snapshots");
     expect(html).toContain("first-pass green");
     expect(html).toContain("67%");
+    expect(html).toContain("PR metadata · git mirror");
+    expect(html).toContain("incident records · git mirror");
+    expect(html).toContain('<span class="metric-sources">pr</span>');
+    expect(html).toContain("review time per PR");
+    expect(html).toContain("median of 1 · review job");
+    expect(html).toContain('title="previous window: 0"');
+    expect(html).toContain("2 incidents open, none fixed in window");
   });
 });
 

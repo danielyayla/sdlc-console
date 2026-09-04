@@ -47,6 +47,12 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
   const token = opts.token ?? "ghp_test";
   const state: FakeState = { protected: opts.protected ?? true, pulls: [], statuses: [], reviews: [], comments: [], requests: [] };
   const prefix = `/repos/${owner}/${repo}`;
+  // when the fake recorded a status or review, served as created_at/updated_at/submitted_at unless the body carries its own
+  const recordedAt = new WeakMap<object, string>();
+  const record = <T extends object>(entry: T): T => {
+    recordedAt.set(entry, new Date().toISOString());
+    return entry;
+  };
 
   const headOf = async (ref: string): Promise<string | null> => {
     const r = await gitRaw(opts.bare, ["rev-parse", "--verify", `refs/heads/${ref}^{commit}`]);
@@ -141,15 +147,29 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
       }
     }
     if ((m = /^\/pulls\/(\d+)\/reviews$/.exec(rest)) && method === "POST") {
-      state.reviews.push({ number: Number(m[1]), body });
+      state.reviews.push(record({ number: Number(m[1]), body }));
       return send(res, 200, { id: state.reviews.length, state: body["event"] });
+    }
+    if ((m = /^\/pulls\/(\d+)\/reviews$/.exec(rest)) && method === "GET") {
+      const n = Number(m[1]);
+      const reviews = state.reviews.map((r, i) => ({ id: i + 1, number: r.number, submitted_at: recordedAt.get(r) ?? null, user: recordedAt.has(r) ? { login: "token-user" } : null, ...r.body, state: r.body["state"] ?? (r.body["event"] === "REQUEST_CHANGES" ? "CHANGES_REQUESTED" : r.body["event"] === "APPROVE" ? "APPROVED" : "COMMENTED") }));
+      return send(res, 200, reviews.filter((r) => r.number === n));
+    }
+    if ((m = /^\/commits\/([0-9a-f]{40})\/status$/.exec(rest)) && method === "GET") {
+      const sha = m[1] ?? "";
+      const latest = new Map<string, Record<string, unknown>>();
+      for (const s of state.statuses) if (s.sha === sha) latest.set(String(s.body["context"]), { created_at: recordedAt.get(s) ?? null, updated_at: recordedAt.get(s) ?? null, ...s.body });
+      const statuses = [...latest.values()];
+      const states = statuses.map((s) => String(s["state"]));
+      const combined = states.length === 0 ? "pending" : states.some((x) => x === "failure" || x === "error") ? "failure" : states.every((x) => x === "success") ? "success" : "pending";
+      return send(res, 200, { state: combined, sha, statuses });
     }
     if ((m = /^\/issues\/(\d+)\/comments$/.exec(rest)) && method === "POST") {
       state.comments.push({ number: Number(m[1]), body: String(body["body"]) });
       return send(res, 201, { id: state.comments.length });
     }
     if ((m = /^\/statuses\/([0-9a-f]{40})$/.exec(rest)) && method === "POST") {
-      state.statuses.push({ sha: m[1] ?? "", body });
+      state.statuses.push(record({ sha: m[1] ?? "", body }));
       return send(res, 201, { id: state.statuses.length, ...body });
     }
     return send(res, 404, { message: `no route ${method} ${rest}` });

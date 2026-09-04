@@ -1,8 +1,9 @@
+import { collectSources, type FactsCache } from "./metrics/index.js";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { gitRaw } from "@sdlc/adapter-git";
-import { readFile, type ArtifactIndex, type Tree } from "@sdlc/core";
+import { computeMetrics, deriveAll, parseWindow, readFile, type ArtifactIndex, type Tree } from "@sdlc/core";
 import { readRounds } from "@sdlc/mcp";
 import { parseFrontMatter, type GateNumber } from "@sdlc/schemas";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -155,6 +156,8 @@ export interface AppOptions {
   /** Records write-backs (FR-16): the connector and retry policy the link/retry actions use; defaults to `.mcp.json`. */
   writeback?: WritebackDeps;
   jobs?: JobStore;
+  /** Metrics facts cache (FR-70); `GET /api/metrics` reads the git mirror alone without it. */
+  facts?: FactsCache;
   /** Processed webhook deliveries (replay guard); the receiver is off without it. */
   deliveries?: DeliveryLog;
   /** Environment for the code host (`GITHUB_TOKEN`) and the webhook receiver (`GITHUB_WEBHOOK_SECRET`). */
@@ -214,6 +217,25 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
     if (method === "GET" && parts[1] === "jobs") {
       json(res, 200, options.jobs?.list() ?? []);
       return;
+    }
+    if (parts[1] === "metrics") {
+      if (method === "GET" && parts.length === 2) {
+        const days = parseWindow(url.searchParams.get("window") ?? undefined);
+        if (days === null) throw new ActionError(400, `window must be like 7d, 30d or 90d (got ${url.searchParams.get("window") ?? ""})`);
+        await store.refresh();
+        const repo = store.currentRepo;
+        if (!repo) throw new ActionError(502, "repository not loaded", [], true);
+        const collected = collectSources(repo, options.facts ?? null);
+        const now = store.current?.generatedAt ?? new Date().toISOString();
+        json(res, 200, { window: `${days}d`, generatedAt: now, sources: collected.status, metrics: computeMetrics(repo, deriveAll(repo).changes, { now, windowDays: days, sources: collected.sources }) });
+        return;
+      }
+      if (method === "POST" && parts[2] === "refresh" && parts.length === 3) {
+        const r = options.engine ? await options.engine.refreshMetricFacts() : null;
+        if (!r) throw new ActionError(409, "metrics facts come from the git mirror here: refresh needs config.codeHost github, GITHUB_TOKEN and sdlc serve with the engine");
+        json(res, 200, { ...r, snapshot: store.current });
+        return;
+      }
     }
     if (method === "GET" && parts[1] === "health") {
       json(res, 200, { ok: true, revision: store.current?.revision ?? 0 });

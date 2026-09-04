@@ -140,3 +140,22 @@ describe("sdlc serve", () => {
     expect(snap.validation.blocking).toBe(false);
   }, 15_000);
 });
+
+describe("GET /api/metrics (FR-70)", () => {
+  it("computes the table for a window and reports the feeds; refresh is refused outside GitHub mode", async () => {
+    const { server } = await seededServer();
+    const r = (await (await fetch(`${server.url}/api/metrics?window=7d`)).json()) as { window: string; sources: { pr: { via: string }; incidents: { via: string } }; metrics: { stage: number; leading: { key: string; value: number | null; note: string }[]; lagging: { key: string; note: string }[] }[] };
+    expect(r.window).toBe("7d");
+    expect(r.sources.pr.via).toBe("git");
+    expect(r.sources.incidents.via).toBe("git");
+    expect(r.metrics).toHaveLength(6);
+    expect(r.metrics[0]?.leading[0]?.note).toBe("7-day window");
+    expect(r.metrics[3]?.lagging.find((v) => v.key === "review_time")?.note).toBe("no reviewed PRs in window");
+    const snap = (await (await fetch(`${server.url}/api/state`)).json()) as Snapshot;
+    expect(snap.metricSources.pr).toEqual({ via: "git", fetchedAt: null, facts: 2 });
+    expect((await fetch(`${server.url}/api/metrics?window=fortnight`)).status).toBe(400);
+    const refresh = await post(`${server.url}/api/metrics/refresh`);
+    expect(refresh.status).toBe(409);
+    expect(String(refresh.body["error"] ?? refresh.body["message"])).toContain("git mirror");
+  }, 60_000);
+});
