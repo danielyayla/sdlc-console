@@ -201,6 +201,9 @@ describe("loop (gate 6, acceptance b)", () => {
     expect(accept(repo, view, 6, ENG_CTX()).ok).toBe(false);
     const plan = expectOk(accept(repo, view, 6, PO_CTX()));
     expect(plan.commitMessage).toBe("sdlc(CHG-0012): accept incident.md (gate 6) → cycle 2");
+    // the decision records how it was made: the CLI by default, the PR merge in GitHub mode
+    expect(plan.events[0]?.event.data).toMatchObject({ gate: 6, source: "cli" });
+    expect(expectOk(accept(repo, view, 6, { ...PO_CTX(), source: "pr.merge" })).events[0]?.event.data).toMatchObject({ gate: 6, source: "pr.merge" });
     const deleted = plan.files.filter((f) => f.content === null).map((f) => f.path);
     expect(deleted).toEqual(expect.arrayContaining(["sdlc/changes/CHG-0012/intent.md", "sdlc/changes/CHG-0012/spec.md", "sdlc/changes/CHG-0012/plan.md", "sdlc/changes/CHG-0012/pr.yaml", "sdlc/changes/CHG-0012/incident.md", "sdlc/changes/CHG-0012/evals/run-1.json"]));
     expect(plan.files.map((f) => f.path)).toContain("sdlc/changes/CHG-0012/cycles/1/incident.md");
