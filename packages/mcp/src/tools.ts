@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { blobSha, commitWritePlan, currentBranch, defaultBranch, git, isRepo, newUlid, readTree, repoRoot } from "@sdlc/adapter-git";
+import { blobSha, commitWritePlan, currentBranch, defaultBranch, git, isRepo, newUlid, readTree, readTreeWithBase, repoRoot } from "@sdlc/adapter-git";
 import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, normalizeReason, proposalForReason, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
 import { appendHookEvent } from "@sdlc/hooks";
 import { changeId as changeIdSchema, compileGlobs, parseArtifact, parsePlan, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
@@ -54,8 +54,10 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
     if (!(await isRepo(opts.cwd))) throw new Refusal(`${opts.cwd} is not a git repository`);
     const root = await repoRoot(opts.cwd);
     const branch = await currentBranch(root);
-    const repo = loadRepo(await readTree(root, "HEAD"));
-    const base = repo.rawConfig?.defaultBranch ?? (await defaultBranch(root));
+    const own = loadRepo(await readTree(root, "HEAD"));
+    const base = own.rawConfig?.defaultBranch ?? (await defaultBranch(root));
+    // on a change branch the lifecycle records (pr.yaml, runs, the console's events) live on the default branch
+    const repo = branch === base ? own : loadRepo(await readTreeWithBase(root, "HEAD", base));
     return { root, branch, base, repo };
   }
 

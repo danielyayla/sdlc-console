@@ -1,5 +1,5 @@
-import { commitWritePlan, headSha, newUlid } from "@sdlc/adapter-git";
-import { findingsVerdict, recordReview, tallyFindings, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
+import { commitWritePlan, diffFiles, headSha, isAncestor, newUlid } from "@sdlc/adapter-git";
+import { findingsVerdict, logPath, recordReview, tallyFindings, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
 import type { Env } from "@sdlc/adapter-github";
 import { DEFAULT_AGENT_ID, readFindings } from "@sdlc/mcp";
 import type { StoredSession } from "../sessions/index.js";
@@ -30,10 +30,24 @@ export interface MirrorOutcome {
  * the default branch; the code host then gets the tally as a check and the
  * findings verbatim. Nothing here approves or merges.
  */
+/**
+ * The head the review looked at is the PR's tested head: the session's own
+ * ledger commits on the branch (notes, rounds) do not move it. Anything else
+ * past the tested head is a real head move, reported as such by recordReview.
+ */
+async function reviewedHead(worktree: string, view: ChangeView): Promise<string> {
+  const head = await headSha(worktree, "HEAD");
+  const tested = view.pr?.headSha;
+  if (!tested || tested === head) return head;
+  if (!(await isAncestor(worktree, tested, head))) return head;
+  const touched = await diffFiles(worktree, tested, head);
+  return touched.every((p) => p === logPath(view.id)) ? tested : head;
+}
+
 export async function mirrorReview(input: MirrorInput, repo: Repo): Promise<MirrorOutcome> {
   const now = (input.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
   const { session, view } = input;
-  const reviewed = await headSha(session.worktreePath, "HEAD");
+  const reviewed = await reviewedHead(session.worktreePath, view);
   const findings = readFindings(session.worktreePath, session.id).map((f) => ({ severity: f.severity, title: f.title, ...(f.path ? { path: f.path } : {}), ...(f.detail ? { detail: f.detail } : {}) }));
   const r = recordReview(repo, view, { session: session.id, agentId: input.env?.["SDLC_AGENT_ID"] ?? DEFAULT_AGENT_ID, headSha: reviewed, findings }, { now, newId: newUlid });
   if (!r.ok) throw new Error(r.diagnostics.map((d) => d.message).join("; "));

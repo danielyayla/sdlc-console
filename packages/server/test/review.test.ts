@@ -147,6 +147,25 @@ describe("review findings mirror (2.3, local mode)", () => {
     expect(view.findings).toEqual([]);
   }, 30_000);
 
+  it("the review session's own ledger commits on the PR branch (a note) do not move the reviewed head: the mirror records the tested head", async () => {
+    const dir = await seeded();
+    const s5 = await toStage5(dir);
+    const review = await launchSession({ changeId: "CHG-0018", kind: "review", mode: "SUPERVISED" }, { root: dir, registry: s5.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE });
+    // log_note from the session lands on the branch, past the tested head
+    const { appendFileSync } = await import("node:fs");
+    appendFileSync(join(s5.worktree, "sdlc/changes/CHG-0018/log.jsonl"), `${JSON.stringify({ schema: 1, id: "01J8Z6Q7Y2K3M4N5P6Q7R8S9TN", ts: "2026-09-04T09:04:00Z", seq: 99, cycle: 1, actor: { type: "agent", id: "claude-code", session: review.session.id }, event: "note", data: { text: "review note" } })}\n`);
+    await git(s5.worktree, ["commit", "-q", "-am", "sdlc(CHG-0018): note"]);
+    expect((await git(s5.worktree, ["rev-parse", "HEAD"])).trim()).not.toBe(s5.head);
+    appendFinding(s5.worktree, review.session.id, { n: 1, ts: "2026-09-04T09:05:00Z", severity: "medium", title: "header row dropped", path: "src/export/csv.ts" });
+    s5.registry.patch(review.session.id, { status: "done" });
+    const job = await s5.engine.mirrorForSession({ ...review.session, status: "done" });
+    expect(job?.state).toBe("done");
+    expect(job?.note).toBe(`review of ${s5.head.slice(0, 7)}: 0 high · 1 medium · 0 low`);
+    const view = await viewOf(dir, "CHG-0018");
+    expect(view.pr?.review).toMatchObject({ session: review.session.id, headSha: s5.head });
+    expect(view.findings.map((f) => [f.severity, f.title])).toEqual([["medium", "header row dropped"]]);
+  }, 30_000);
+
   it("with autoLaunch the engine starts one headless review per PR head and mirrors it when the harness ends; a later tick does not launch again", async () => {
     const dir = await seeded();
     const s5 = await toStage5(dir);
