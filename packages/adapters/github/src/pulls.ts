@@ -1,4 +1,4 @@
-import type { GitHubClient } from "./client.js";
+import { GitHubError, type GitHubClient } from "./client.js";
 import type { GitHubRepo } from "./remote.js";
 
 export interface PullRequest {
@@ -82,6 +82,13 @@ export interface MergePullInput {
   method?: "merge" | "squash" | "rebase";
   title?: string;
   message?: string;
+  /** How long to wait for GitHub's mergeability check (default 10 × 1.5 s). */
+  wait?: MergeWait;
+}
+
+export interface MergeWait {
+  attempts: number;
+  delayMs: number;
 }
 
 export interface MergeResult {
@@ -90,15 +97,46 @@ export interface MergeResult {
   message: string;
 }
 
-/** Merge through the API: branch protection decides (405 when blocked), the sha precondition guards the tested head. */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** GitHub recomputes mergeability after every push and reports `unknown` (405 on merge) meanwhile; wait for a known state. */
+export async function waitMergeable(client: GitHubClient, repo: GitHubRepo, number: number, wait: MergeWait): Promise<PullRequest> {
+  let pull = await getPull(client, repo, number);
+  for (let n = 0; n < wait.attempts && !pull.merged && (pull.mergeableState === null || pull.mergeableState === "unknown"); n++) {
+    await sleep(wait.delayMs);
+    pull = await getPull(client, repo, number);
+  }
+  return pull;
+}
+
+const DEFAULT_WAIT: MergeWait = { attempts: 10, delayMs: 1_500 };
+
+/**
+ * Merge through the API: branch protection decides (405 when blocked), the sha
+ * precondition guards the tested head. The merge is attempted only once GitHub
+ * has computed mergeability for the head — right after a push it answers 405
+ * "not mergeable" until it has — and a 405 met while the state is still
+ * `unknown` is retried within the same wait.
+ */
 export async function mergePull(client: GitHubClient, repo: GitHubRepo, number: number, input: MergePullInput): Promise<MergeResult> {
-  const r = await client.put<MergeResult>(`${base(repo)}/pulls/${number}/merge`, {
-    sha: input.sha,
-    merge_method: input.method ?? "merge",
-    ...(input.title ? { commit_title: input.title } : {}),
-    ...(input.message ? { commit_message: input.message } : {}),
-  });
-  return r.data;
+  const wait = input.wait ?? DEFAULT_WAIT;
+  await waitMergeable(client, repo, number, wait);
+  for (let n = 0; ; n++) {
+    try {
+      const r = await client.put<MergeResult>(`${base(repo)}/pulls/${number}/merge`, {
+        sha: input.sha,
+        merge_method: input.method ?? "merge",
+        ...(input.title ? { commit_title: input.title } : {}),
+        ...(input.message ? { commit_message: input.message } : {}),
+      });
+      return r.data;
+    } catch (e) {
+      if (!(e instanceof GitHubError) || e.status !== 405 || n >= wait.attempts) throw e;
+      await sleep(wait.delayMs);
+      const pull = await getPull(client, repo, number);
+      if (pull.mergeableState !== null && pull.mergeableState !== "unknown") throw e;
+    }
+  }
 }
 
 export type ReviewEvent = "COMMENT" | "REQUEST_CHANGES";
