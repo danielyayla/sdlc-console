@@ -342,6 +342,9 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     await mergeOnGitHub(gh, 1, "priya-gh");
     const sync = await engine.sync();
     expect(sync?.merges).toEqual([{ changeId: "CHG-0022", gate: 2, number: 1, mergedBy: "priya-gh", recorded: true }]);
+    // the merge is taken before the pass looks for branches to open: no attempt to reopen a PR for the merged branch
+    expect(sync?.opened).toEqual([]);
+    expect(sync?.errors).toEqual([]);
     const v = await viewOf(dir, "CHG-0022");
     expect(v.stage).toBe(3);
     const acc = v.activity.find((a) => a.event === "gate.accepted");

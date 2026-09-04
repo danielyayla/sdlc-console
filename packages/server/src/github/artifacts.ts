@@ -356,13 +356,18 @@ export interface SyncSummary {
   errors: string[];
 }
 
-/** One GitHub-mode pass: artifact PRs, merges done on GitHub, records PR. */
+/**
+ * One GitHub-mode pass: merges done on GitHub first (so a branch merged
+ * there is off the list before anything tries to open a PR for it), then
+ * artifact PRs, then the records PR.
+ */
 export async function syncGitHub(mode: GitHubMode, store: StateStore): Promise<SyncSummary> {
-  const opened = await openArtifactPrs(mode, store);
+  const errors: string[] = [];
   const merges = await detectMergedPrs(mode, store).catch((e: Error) => {
-    opened.errors.push(`merge detection: ${e.message}`);
+    errors.push(`merge detection: ${e.message}`);
     return [] as DetectedMerge[];
   });
+  const opened = await openArtifactPrs(mode, store);
   const records = await syncRecords(mode, store);
-  return { opened: opened.opened, pushed: opened.pushed, merges, records, errors: opened.errors };
+  return { opened: opened.opened, pushed: opened.pushed, merges, records, errors: [...errors, ...opened.errors] };
 }
