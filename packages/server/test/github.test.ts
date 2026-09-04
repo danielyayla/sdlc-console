@@ -171,6 +171,7 @@ describe("GitHub mode (2.1): green run pushes the branch, opens a real PR, gate 
 import { parseFrontMatter, stringifyFrontMatter, stringifyJsonl } from "@sdlc/schemas";
 import { addWorktree, commitWritePlan, newUlid } from "@sdlc/adapter-git";
 import { sendBackGate } from "../src/index.js";
+import { commitOnBranch } from "../src/github/artifacts.js";
 
 const PO_ID = { id: PO, name: "Priya Owens" };
 const AGENT = { id: "claude-code@sdlc.local", name: "claude-code" };
@@ -324,6 +325,50 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     sync = await engine.sync();
     expect(sync?.opened).toMatchObject([{ changeId: "CHG-0022", artifact: 1, branch }]);
     expect(await git(gh.bare, ["show", `refs/heads/${branch}:sdlc/changes/CHG-0022/spec.md`])).toContain("CHG-0022");
+  }, 60_000);
+
+  it("a decision committed on the PR branch but not yet merged does not launch the next stage's session; the merge does", async () => {
+    const { dir, gh, env } = await githubSeed();
+    mapLogin(dir, PO, "priya-gh");
+    await git(dir, ["commit", "-q", "-am", "sdlc(config): map priya-gh"]);
+    await git(dir, ["push", "-q", "origin", "main"]);
+    const registry = new SessionRegistry(dir);
+    cleanups.push(() => registry.close());
+    const store = new StateStore({ root: dir, identity: ENG, sessions: () => registry.list() });
+    const jobs = new JobStore(registry.database);
+    const engine = new Engine({ store, registry, jobs, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE, exec: green, autoLaunch: true, env, syncIntervalMs: 3_600_000, now: () => new Date("2026-09-04T09:00:00Z") });
+    cleanups.push(() => engine.close());
+    const po = new StateStore({ root: dir, identity: PO_ID });
+    await acceptGate(po, "CHG-0022", 1, env);
+    const intentSha = (await viewOf(dir, "CHG-0022")).docs[0].sha ?? "";
+    const { branch } = await draftSpec(dir, intentSha);
+    await engine.sync();
+    // the accept's first half: gate.accepted{source: pr.merge} committed on the branch and pushed, the merge still to come
+    const { accept: acceptFn } = await import("@sdlc/core");
+    const snap = await store.refresh(true);
+    const repo = store.currentRepo;
+    const files = repo?.changes.get("CHG-0022");
+    if (!repo || !files) throw new Error("CHG-0022 not loaded");
+    const r = acceptFn(repo, deriveChange(repo, files), 2, { now: "2026-09-04T09:01:00Z", newId: newUlid, actor: { id: PO }, source: "pr.merge" });
+    if (!r.ok) throw new Error(r.diagnostics.map((d) => d.message).join("; "));
+    await commitOnBranch(dir, branch, r.plan, PO_ID);
+    await git(dir, ["push", "-q", "origin", branch]);
+    await store.refresh(true);
+    // the overlay says stage 3; the default branch still says 2 → nothing launches
+    expect((await store.refresh(true)).changes.find((c) => c.id === "CHG-0022")?.stage).toBe(3);
+    expect((await viewOf(dir, "CHG-0022")).stage).toBe(2);
+    await engine.tick();
+    expect(jobs.list().filter((j) => j.changeId === "CHG-0022").map((j) => j.kind)).toEqual([]);
+    // the merge lands (done on GitHub here) → the sync takes it → the plan session launches
+    await mergeOnGitHub(gh, 1, "priya-gh");
+    await engine.sync();
+    expect((await viewOf(dir, "CHG-0022")).stage).toBe(3);
+    await engine.tick();
+    const launched = jobs.list().filter((j) => j.changeId === "CHG-0022");
+    expect(launched.map((j) => j.kind)).toEqual(["plan-session"]);
+    expect(launched[0]?.error ?? null).toBeNull();
+    void snap;
+    cleanups.push(() => new Promise((r3) => setTimeout(r3, 300)));
   }, 60_000);
 
   it("a PR merged on GitHub is recorded under the identity mapped to the merger; an unmapped merger is not guessed", async () => {

@@ -1,5 +1,5 @@
-import { deriveChange, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, reasonKey, validateWritePlan, writebacksInState, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
-import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, type GitIdentity } from "@sdlc/adapter-git";
+import { deriveChange, loadRepo, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, reasonKey, validateWritePlan, writebacksInState, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
+import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
 import { readReproDraft } from "@sdlc/mcp";
 import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
@@ -96,9 +96,21 @@ export class Engine {
     try {
       const repo = this.opts.store.currentRepo;
       if (!repo) return;
+      // the snapshot lays unmerged artifact branches over the default branch; a decision committed on a PR branch
+      // shows there before the merge lands on the default branch, and sessions launch from the default branch
+      const pending = new Set((this.opts.store.current?.branches ?? []).map((b) => b.changeId));
+      const committed = pending.size > 0 ? loadRepo(await readTree(this.opts.store.root, "HEAD")) : null;
       for (const files of repo.changes.values()) {
         const view = deriveChange(repo, files);
         if (!view.valid || view.closed) continue;
+        if (committed && pending.has(view.id)) {
+          const onBase = committed.changes.get(view.id);
+          const baseStage = onBase ? deriveChange(committed, onBase).stage : null;
+          if (baseStage !== view.stage) {
+            this.log(`${view.id}: stage ${view.stage} on an unmerged branch, ${baseStage ?? "absent"} on ${repo.config.defaultBranch} — waiting for the merge`);
+            continue;
+          }
+        }
         await this.forChange(repo, view).catch((e: unknown) => this.log(`${view.id}: ${(e as Error).message}`));
       }
       await this.forWritebacks(repo).catch((e: unknown) => this.log(`write-backs: ${(e as Error).message}`));
