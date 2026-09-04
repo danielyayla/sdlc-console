@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { auditCommand, renderAudit } from "./commands/audit.js";
+import { metricsReport, renderMetrics } from "./commands/metrics.js";
 import { changeList, changeNew, changeShow, summarize } from "./commands/change.js";
 import { acceptCommand, parseGate, sendBackCommand } from "./commands/gate.js";
 import { hookCommand } from "./commands/hook.js";
@@ -31,6 +32,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc send-back <CHG> --gate n --feedback <text>
   sdlc loop <CHG> [--incident <file>]
   sdlc audit <CHG>
+  sdlc metrics [--stage n] [--window 30d] [--refresh]   (per-stage leading/lagging over git, ledger, PR metadata, CI, incident records; --refresh fetches GitHub facts)
   sdlc serve [--port n] [--host addr] [--role po|eng]
   sdlc triage accept|dismiss <TRI> [--reason <text>] [--tune <note>]
   sdlc security patch|escalate|dismiss <SEC> [--reason <text>]
@@ -96,6 +98,8 @@ const OPTIONS = {
   system: { type: "string" },
   id: { type: "string" },
   url: { type: "string" },
+  window: { type: "string" },
+  refresh: { type: "boolean" },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -299,6 +303,11 @@ export async function main(argv: string[], io: Io): Promise<number> {
           return r.loaded ? 0 : 1;
         }
         throw new CliError("usage: sdlc evals run|gate|harvest|trigger");
+      }
+      case "metrics": {
+        const r = await metricsReport(await repoContext(io, json), { stage: typeof values.stage === "string" ? values.stage : undefined, window: typeof values.window === "string" ? values.window : undefined, refresh: values.refresh === true });
+        emit(io, json, r, () => renderMetrics(r));
+        return 0;
       }
       case "audit": {
         const ctx = await repoContext(io, json);

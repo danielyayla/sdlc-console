@@ -1,3 +1,4 @@
+import type { CollectedSources } from "./metrics/index.js";
 import { blobSha, commitWritePlan, GitError, headSha, newUlid, readTreeWithBranches, type ArtifactBranch, type GitIdentity } from "@sdlc/adapter-git";
 import { loadRepo, rolesOf, validateWritePlan, type Repo, type TransitionContext, type TransitionResult, type Tree } from "@sdlc/core";
 import type { Diagnostic } from "@sdlc/schemas";
@@ -23,6 +24,8 @@ export interface StoreOptions {
   /** Session provider; receives the current repo so records can be enriched from the ledger. */
   sessions?: (repo: Repo | null) => SessionRecord[];
   now?: () => Date;
+  /** External facts for the metrics (GitHub cache overlay); defaults to the git mirror alone. */
+  facts?: (repo: Repo) => CollectedSources;
 }
 
 /**
@@ -83,7 +86,7 @@ export class StateStore {
         this.repo = loadRepo(this.tree);
         this.lastHead = key;
         this.revision += 1;
-        this.snapshot = { ...buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date()), branches: this.branches };
+        this.snapshot = { ...buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date(), this.opts.facts?.(this.repo)), branches: this.branches };
         for (const fn of this.listeners) fn(this.snapshot);
         return this.snapshot;
       } finally {
@@ -97,7 +100,7 @@ export class StateStore {
   rebuild(): Snapshot {
     if (!this.repo) throw new Error("store not loaded");
     this.revision += 1;
-    this.snapshot = { ...buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date()), branches: this.branches };
+    this.snapshot = { ...buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date(), this.opts.facts?.(this.repo)), branches: this.branches };
     for (const fn of this.listeners) fn(this.snapshot);
     return this.snapshot;
   }

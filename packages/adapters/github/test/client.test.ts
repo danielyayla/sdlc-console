@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { git } from "@sdlc/adapter-git";
-import { GitHubClient, GitHubError, branchProtected, credentialsFrom, getPull, parseGitHubRemote, parseRepoSlug, publishStatus } from "../src/index.js";
+import { GitHubClient, GitHubError, branchProtected, combinedStatus, credentialsFrom, getPull, listReviews, parseGitHubRemote, parseRepoSlug, publishStatus } from "../src/index.js";
 import { startFakeGitHub, type FakeGitHub } from "./fake-github.js";
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -82,5 +82,33 @@ describe("REST client", () => {
 
   it("refuses to construct without a token", () => {
     expect(() => new GitHubClient({ token: "" })).toThrow(/needs a token/);
+  });
+});
+
+describe("reviews and combined status (metrics sources)", () => {
+  it("lists reviews oldest first and folds statuses per context with their timing", async () => {
+    const gh = await fake();
+    const client = new GitHubClient({ token: gh.token, apiUrl: gh.url });
+    const repo = { owner: gh.owner, repo: gh.repo };
+    gh.state.pulls.push({ number: 1, title: "t", body: "", head: "feature", base: "main", state: "open", merged: false, merge_commit_sha: null, merged_by: null });
+    gh.state.reviews.push({ number: 1, body: { state: "APPROVED", submitted_at: "2026-09-02T10:00:00Z", user: { login: "reviewer" } } });
+    gh.state.reviews.push({ number: 1, body: { state: "COMMENTED", submitted_at: "2026-09-02T09:00:00Z", user: { login: "bot" } } });
+    const reviews = await listReviews(client, repo, 1);
+    expect(reviews.map((r) => [r.login, r.state, r.submittedAt])).toEqual([
+      ["bot", "COMMENTED", "2026-09-02T09:00:00Z"],
+      ["reviewer", "APPROVED", "2026-09-02T10:00:00Z"],
+    ]);
+    const sha = "a".repeat(40);
+    await publishStatus(client, repo, sha, { context: "ci/build", state: "pending" });
+    await publishStatus(client, repo, sha, { context: "ci/build", state: "success", description: "ok" });
+    await publishStatus(client, repo, sha, { context: "sdlc/evidence", state: "failure" });
+    const combined = await combinedStatus(client, repo, sha);
+    expect(combined.state).toBe("failure");
+    expect(combined.statuses.map((s) => [s.context, s.state])).toEqual([
+      ["ci/build", "success"],
+      ["sdlc/evidence", "failure"],
+    ]);
+    expect(combined.statuses[0]?.createdAt).toMatch(/^\d{4}-/);
+    expect(await combinedStatus(client, repo, "b".repeat(40))).toEqual({ state: "pending", statuses: [] });
   });
 });

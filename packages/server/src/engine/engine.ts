@@ -10,7 +10,8 @@ import { mirrorProposal } from "./proposals.js";
 import { runSuite, type SuiteOutcome } from "./suite.js";
 import { nextRunId } from "@sdlc/core";
 import type { EvalRun } from "@sdlc/schemas";
-import { gitHubCodeHostFrom, type WebhookEvent } from "@sdlc/adapter-github";
+import { gitHubCodeHostFrom, type GitHubCodeHost, type WebhookEvent } from "@sdlc/adapter-github";
+import { refreshFacts, type FactsCache, type RefreshSummary } from "../metrics/index.js";
 import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
 import { runWriteback, type WritebackDeps, type WritebackRun } from "../records.js";
 
@@ -32,6 +33,8 @@ export interface EngineOptions {
   syncIntervalMs?: number;
   /** GitHub mode: while webhook deliveries keep arriving, the poll backs off to this gap (default 10 min) — polling is the fallback, not the transport. */
   webhookQuietMs?: number;
+  /** Metrics facts cache (FR-70): GitHub reviews and statuses are refreshed on every GitHub sync pass when set. */
+  facts?: FactsCache;
   /** Records write-backs (FR-16): connector, attempts and backoff per run. Defaults to the `.mcp.json` connector, 3 attempts, 2 s doubling. */
   writeback?: WritebackDeps;
   /** A failed write-back is retried on ticks after this gap (default 10 min); the retry action runs it at once. */
@@ -156,8 +159,33 @@ export class Engine {
     }
     this.lastSync = Date.now();
     const summary = await syncGitHub({ host, identity: this.opts.identity, ...(this.opts.now ? { now: this.opts.now } : {}), log: (l) => this.log(l) }, this.opts.store);
-    if (summary.opened.length > 0 || summary.merges.some((m) => m.recorded)) this.opts.store.rebuild();
+    const fetched = await this.refreshFacts(host).catch((e: Error) => {
+      this.log(`metrics facts: ${e.message}`);
+      return false;
+    });
+    if (summary.opened.length > 0 || summary.merges.some((m) => m.recorded) || fetched) this.opts.store.rebuild();
     return summary;
+  }
+
+  private async refreshFacts(host: GitHubCodeHost): Promise<boolean> {
+    if (!this.opts.facts) return false;
+    const repo = this.opts.store.currentRepo;
+    if (!repo) return false;
+    const r = await refreshFacts(host, this.opts.store.root, repo, this.opts.facts, this.opts.now);
+    for (const e of r.errors) this.log(`metrics facts: ${e}`);
+    return r.prs > 0 || r.statuses > 0;
+  }
+
+  /** On demand (`POST /api/metrics/refresh`): fetch GitHub facts now; null when not in GitHub mode, without a token, or without a cache. */
+  async refreshMetricFacts(): Promise<RefreshSummary | null> {
+    await this.opts.store.refresh();
+    const repo = this.opts.store.currentRepo;
+    if (!repo || repo.config.codeHost !== "github" || !this.opts.facts) return null;
+    const host = gitHubCodeHostFrom(this.opts.env ?? process.env);
+    if (!host) return null;
+    const r = await refreshFacts(host, this.opts.store.root, repo, this.opts.facts, this.opts.now);
+    if (r.prs > 0 || r.statuses > 0) this.opts.store.rebuild();
+    return r;
   }
 
   /** The change whose recorded pull request (code PR or artifact PR) has this number. */

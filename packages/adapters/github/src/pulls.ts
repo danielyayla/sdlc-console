@@ -116,3 +116,26 @@ export async function requestChanges(client: GitHubClient, repo: GitHubRepo, num
 export async function commentOnPull(client: GitHubClient, repo: GitHubRepo, number: number, body: string): Promise<void> {
   await client.post(`${base(repo)}/issues/${number}/comments`, { body });
 }
+
+export interface PullReview {
+  id: number;
+  login: string | null;
+  /** APPROVED, CHANGES_REQUESTED, COMMENTED, DISMISSED, PENDING */
+  state: string;
+  submittedAt: string | null;
+}
+
+interface RawReview {
+  id: number;
+  user?: { login: string } | null;
+  state: string;
+  submitted_at?: string | null;
+}
+
+/** Reviews on a PR, oldest first (metrics: review time per PR). */
+export async function listReviews(client: GitHubClient, repo: GitHubRepo, number: number): Promise<PullReview[]> {
+  const r = await client.get<RawReview[]>(`${base(repo)}/pulls/${number}/reviews?per_page=100`);
+  return r.data
+    .map((x) => ({ id: x.id, login: x.user?.login ?? null, state: x.state, submittedAt: x.submitted_at ?? null }))
+    .sort((a, b) => (a.submittedAt ?? "").localeCompare(b.submittedAt ?? ""));
+}
