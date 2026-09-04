@@ -195,7 +195,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const ctx = await repoContext(io, json);
         if (!sub) throw new CliError("usage: sdlc loop <CHG> [--incident <file>]");
         const r = await loopCommand(ctx, sub, values.incident ? { incident: values.incident } : {});
-        emit(io, json, r, () => `${r.id}: loop closed → cycle ${r.cycle}, stage ${r.view.stage} (${r.view.status}) · ${r.commits.map((c) => c.slice(0, 7)).join(", ")}`);
+        emit(io, json, r, () => (r.inReview ? `${r.id}: incident.md committed on ${r.inReview} · ${r.commits.map((c) => c.slice(0, 7)).join(", ")} — the engine (or sdlc sync) opens its PR; merging it closes the loop` : `${r.id}: loop closed → cycle ${r.cycle}, stage ${r.view.stage} (${r.view.status}) · ${r.commits.map((c) => c.slice(0, 7)).join(", ")}`));
         return 0;
       }
       case "triage": {

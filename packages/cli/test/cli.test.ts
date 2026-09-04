@@ -178,30 +178,35 @@ describe("change new / list / show / validate / accept / send-back / audit", () 
     expect(audit.out).toContain("chain: BROKEN");
   });
 
+/** Hand-build CHG-0001 at stage 6 (merged) on main. */
+async function stage6Fixture(dir: string): Promise<void> {
+  await initAndCommit(dir);
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  // hand-build a change at stage 6 (merged) on main
+  const chg = "sdlc/changes/CHG-0001";
+  put(dir, `${chg}/change.yaml`, `schema: 1\nid: CHG-0001\ntitle: Export\nkind: feature\nrisk: routine\ncreated: { by: po@example.com, at: "2026-09-01T09:00:00Z" }\norigin: { type: idea }\nrecord: null\ncycle: 1\nrepro: null\nclosed: null\n`);
+  put(dir, `${chg}/intent.md`, `---\nid: CHG-0001\nartifact: intent\ncycle: 1\nauthor: po@example.com\ncreated: 2026-09-01T09:00:00Z\nschema: 1\n---\n${FULL_INTENT}`);
+  put(dir, `${chg}/spec.md`, `---\nid: CHG-0001\nartifact: spec\ncycle: 1\nintent_sha: ${sha}\nskills: []\nconcerns: []\ncreated: 2026-09-01T10:00:00Z\nschema: 1\n---\n# Spec: Export\n\n## Requirements\nr\n\n## Design\nd\n\n## Areas of concern\nnone\n\n## Open questions carried forward\nnone\n`);
+  put(dir, `${chg}/plan.md`, `---\nid: CHG-0001\nartifact: plan\ncycle: 1\nspec_sha: ${sha}\nrev: 1\naccepted_by: eng@example.com\naccepted_at: 2026-09-01T11:00:00Z\nacceptance_line: "tests pass"\nschema: 1\n---\n# Plan: Export\n\n## Files that change\nsrc/export.ts (new)\n\n## Order of work\n1. do\n\n## Risks\nnone\n\n## Proof\ntests\n`);
+  const fp = { claudeMdSha: (await git(dir, ["rev-parse", "HEAD:CLAUDE.md"])).trim(), skills: [], hooksSha: (await git(dir, ["rev-parse", "HEAD:.claude/settings.json"])).trim(), model: "claude-opus-5" };
+  put(dir, `${chg}/evals/run-1.json`, JSON.stringify({ schema: 1, n: 1, changeId: "CHG-0001", cycle: 1, worktree: "CHG-0001/src", headSha: sha, fileSet: ["src/export.ts"], configRef: fp, results: [], commandResults: [{ name: "test", cmd: "pnpm test", exitCode: 0, pass: true, output: "ok" }], verdict: "green", startedAt: "2026-09-01T12:00:00Z" }));
+  put(dir, `${chg}/pr.yaml`, `schema: 1\nprovider: local\nbranch: CHG-0001/src\nbaseBranch: main\nheadSha: ${sha}\nopenedAt: 2026-09-01T12:30:00Z\nmergedAt: 2026-09-01T13:00:00Z\nmergeSha: ${sha}\nreviewers: []\nchecks: []\nplanMatches: true\n`);
+  const ev = (seq: number, actor: object, event: string, data: object) => JSON.stringify({ schema: 1, id: `01J8Z6Q7Y2K3M4N5P6Q7R8S9${seq.toString(36).toUpperCase().padStart(2, "0")}`.replace(/[ILOU]/g, "X"), ts: `2026-09-01T09:${String(seq).padStart(2, "0")}:00Z`, seq, cycle: 1, actor, event, data });
+  const po = { type: "human", id: "po@example.com", role: "po" };
+  const eng = { type: "human", id: "eng@example.com", role: "eng" };
+  put(dir, `${chg}/log.jsonl`, [
+    ev(1, po, "gate.accepted", { gate: 1, artifactSha: sha, source: "cli" }),
+    ev(2, po, "gate.accepted", { gate: 2, artifactSha: sha, source: "cli" }),
+    ev(3, eng, "gate.accepted", { gate: 3, artifactSha: sha, source: "cli" }),
+    ev(4, { type: "system", id: "sdlc-bot" }, "pr.merged", { mergeSha: sha }),
+  ].join("\n") + "\n");
+  await git(dir, ["add", "-A"]);
+  await git(dir, ["commit", "-q", "-m", "fixture at stage 6"]);
+}
+
   it("loop --incident commits the incident then re-enters cycle 2", async () => {
     const dir = await freshRepo();
-    await initAndCommit(dir);
-    const sha = "0123456789abcdef0123456789abcdef01234567";
-    // hand-build a change at stage 6 (merged) on main
-    const chg = "sdlc/changes/CHG-0001";
-    put(dir, `${chg}/change.yaml`, `schema: 1\nid: CHG-0001\ntitle: Export\nkind: feature\nrisk: routine\ncreated: { by: po@example.com, at: "2026-09-01T09:00:00Z" }\norigin: { type: idea }\nrecord: null\ncycle: 1\nrepro: null\nclosed: null\n`);
-    put(dir, `${chg}/intent.md`, `---\nid: CHG-0001\nartifact: intent\ncycle: 1\nauthor: po@example.com\ncreated: 2026-09-01T09:00:00Z\nschema: 1\n---\n${FULL_INTENT}`);
-    put(dir, `${chg}/spec.md`, `---\nid: CHG-0001\nartifact: spec\ncycle: 1\nintent_sha: ${sha}\nskills: []\nconcerns: []\ncreated: 2026-09-01T10:00:00Z\nschema: 1\n---\n# Spec: Export\n\n## Requirements\nr\n\n## Design\nd\n\n## Areas of concern\nnone\n\n## Open questions carried forward\nnone\n`);
-    put(dir, `${chg}/plan.md`, `---\nid: CHG-0001\nartifact: plan\ncycle: 1\nspec_sha: ${sha}\nrev: 1\naccepted_by: eng@example.com\naccepted_at: 2026-09-01T11:00:00Z\nacceptance_line: "tests pass"\nschema: 1\n---\n# Plan: Export\n\n## Files that change\nsrc/export.ts (new)\n\n## Order of work\n1. do\n\n## Risks\nnone\n\n## Proof\ntests\n`);
-    const fp = { claudeMdSha: (await git(dir, ["rev-parse", "HEAD:CLAUDE.md"])).trim(), skills: [], hooksSha: (await git(dir, ["rev-parse", "HEAD:.claude/settings.json"])).trim(), model: "claude-opus-5" };
-    put(dir, `${chg}/evals/run-1.json`, JSON.stringify({ schema: 1, n: 1, changeId: "CHG-0001", cycle: 1, worktree: "CHG-0001/src", headSha: sha, fileSet: ["src/export.ts"], configRef: fp, results: [], commandResults: [{ name: "test", cmd: "pnpm test", exitCode: 0, pass: true, output: "ok" }], verdict: "green", startedAt: "2026-09-01T12:00:00Z" }));
-    put(dir, `${chg}/pr.yaml`, `schema: 1\nprovider: local\nbranch: CHG-0001/src\nbaseBranch: main\nheadSha: ${sha}\nopenedAt: 2026-09-01T12:30:00Z\nmergedAt: 2026-09-01T13:00:00Z\nmergeSha: ${sha}\nreviewers: []\nchecks: []\nplanMatches: true\n`);
-    const ev = (seq: number, actor: object, event: string, data: object) => JSON.stringify({ schema: 1, id: `01J8Z6Q7Y2K3M4N5P6Q7R8S9${seq.toString(36).toUpperCase().padStart(2, "0")}`.replace(/[ILOU]/g, "X"), ts: `2026-09-01T09:${String(seq).padStart(2, "0")}:00Z`, seq, cycle: 1, actor, event, data });
-    const po = { type: "human", id: "po@example.com", role: "po" };
-    const eng = { type: "human", id: "eng@example.com", role: "eng" };
-    put(dir, `${chg}/log.jsonl`, [
-      ev(1, po, "gate.accepted", { gate: 1, artifactSha: sha, source: "cli" }),
-      ev(2, po, "gate.accepted", { gate: 2, artifactSha: sha, source: "cli" }),
-      ev(3, eng, "gate.accepted", { gate: 3, artifactSha: sha, source: "cli" }),
-      ev(4, { type: "system", id: "sdlc-bot" }, "pr.merged", { mergeSha: sha }),
-    ].join("\n") + "\n");
-    await git(dir, ["add", "-A"]);
-    await git(dir, ["commit", "-q", "-m", "fixture at stage 6"]);
+    await stage6Fixture(dir);
     const before = await sdlc(dir, ["change", "show", "CHG-0001", "--json"]);
     expect(before.json<{ stage: number; status: string }>()).toMatchObject({ stage: 6, status: "Deployed · monitoring" });
 
@@ -220,6 +225,32 @@ describe("change new / list / show / validate / accept / send-back / audit", () 
     expect(validate.json<{ blocking: boolean }>().blocking).toBe(false);
     const audit = await sdlc(dir, ["audit", "CHG-0001"]);
     expect(audit.out).toContain("— cycle 2 —");
+  });
+
+  it("GitHub mode: loop --incident puts the incident on sdlc/<CHG>/incident for its PR and does not loop; main is untouched", async () => {
+    const dir = await freshRepo();
+    await stage6Fixture(dir);
+    const cfg = join(dir, "sdlc/config.yaml");
+    writeFileSync(cfg, readFileSync(cfg, "utf8").replace("codeHost: local", "codeHost: github"));
+    await git(dir, ["commit", "-q", "-am", "sdlc(config): github mode"]);
+    const main = (await git(dir, ["rev-parse", "HEAD"])).trim();
+    put(dir, "incident.md", "# Incident: Export timeouts\n\n## Anomaly and evidence\np95 12s\n\n## Proposed outcome\nunder 1s\n\n## Affected systems\nexport api\n\n## Open questions\nwhy\n");
+    const r = await sdlc(dir, ["loop", "CHG-0001", "--incident", "incident.md"]);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("incident.md committed on sdlc/CHG-0001/incident");
+    expect(r.out).toContain("merging it closes the loop");
+    // the branch carries the incident and its artifact.committed event; main did not move and the cycle is still 1
+    expect((await git(dir, ["rev-parse", "HEAD"])).trim()).toBe(main);
+    expect(await git(dir, ["show", "sdlc/CHG-0001/incident:sdlc/changes/CHG-0001/incident.md"])).toContain("artifact: incident");
+    expect(await git(dir, ["show", "sdlc/CHG-0001/incident:sdlc/changes/CHG-0001/log.jsonl"])).toContain('"artifact":5');
+    const show = await sdlc(dir, ["change", "show", "CHG-0001", "--json"]);
+    expect(show.json<{ stage: number; cycle: number }>()).toMatchObject({ stage: 6, cycle: 1 });
+    // the console's snapshot lays the branch over main: the incident is the gate-6 draft, in review
+    const { StateStore } = await import("@sdlc/server");
+    const store = new StateStore({ root: dir, identity: { id: "po@example.com", name: "Pat Owner" } });
+    const snap = await store.refresh();
+    expect(snap.branches.map((b) => b.branch)).toEqual(["sdlc/CHG-0001/incident"]);
+    expect(snap.changes.find((c) => c.id === "CHG-0001")?.docs[5].state).toBe("pending-review");
   });
 });
 

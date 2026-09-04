@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { blobSha } from "@sdlc/adapter-git";
-import { loop, type ChangeView, type WritePlan } from "@sdlc/core";
+import { loop, validateWritePlan, type ChangeView, type WritePlan } from "@sdlc/core";
 import { parseFrontMatter, stringifyFrontMatter } from "@sdlc/schemas";
 import { actingIdentity, assertHuman, commitPlan, loadCommitted, transitionContext, viewOf, type CliContext } from "../context.js";
+import { commitOnBranch } from "@sdlc/server";
 import { CliError } from "../io.js";
 
 export interface LoopOptions {
@@ -16,6 +17,8 @@ export interface LoopResult {
   cycle: number;
   commits: string[];
   view: ChangeView;
+  /** GitHub mode: the incident went on this branch for review; merging its PR is the gate 6 decision. */
+  inReview?: string;
 }
 
 export async function loopCommand(ctx: CliContext, id: string, opts: LoopOptions): Promise<LoopResult> {
@@ -66,6 +69,14 @@ export async function loopCommand(ctx: CliContext, id: string, opts: LoopOptions
       trailers: { "SDLC-Actor": `human:${who.id}` },
       actor: { type: "human", id: who.id },
     };
+    if (repo.config.codeHost === "github") {
+      // the incident is an artifact PR (2.2): it goes on sdlc/<CHG>/incident, the engine (or sdlc sync) opens the PR, merging it closes the loop
+      const report = validateWritePlan(repo, plan);
+      if (report.blocking) throw new CliError("write-plan rejected by validation", 1, report.diagnostics.filter((d) => d.blocking));
+      const branch = `sdlc/${id}/incident`;
+      commits.push(await commitOnBranch(ctx.root, branch, plan, who));
+      return { id, cycle: view.cycle, commits, view, inReview: branch };
+    }
     commits.push(await commitPlan(ctx, repo, plan, who));
     ({ repo } = await loadCommitted(ctx));
     view = viewOf(repo, id);
