@@ -5,7 +5,7 @@ import { buildSnapshot, type Identity, type SessionRecord, type Snapshot } from 
 
 export class ActionError extends Error {
   constructor(
-    readonly status: 400 | 403 | 404 | 409 | 502,
+    readonly status: 400 | 403 | 404 | 409 | 413 | 502,
     message: string,
     readonly diagnostics: Diagnostic[] = [],
     readonly retryable = false,

@@ -1,11 +1,11 @@
 import { deriveChange, proposeTasks, confirmTasks, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
-import { blobSha, commitWritePlan, headSha, newUlid, type GitIdentity } from "@sdlc/adapter-git";
+import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, type GitIdentity } from "@sdlc/adapter-git";
 import { launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
 import { mirrorReview } from "./review.js";
-import { gitHubCodeHostFrom } from "@sdlc/adapter-github";
+import { gitHubCodeHostFrom, type WebhookEvent } from "@sdlc/adapter-github";
 import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
 
 export interface EngineOptions {
@@ -24,6 +24,14 @@ export interface EngineOptions {
   env?: Record<string, string | undefined>;
   /** GitHub mode: minimum gap between PR polls on ticks (default 30 s). */
   syncIntervalMs?: number;
+  /** GitHub mode: while webhook deliveries keep arriving, the poll backs off to this gap (default 10 min) — polling is the fallback, not the transport. */
+  webhookQuietMs?: number;
+}
+
+/** What the engine did with a verified webhook delivery — one line, recorded with the delivery. */
+export interface WebhookOutcome {
+  outcome: string;
+  changeId: string | null;
 }
 
 /**
@@ -37,7 +45,8 @@ export class Engine {
   private ticking = false;
   private pending = false;
   private lastSync = 0;
-  private syncing = false;
+  private lastDelivery = 0;
+  private inflight: Promise<SyncSummary | null> | null = null;
   private warnedNoToken = false;
   private closed = false;
   private readonly unsubscribe: () => void;
@@ -75,7 +84,7 @@ export class Engine {
         if (!view.valid || view.closed) continue;
         await this.forChange(repo, view).catch((e: unknown) => this.log(`${view.id}: ${(e as Error).message}`));
       }
-      if (repo.config.codeHost === "github" && Date.now() - this.lastSync >= (this.opts.syncIntervalMs ?? 30_000)) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
+      if (repo.config.codeHost === "github" && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
     } finally {
       this.ticking = false;
       if (this.pending) {
@@ -85,30 +94,201 @@ export class Engine {
     }
   }
 
+  /** Poll every `syncIntervalMs` — unless deliveries are arriving, then every `webhookQuietMs` as the fallback. */
+  pollInterval(): number {
+    const quiet = this.opts.webhookQuietMs ?? 600_000;
+    return Date.now() - this.lastDelivery < quiet ? quiet : (this.opts.syncIntervalMs ?? 30_000);
+  }
+
+  /** Last verified webhook delivery (epoch ms), 0 when none arrived in this process. */
+  get lastDeliveryAt(): number {
+    return this.lastDelivery;
+  }
+
+  /** Last GitHub poll (epoch ms), 0 when none ran in this process. */
+  get lastSyncAt(): number {
+    return this.lastSync;
+  }
+
   /**
    * GitHub mode pass: artifact branches become PRs, merges done on GitHub are
    * recorded, the records PR is refreshed. Null when not in GitHub mode or
    * without a token.
    */
   async sync(): Promise<SyncSummary | null> {
+    // one pass at a time; a caller arriving mid-pass (a webhook) gets its own pass afterwards — the merge it reports may have landed after the running pass looked
+    while (this.inflight) await this.inflight.catch(() => null);
+    if (this.closed) return null;
+    this.inflight = this.syncOnce();
+    try {
+      return await this.inflight;
+    } finally {
+      this.inflight = null;
+    }
+  }
+
+  private async syncOnce(): Promise<SyncSummary | null> {
     await this.opts.store.refresh();
     const repo = this.opts.store.currentRepo;
-    if (!repo || repo.config.codeHost !== "github" || this.syncing || this.closed) return null;
+    if (!repo || repo.config.codeHost !== "github" || this.closed) return null;
     const host = gitHubCodeHostFrom(this.opts.env ?? process.env);
     if (!host) {
       if (!this.warnedNoToken) this.log("config.codeHost is github but GITHUB_TOKEN is not set; artifact PRs and merge detection are off");
       this.warnedNoToken = true;
       return null;
     }
-    this.syncing = true;
     this.lastSync = Date.now();
-    try {
-      const summary = await syncGitHub({ host, identity: this.opts.identity, ...(this.opts.now ? { now: this.opts.now } : {}), log: (l) => this.log(l) }, this.opts.store);
-      if (summary.opened.length > 0 || summary.merges.some((m) => m.recorded)) this.opts.store.rebuild();
-      return summary;
-    } finally {
-      this.syncing = false;
+    const summary = await syncGitHub({ host, identity: this.opts.identity, ...(this.opts.now ? { now: this.opts.now } : {}), log: (l) => this.log(l) }, this.opts.store);
+    if (summary.opened.length > 0 || summary.merges.some((m) => m.recorded)) this.opts.store.rebuild();
+    return summary;
+  }
+
+  /** The change whose recorded pull request (code PR or artifact PR) has this number. */
+  private changeForPull(repo: Repo, number: number): { view: ChangeView; what: "code" | "artifact" } | null {
+    for (const files of repo.changes.values()) {
+      const view = deriveChange(repo, files);
+      if (view.pr?.provider === "github" && view.pr.number === number) return { view, what: "code" };
+      if (Object.values(view.artifactPrs).some((p) => p?.number === number)) return { view, what: "artifact" };
     }
+    return null;
+  }
+
+  /**
+   * Bring `origin/<branch>` into the clone: fast-forward the worktree that has
+   * it checked out, or the local ref when none does. Diverged history is
+   * refused — the console never rewrites a branch. Returns the worktree path
+   * when one exists.
+   */
+  private async fetchBranch(branch: string, createWorktree = false): Promise<{ path: string | null; head: string }> {
+    const root = this.opts.store.root;
+    await fetchRemote(root, "origin", branch);
+    const fetched = (await gitRaw(root, ["rev-parse", "FETCH_HEAD"])).stdout.trim();
+    const existing = (await listWorktrees(root)).find((w) => w.branch === branch);
+    if (existing) {
+      // FETCH_HEAD is per worktree; the fetched sha is not
+      const ff = await gitRaw(existing.path, ["merge", "--ff-only", "--quiet", fetched]);
+      if (ff.code !== 0) throw new Error(`${branch}: the local worktree at ${existing.path} diverged from origin (${fetched.slice(0, 7)}); reconcile it by hand — the console never rewrites a branch`);
+      return { path: existing.path, head: fetched };
+    }
+    if (await branchExists(root, branch)) {
+      const ff = await gitRaw(root, ["fetch", "--quiet", "origin", `${branch}:${branch}`]);
+      if (ff.code !== 0) throw new Error(`${branch}: the local branch diverged from origin (${fetched.slice(0, 7)}); reconcile it by hand — the console never rewrites a branch`);
+    } else {
+      await gitRaw(root, ["branch", branch, fetched]);
+    }
+    if (!createWorktree) return { path: null, head: fetched };
+    const path = worktreePathFor(root, branch);
+    await addWorktree(root, path, branch);
+    return { path, head: fetched };
+  }
+
+  /**
+   * A verified delivery (2.4). Payloads are data: this routes on the PR
+   * number, head and branch, then fetches and re-derives from git; the merger
+   * identity comes from the API, never from the body. Every downstream job is
+   * keyed on the head it concerns, so a re-sent event finds its work claimed.
+   */
+  async onWebhook(event: WebhookEvent): Promise<WebhookOutcome> {
+    this.lastDelivery = Date.now();
+    const repo = this.opts.store.currentRepo ?? (await this.opts.store.refresh(), this.opts.store.currentRepo);
+    if (!repo) return { outcome: "repository not loaded", changeId: null };
+    const base = repo.config.defaultBranch;
+    switch (event.kind) {
+      case "ping":
+        return { outcome: "pong", changeId: null };
+      case "pull_request": {
+        const hit = this.changeForPull(repo, event.number);
+        const id = hit?.view.id ?? null;
+        if (event.action === "closed") {
+          if (!event.merged) return { outcome: `PR #${event.number} closed without merge${id ? ` (${id}); nothing recorded` : ""}`, changeId: id };
+          const summary = await this.sync();
+          if (!summary) return { outcome: `PR #${event.number} merged, but GitHub sync is off (GITHUB_TOKEN not set): nothing recorded`, changeId: id };
+          const m = summary.merges.find((x) => x.number === event.number);
+          // a recorded PR the sync no longer lists as a candidate is one whose merge is already recorded (a re-sent event)
+          if (!m) return { outcome: hit ? `${hit.view.id}: PR #${event.number} merge already recorded` : `PR #${event.number} merged: not a recorded pull request`, changeId: id };
+          return { outcome: m.recorded ? `${m.changeId}: gate ${m.gate} recorded from PR #${m.number} merged by ${m.mergedBy}` : `${m.changeId}: PR #${m.number} merged by ${m.mergedBy}, not recorded: ${m.reason ?? ""}`, changeId: m.changeId };
+        }
+        if (event.action === "synchronize") {
+          if (hit?.what === "code") return { outcome: (await this.runForPrHead(hit.view.id, event.headSha, "webhook")).note, changeId: id };
+          if (ARTIFACT_BRANCH.test(event.headRef)) return this.fetchArtifactBranch(event.headRef, id);
+          return { outcome: `PR #${event.number} (${event.headRef}) is not a recorded pull request`, changeId: id };
+        }
+        if (event.action === "opened" || event.action === "reopened" || event.action === "ready_for_review") {
+          if (!ARTIFACT_BRANCH.test(event.headRef) && !hit) return { outcome: `PR #${event.number} (${event.headRef}) ${event.action}: not a branch the console tracks`, changeId: null };
+          const summary = await this.sync();
+          return { outcome: summary ? `PR #${event.number} ${event.action}: synced (${summary.opened.length} artifact PR(s) recorded)` : `PR #${event.number} ${event.action}: GitHub sync is off`, changeId: id };
+        }
+        return { outcome: `PR #${event.number} ${event.action}: noted`, changeId: id };
+      }
+      case "pull_request_review": {
+        const hit = this.changeForPull(repo, event.number);
+        this.opts.store.rebuild();
+        return { outcome: `review ${event.state} by ${event.author ?? "?"} on PR #${event.number}${hit ? ` (${hit.view.id})` : ""} noted; gate decisions are recorded from merges`, changeId: hit?.view.id ?? null };
+      }
+      case "check_run":
+      case "status": {
+        const sha = event.kind === "check_run" ? event.headSha : event.sha;
+        const label = event.kind === "check_run" ? `check ${event.name} ${event.conclusion ?? event.status}` : `status ${event.context} ${event.state}`;
+        for (const files of repo.changes.values()) {
+          const view = deriveChange(repo, files);
+          if (view.pr?.headSha === sha && view.pr.mergedAt === undefined) return { outcome: `${label} on ${view.id}'s PR head ${sha.slice(0, 7)}: noted (CI verdicts reach the console through committed run files, item 2.5)`, changeId: view.id };
+        }
+        return { outcome: `${label} on ${sha.slice(0, 7)}: no recorded PR head`, changeId: null };
+      }
+      case "push": {
+        const branch = event.ref.replace(/^refs\/heads\//, "");
+        if (event.ref === branch) return { outcome: `push to ${event.ref}: not a branch`, changeId: null };
+        if (event.deleted) return { outcome: `${branch} deleted on origin: nothing to do`, changeId: null };
+        if (branch === base) {
+          const summary = await this.sync();
+          return { outcome: summary ? `origin/${base} moved to ${event.after.slice(0, 7)}: synced (${summary.merges.filter((m) => m.recorded).length} merge(s) recorded)` : `origin/${base} moved to ${event.after.slice(0, 7)}, but GitHub sync is off`, changeId: null };
+        }
+        if (ARTIFACT_BRANCH.test(branch)) return this.fetchArtifactBranch(branch, ARTIFACT_BRANCH.exec(branch)?.[1] ?? null);
+        for (const files of repo.changes.values()) {
+          const view = deriveChange(repo, files);
+          if (view.pr?.branch === branch && view.pr.mergedAt === undefined) return { outcome: `push to ${branch} (${view.id}): the pull_request.synchronize delivery runs the new head`, changeId: view.id };
+        }
+        return { outcome: `push to ${branch}: not a branch the console tracks`, changeId: null };
+      }
+      default:
+        return { outcome: `ignored ${event.event}${event.action ? `.${event.action}` : ""}`, changeId: null };
+    }
+  }
+
+  private async fetchArtifactBranch(branch: string, changeId: string | null): Promise<WebhookOutcome> {
+    const { head } = await this.fetchBranch(branch);
+    await this.opts.store.refresh(true);
+    return { outcome: `${branch} fetched to ${head.slice(0, 7)}`, changeId };
+  }
+
+  /**
+   * The code PR's head moved on origin: fetch it into the branch worktree and
+   * run the per-change run on it. Green records the new head on `pr.yaml`
+   * (`pr.synchronized`) so the stale review is relaunched; red leaves the old
+   * tested head as the merge precondition.
+   */
+  async runForPrHead(changeId: string, expectedHead: string | null, trigger = "webhook"): Promise<{ job: Job | null; note: string }> {
+    await this.opts.store.refresh(true);
+    const repo = this.opts.store.currentRepo;
+    const files = repo?.changes.get(changeId);
+    if (!repo || !files) return { job: null, note: `${changeId} not found` };
+    const view = deriveChange(repo, files);
+    const pr = view.pr;
+    if (!pr || pr.mergedAt !== undefined) return { job: null, note: `${changeId}: no open pull request` };
+    const live = this.opts.registry.list().some((s) => s.changeId === changeId && s.kind === "build" && (s.status === "running" || s.status === "waiting" || s.status === "awaiting_engineer"));
+    if (live) return { job: null, note: `${changeId}: a build session is running on ${pr.branch}; the run follows its exit` };
+    const fetched = await this.fetchBranch(pr.branch, true);
+    const wt = fetched.path ?? worktreePathFor(this.opts.store.root, pr.branch);
+    const head = await headSha(wt, "HEAD");
+    if (head === pr.headSha) return { job: null, note: `${changeId}: PR head ${head.slice(0, 7)} is already the tested head` };
+    const session = this.opts.registry.list().find((s) => s.changeId === changeId && s.kind === "build" && s.branch === pr.branch);
+    const job = await this.runForSession({ ...(session ?? this.fakeSession(view, pr.branch)), worktreePath: wt, status: "done" }, trigger);
+    const moved = expectedHead && expectedHead !== head ? ` (delivery said ${expectedHead.slice(0, 7)}, origin is at ${head.slice(0, 7)})` : "";
+    return { job, note: job ? `${changeId}: run on ${head.slice(0, 7)}${moved} → ${job.state === "failed" ? `failed: ${job.error ?? ""}` : (job.note ?? job.state)}` : `${changeId}: run on ${head.slice(0, 7)} already claimed` };
+  }
+
+  private fakeSession(view: ChangeView, branch: string, taskId: string | null = null): StoredSession {
+    return { id: `manual-${view.id}`, kind: "build", cycle: view.cycle, resumeCount: 0, worktree: branch, worktreePath: worktreePathFor(this.opts.store.root, branch), branch, changeId: view.id, taskId, mode: "SUPERVISED", engineer: this.opts.identity.id, startedAt: this.now(), heartbeatAt: this.now(), status: "done", target: view.acceptanceLine, files: view.planFiles, subagents: [], loop: { state: "not-run", rounds: [] }, verifier: null, testEditAttempts: 0, waitingOnYou: null, autoRationale: { terms: [] }, modelPin: null, contextManifestRef: null, transcriptRef: null, harnessSessionId: "", pid: null, exitCode: null, command: "", capRaised: false, reviewed: false, costUsd: null, numTurns: null, lastLine: null, error: null };
   }
 
   private async forChange(repo: Repo, view: ChangeView): Promise<void> {
@@ -210,7 +390,8 @@ export class Engine {
     return this.opts.jobs.get(key);
   }
 
-  async runForSession(session: StoredSession, manual = false): Promise<Job | null> {
+  /** `trigger` names a run outside the session-exit path (`manual`, `webhook`); it is part of the job key. */
+  async runForSession(session: StoredSession, trigger: string | null = null): Promise<Job | null> {
     await this.opts.store.refresh(true);
     const repo = this.opts.store.currentRepo;
     if (!repo) return null;
@@ -219,12 +400,12 @@ export class Engine {
     const view = deriveChange(repo, files);
     // one run per (session, worktree head): a replayed exit cannot double-run, new code can
     const head = await headSha(session.worktreePath, "HEAD").catch(() => "nohead");
-    const key = `${session.changeId}:${view.cycle}:4:run:${session.id}:r${session.resumeCount ?? 0}:${head.slice(0, 12)}${manual ? ":manual" : ""}`;
+    const key = `${session.changeId}:${view.cycle}:4:run:${session.id}:r${session.resumeCount ?? 0}:${head.slice(0, 12)}${trigger ? `:${trigger}` : ""}`;
     const job = this.opts.jobs.claim({ key, kind: "per-change-run", changeId: session.changeId, cycle: view.cycle, stage: 4 }, this.now());
     if (!job) return null;
     try {
       const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}) }, repo);
-      this.opts.jobs.update(key, { state: "done", note: `run ${outcome.run.n} ${outcome.run.verdict}${outcome.prCommit ? " · PR opened" : ""}` }, this.now());
+      this.opts.jobs.update(key, { state: "done", note: `run ${outcome.run.n} ${outcome.run.verdict}${outcome.prAction === "opened" ? " · PR opened" : outcome.prAction === "synchronized" ? ` · PR head → ${outcome.run.headSha.slice(0, 7)}` : ""}` }, this.now());
       this.log(`${view.id}: run ${outcome.run.n} ${outcome.run.verdict}`);
       this.opts.registry.patch(session.id, { reviewed: outcome.run.verdict === "green" });
       await this.opts.store.refresh(true);
@@ -254,15 +435,13 @@ export class Engine {
   /** Manual per-change run for a change: uses its most recent build session's worktree, or the task branch worktree. */
   async runForChange(changeId: string): Promise<Job | null> {
     const session = this.opts.registry.list().find((s) => s.changeId === changeId && s.kind === "build");
-    if (session) return this.runForSession(session, true);
+    if (session) return this.runForSession(session, "manual");
     await this.opts.store.refresh(true);
     const repo = this.opts.store.currentRepo;
     const files = repo?.changes.get(changeId);
     if (!repo || !files) return null;
     const view = deriveChange(repo, files);
     const task = view.tasks[0];
-    const branch = task?.branch ?? `${changeId}/work`;
-    const fake: StoredSession = { id: `manual-${changeId}`, kind: "build", cycle: view.cycle, resumeCount: 0, worktree: branch, worktreePath: worktreePathFor(this.opts.store.root, branch), branch, changeId, taskId: task?.id ?? null, mode: "SUPERVISED", engineer: this.opts.identity.id, startedAt: this.now(), heartbeatAt: this.now(), status: "done", target: view.acceptanceLine, files: view.planFiles, subagents: [], loop: { state: "not-run", rounds: [] }, verifier: null, testEditAttempts: 0, waitingOnYou: null, autoRationale: { terms: [] }, modelPin: null, contextManifestRef: null, transcriptRef: null, harnessSessionId: "", pid: null, exitCode: null, command: "", capRaised: false, reviewed: false, costUsd: null, numTurns: null, lastLine: null, error: null };
-    return this.runForSession(fake, true);
+    return this.runForSession(this.fakeSession(view, task?.branch ?? `${changeId}/work`, task?.id ?? null), "manual");
   }
 }

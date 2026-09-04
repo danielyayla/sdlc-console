@@ -21,6 +21,7 @@ import {
   type ActionResult,
 } from "./actions.js";
 import type { Engine, JobStore } from "./engine/index.js";
+import { receiveWebhook, type DeliveryLog } from "./github/webhooks.js";
 import { launchSession, stopSession, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { ActionError, type StateStore } from "./store.js";
 
@@ -48,6 +49,30 @@ function readBody(req: IncomingMessage): Promise<Body> {
     });
     req.on("error", reject);
   });
+}
+
+/** Raw body for signature checks; refuses more than `limit` bytes. */
+function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (c: Buffer) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new ActionError(413, "payload too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+function header(req: IncomingMessage, name: string): string | undefined {
+  const v = req.headers[name];
+  return Array.isArray(v) ? v[0] : v;
 }
 
 function gateOf(body: Body): GateNumber {
@@ -101,7 +126,9 @@ export interface AppOptions {
   claudeBin?: string;
   engine?: Engine;
   jobs?: JobStore;
-  /** Environment for the code host (`GITHUB_TOKEN`). */
+  /** Processed webhook deliveries (replay guard); the receiver is off without it. */
+  deliveries?: DeliveryLog;
+  /** Environment for the code host (`GITHUB_TOKEN`) and the webhook receiver (`GITHUB_WEBHOOK_SECRET`). */
   env?: Record<string, string | undefined>;
 }
 
@@ -224,6 +251,30 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         default:
           throw new ActionError(404, `unknown action ${action}`);
       }
+    }
+    if (parts[1] === "webhooks") {
+      const env = options.env ?? process.env;
+      if (method === "GET" && parts.length === 2) {
+        const last = options.engine?.lastDeliveryAt ?? 0;
+        json(res, 200, {
+          path: "/api/webhooks/github",
+          enabled: Boolean(env["GITHUB_WEBHOOK_SECRET"]) && Boolean(options.engine) && Boolean(options.deliveries),
+          secretSet: Boolean(env["GITHUB_WEBHOOK_SECRET"]),
+          engine: Boolean(options.engine),
+          lastDeliveryAt: last > 0 ? new Date(last).toISOString() : null,
+          lastPollAt: (options.engine?.lastSyncAt ?? 0) > 0 ? new Date(options.engine?.lastSyncAt ?? 0).toISOString() : null,
+          pollIntervalMs: options.engine?.pollInterval() ?? null,
+          deliveries: options.deliveries?.recent(20) ?? [],
+        });
+        return;
+      }
+      if (method === "POST" && parts[2] === "github" && parts.length === 3) {
+        const body = await readRaw(req, 1024 * 1024);
+        const r = await receiveWebhook({ store, engine: options.engine ?? null, deliveries: options.deliveries ?? null, env }, { headers: { event: header(req, "x-github-event"), delivery: header(req, "x-github-delivery"), signature: header(req, "x-hub-signature-256") }, body });
+        json(res, r.status, r.body);
+        return;
+      }
+      throw new ActionError(404, "not found");
     }
     if (parts[1] === "sync" && method === "POST") {
       if (!options.engine) throw new ActionError(409, "sync needs the engine (start the server with sdlcBin)");

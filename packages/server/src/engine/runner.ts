@@ -35,8 +35,10 @@ export interface RunInput {
 export interface RunOutcome {
   run: PerChangeRun;
   runCommit: string;
-  /** Present when the run was green and a PR was opened. */
+  /** Present when the run was green and the PR was opened or its head synchronized. */
   prCommit: string | null;
+  /** What a green run did about the PR: opened it, moved its head, or found it already at this head. */
+  prAction: "opened" | "synchronized" | "unchanged" | null;
   consecutiveReds: number;
 }
 
@@ -118,6 +120,7 @@ export async function runPerChange(input: RunInput, repo: Repo): Promise<RunOutc
   const runCommit = await commitWritePlan(input.root, plan, { identity: SYSTEM_IDENTITY });
 
   let prCommit: string | null = null;
+  let prAction: RunOutcome["prAction"] = null;
   let reds = 0;
   if (green) {
     const planMatches = view.planMatches ?? check.planSync(fileSet, view.planFiles, `${files.dir}/plan.md`).allowed;
@@ -128,11 +131,22 @@ export async function runPerChange(input: RunInput, repo: Repo): Promise<RunOutc
       { name: "evidence", verdict: "pass" as const, summary: `per-change run ${n} green · ${cmdPassed}/${commandResults.length} verification commands passed` },
       { name: "evals", verdict: "pass" as const, summary: results.length === 0 ? `per-change run ${n} · no eval cases intersect the diff` : `per-change run ${n} · ${casesPassed}/${results.length} intersecting eval cases passed` },
     ];
-    const opened = await host.openPr({ root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now(), checks });
-    prCommit = opened.commit;
+    const prInput = { root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now(), checks };
+    const existing = files.pr && files.pr.mergedAt === undefined && files.pr.branch === input.branch ? files.pr : null;
+    if (existing && existing.headSha === head) {
+      // the PR already points at this head (a re-run): nothing to record on it
+      prAction = "unchanged";
+    } else if (existing) {
+      // the head moved (a push delivered as pull_request.synchronize, or new local commits): the same PR follows the tested head
+      prCommit = (await host.syncPr(prInput, existing)).commit;
+      prAction = "synchronized";
+    } else {
+      prCommit = (await host.openPr(prInput)).commit;
+      prAction = "opened";
+    }
   } else {
     for (let i = files.runs.length - 1; i >= 0 && files.runs[i]?.verdict === "red"; i--) reds++;
     reds += 1;
   }
-  return { run, runCommit, prCommit, consecutiveReds: reds };
+  return { run, runCommit, prCommit, prAction, consecutiveReds: reds };
 }

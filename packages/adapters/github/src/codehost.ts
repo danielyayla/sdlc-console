@@ -1,8 +1,8 @@
-import { CodeHostError, git, mergeRemoteBranch, pushBranch, recordOpenedPr, remoteUrl, type CodeHost, type GitIdentity, type OpenPrInput, type OpenPrResult, type ReviewReport } from "@sdlc/adapter-git";
+import { CodeHostError, git, mergeRemoteBranch, pushBranch, recordOpenedPr, recordSyncedPr, remoteUrl, type CodeHost, type GitIdentity, type OpenPrInput, type OpenPrResult, type ReviewReport } from "@sdlc/adapter-git";
 import type { Pr } from "@sdlc/schemas";
 import { GitHubClient, GitHubError } from "./client.js";
 import { assertProtected } from "./protection.js";
-import { mergePull, openPull, reviewPull } from "./pulls.js";
+import { getPull, mergePull, openPull, reviewPull } from "./pulls.js";
 import { credentialsFrom, parseGitHubRemote, type Env, type GitHubCredentials, type GitHubRepo } from "./remote.js";
 import { publishStatus, verdictState } from "./statuses.js";
 
@@ -72,6 +72,28 @@ export class GitHubCodeHost implements CodeHost {
         planMatches: input.planMatches,
       };
       return await recordOpenedPr(input, pr);
+    } catch (e) {
+      throw hostError(e);
+    }
+  }
+
+  /**
+   * The PR's head moved (a push, delivered as `pull_request.synchronize`) and
+   * the run tested it: the checks go on the new head as statuses and `pr.yaml`
+   * follows. The PR must still be open at exactly the tested head.
+   */
+  async syncPr(input: OpenPrInput, existing: Pr): Promise<OpenPrResult> {
+    if (existing.number === undefined) throw new CodeHostError("pr.yaml has no pull request number; nothing to synchronize on GitHub", false);
+    try {
+      const repo = await this.repoFor(input.root);
+      await pushBranch(input.root, input.branch, this.remote);
+      const pull = await getPull(this.client, repo, existing.number);
+      if (pull.state !== "open" || pull.merged) throw new CodeHostError(`PR #${existing.number} is ${pull.merged ? "merged" : "closed"}; the head cannot be synchronized`, false);
+      if (pull.headSha !== input.headSha) throw new CodeHostError(`PR #${existing.number} is at ${pull.headSha.slice(0, 7)} but the run tested ${input.headSha.slice(0, 7)}`, true);
+      for (const check of input.checks) {
+        await publishStatus(this.client, repo, input.headSha, { context: `sdlc/${check.name}`, state: verdictState(check.verdict), description: check.summary, targetUrl: pull.url });
+      }
+      return await recordSyncedPr(input, { ...existing, reviewers: pull.reviewers });
     } catch (e) {
       throw hostError(e);
     }

@@ -170,6 +170,8 @@ export const events = {
     z.strictObject({ number: z.number().int().min(1).optional(), mergeSha: gitSha }),
     actor,
   ),
+  /** The code PR's head moved and the per-change run tested the new head (2.4): `pr.yaml` now points at it. */
+  "pr.synchronized": ev("pr.synchronized", z.strictObject({ number: z.number().int().min(1).optional(), headSha: gitSha }), systemActor),
   "review.finding": ev(
     "review.finding",
     z.strictObject({ severity, title: nonEmpty, path: z.string().optional(), detail: z.string().optional() }),
@@ -254,6 +256,7 @@ export const event = z.discriminatedUnion("event", [
   events["evals.red"],
   events["pr.opened"],
   events["pr.merged"],
+  events["pr.synchronized"],
   events["review.finding"],
   events["deploy.authorized"],
   events["deploy.started"],
