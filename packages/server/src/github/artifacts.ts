@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { addWorktree, blobSha, CodeHostError, commitWritePlan, currentBranch, fetchRemote, git, gitRaw, headSha, listWorktrees, mergeRemoteBranch, newUlid, pushBranch, removeWorktree, type GitIdentity } from "@sdlc/adapter-git";
 import { assertProtected, findOpenPull, getPull, GitHubError, mergePull, openPull, requestChanges, type GitHubCodeHost } from "@sdlc/adapter-github";
@@ -46,6 +46,7 @@ export function artifactBranchFor(changeId: string, index: ArtifactIndex): strin
 export async function withBranchWorktree<T>(root: string, branch: string, fn: (dir: string) => Promise<T>): Promise<T> {
   const existing = (await listWorktrees(root)).find((w) => w.branch === branch);
   if (existing) return fn(existing.path);
+  mkdirSync(join(root, ".sdlc-state", "worktrees"), { recursive: true });
   const dir = mkdtempSync(join(root, ".sdlc-state", "worktrees", "tmp-"));
   try {
     rmSync(dir, { recursive: true, force: true });

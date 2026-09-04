@@ -65,6 +65,17 @@ describe("Change detail (spec §4)", () => {
     expect(html).toContain("Evals red — agent fixing");
     expect(html).toContain("The next human gate opens when the artifact is committed.");
     expect(html).toContain("Auto mode");
+    // 2.6: the design mock is named beside the rationale; CLAUDE.md has no Visual: line
+    expect(html).toContain("mock export-dialog.svg · no visual tool in CLAUDE.md");
+    // 2.7: the fix shows its committed repro test and the freeze; only an engineer can lift it once
+    expect(html).toContain("Repro first · freeze active");
+    expect(html).toContain("test/export/zero-total.test.ts");
+    expect(html).toContain("e4a6f2d");
+    expect(html).toContain("expected 4 rows, received 3");
+    expect(html).toContain("Lift freeze once");
+    const po = render({ ...initialState("po"), view: "detail", sel: "CHG-0018" });
+    expect(po).toContain("Repro first · freeze active");
+    expect(po).not.toContain("Lift freeze once");
   });
 });
 
@@ -118,7 +129,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
 describe("Sessions (spec §4)", () => {
   it("renders the header counts, four seed cards with mode chips, waiting-on-you, rationale and the footer callout", () => {
     const html = render({ ...initialState("eng"), view: "sessions" });
-    expect(html).toContain("2 active · review backlog 2"); // running + waiting; two done sessions on changes before stage 6
+    expect(html).toContain("2 active · review backlog 2 · ceiling 4"); // running + waiting; the done plan (CHG-0019 at stage 3) and design (CHG-0021 at stage 2) sessions await their gates
     expect(html).toContain("CHG-0018/export-fix");
     expect(html).toContain("PLAN MODE");
     expect(html).toContain("HEADLESS");
@@ -126,6 +137,17 @@ describe("Sessions (spec §4)", () => {
     expect(html).toContain("test edit attempts: 1");
     expect(html).toContain("New session");
     expect(html).toContain("Sessions run Claude Code headless in a worktree per task");
+  });
+  it("renders the visual rounds strip from the session's screenshot rounds and offers Downgrade only on running AUTO/HEADLESS cards", () => {
+    const html = render({ ...initialState("eng"), view: "sessions" });
+    expect(html).toContain('aria-label="visual rounds"');
+    expect(html).toContain("round 1 · 14.2%");
+    expect(html).toContain("round 2 · 3.1%");
+    expect(html).toContain("chip red");
+    expect(html).toContain("chip amber");
+    // the seed's running session is SUPERVISED and the AUTO/HEADLESS ones are done: nothing to downgrade
+    expect(html).not.toContain("Downgrade to SUPERVISED");
+    expect(html).toContain("AUTO can be taken away, never granted");
   });
 });
 
@@ -147,6 +169,54 @@ describe("Config (spec §4)", () => {
     expect(html).toContain("pass 100% · threshold 90%");
     expect(html).toContain("CASE-0003");
     expect(html).toContain("draft · checks missing");
-    expect(html).toContain("Run suite needs the CI adapter");
+    expect(html).toContain("Run suite");
+    expect(html).toContain("budget n/a");
+    expect(html).toContain("config PRs pass on RUN-0001");
+    expect(html).toContain("RUN-0001 · schedule · pass 100%");
+  });
+
+  it("2.8: repeat signal with its proposal, proposal Accept for eng only, pending/merged chips, skills version · backed-by · pass % · findings citing", () => {
+    const eng = render({ ...initialState("eng"), view: "config" });
+    expect(eng).toContain("Repeat mistakes");
+    expect(eng).toContain("commit touches files outside plan.md&#x27;s file list");
+    expect(eng).toContain("from CHG-0017, CHG-0018");
+    expect(eng).toContain("PRP-0008 open");
+    expect(eng).toContain("seen 2×");
+    expect(eng).toContain("Accept · open PR");
+    expect(eng).not.toContain("no proposal yet");
+    // skills row: version (blob sha7), backed by plan-sync (team), 100% on one trigger test, findings citing
+    expect(eng).toContain(snapshot.skillStatus[0]?.version ?? "no-version");
+    expect(eng).toContain("plan-sync</span>");
+    expect(eng).toContain("100%</span>");
+    expect(eng).toContain("1 trigger test · RUN-0001");
+    expect(eng).toContain("Findings citing");
+    expect(eng).toContain("threshold 80%");
+    const po = render({ ...initialState("po"), view: "config" });
+    expect(po).toContain('title="eng or platform accepts a proposal"');
+    expect(po).toMatch(/<button class="btn primary" disabled="" title="eng or platform accepts a proposal"/);
+  });
+
+  it("a merged change shows the case it was harvested into (2.5)", () => {
+    const html = render({ ...initialState("po"), view: "detail", sel: "CHG-0012" });
+    expect(html).toContain("harvested as");
+    expect(html).toContain("CASE-0002");
+    expect(html).not.toContain("Add as eval");
+  });
+});
+
+describe("Records mode (2.9, FR-16, spec 5A.6)", () => {
+  it("the viewer header says copy of <record> · synced for an external artifact, the record chip links out, the Record panel lists the mode and sync, and Config shows the connector", () => {
+    const html = render({ ...initialState("eng"), view: "detail", sel: "CHG-0012", art: 5 });
+    expect(html).toContain("copy of servicenow INC0041207 · synced 2026-09-02 07:31");
+    expect(html).toContain('href="https://servicenow.example/incident/INC0041207"');
+    expect(html).toContain("Record · servicenow INC0041207");
+    expect(html).toContain("incident.md · external");
+    expect(html).not.toContain("write-back failed");
+    const config = render({ ...initialState("eng"), view: "config" });
+    expect(config).toContain("incident: external");
+    expect(config).toContain("connector: records");
+    // a repo-mode artifact keeps the plain header
+    const intent = render({ ...initialState("po"), view: "detail", sel: "CHG-0022" });
+    expect(intent).toContain("pending review · authoritative");
   });
 });

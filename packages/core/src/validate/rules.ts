@@ -3,6 +3,8 @@ import { holdsRole } from "../config.js";
 import type { ChangeView } from "../derive.js";
 import { eventsNamed, eventsOfCycle, lastEvent } from "../events.js";
 import type { ChangeFiles, Repo } from "../repo.js";
+import { isDowngrade } from "../modes.js";
+import { normalizeReason } from "../proposals.js";
 import { gateOwner, STAGES } from "../stages.js";
 
 /** A diagnostic with the engine's blocking verdict (blueprint §11.1). */
@@ -80,6 +82,11 @@ export function changeRules(repo: Repo, files: ChangeFiles, view: ChangeView): R
     }
   }
 
+  // autonomy only goes down (P9): an override that raises a session's mode is not a decision the ledger accepts
+  for (const e of eventsNamed(files.events, "override.mode")) {
+    if (!isDowngrade(e.data.from, e.data.to)) out.push(block(id, `${dir}/log.jsonl`, "override.upward", `${e.actor.id} recorded mode ${e.data.from} → ${e.data.to}; autonomy is derived and can only be reduced`));
+  }
+
   // linked mode: past an artifact's stage the record must be present
   for (const s of STAGES) {
     if (s.gate === null) continue;
@@ -107,6 +114,17 @@ export function changeRules(repo: Repo, files: ChangeFiles, view: ChangeView): R
     if (files.tasks.changeId !== id) out.push(block(id, `${dir}/tasks.yaml`, "tasks.change-id", `tasks.yaml belongs to ${files.tasks.changeId}`));
   }
 
+  // a lift is single-use per file per change (FR-22): a second freeze.lifted on the same path is not a decision the ledger accepts
+  {
+    const seenLift = new Map<string, string>();
+    for (const e of eventsNamed(files.events, "freeze.lifted")) {
+      const key = `${e.cycle}:${e.data.path}`;
+      const first = seenLift.get(key);
+      if (first) out.push(block(id, `${dir}/log.jsonl`, "freeze.lifted-twice", `${e.actor.id} lifted the test freeze on ${e.data.path} again (first by ${first}); a lift is once per file per change`));
+      else seenLift.set(key, e.actor.id);
+    }
+  }
+
   // repro consistency
   if (change.repro?.state === "committed") {
     if (!change.repro.sha) out.push(block(id, `${dir}/change.yaml`, "repro.sha.missing", "repro state is committed but no sha is recorded"));
@@ -129,10 +147,19 @@ export function changeRules(repo: Repo, files: ChangeFiles, view: ChangeView): R
 /** Repo-level rules: eval cases, dismissals, config parse and lint warnings. */
 export function repoRules(repo: Repo): RuleDiagnostic[] {
   const out: RuleDiagnostic[] = repo.diagnostics.map(rule);
+  // records mode (FR-16): write-backs need a connector; linked mode needs an artifact commit to write back
+  const rec = repo.config.records;
+  const outside = STAGES.filter((s) => rec[s.artifact] !== "repo").map((s) => s.artifact);
+  if (outside.length > 0 && !repo.rawConfig?.records?.connector) out.push(warn(undefined, "sdlc/config.yaml", "records.connector-missing", `records ${outside.join(", ")} ${outside.length === 1 ? "is" : "are"} external or linked but records.connector names no MCP server in .mcp.json — write-backs will fail until it does`));
+  for (const a of ["evals", "pr"] as const) if (rec[a] === "linked") out.push(warn(undefined, "sdlc/config.yaml", "records.linked-unsupported", `records.${a} is linked but ${a} has no artifact commit to write back; it behaves as external`));
   for (const c of repo.evalCases) {
     if (c.status === "active" && c.checks.length === 0) {
       out.push(block(undefined, `evals/cases/${c.id}.json`, "eval-case.active-without-checks", `${c.id} is active but has no checks`));
     }
+  }
+  for (const r of repo.evalRuns) {
+    // incomplete never counts as pass; a run file claiming pass below its own threshold was hand-edited
+    if (r.verdict === "pass" && r.passRate < r.threshold) out.push(block(undefined, `evals/runs/${r.id}.json`, "eval-run.pass-below-threshold", `${r.id} is marked pass at ${Math.round(r.passRate * 100)}% below its threshold ${Math.round(r.threshold * 100)}%`));
   }
   if (repo.evalCases.filter((c) => c.status !== "retired").length < repo.config.thresholds.suiteMinSize) {
     out.push(warn(undefined, "evals/cases", "eval-suite.under-sized", `eval suite has ${repo.evalCases.length} cases; under-sized below ${repo.config.thresholds.suiteMinSize}`));
@@ -147,8 +174,18 @@ export function repoRules(repo: Repo): RuleDiagnostic[] {
   for (const p of repo.proposals) {
     if (p.status === "dismissed" && !p.dismissal) out.push(block(undefined, `sdlc/proposals/${p.id}.yaml`, "dismissal.reason-missing", `${p.id} is dismissed without a reason`));
   }
+  const seenReason = new Map<string, string>();
+  for (const p of repo.proposals) {
+    if (p.reason === undefined) continue;
+    const key = normalizeReason(p.reason);
+    const other = seenReason.get(key);
+    if (other) out.push(warn(undefined, `sdlc/proposals/${p.id}.yaml`, "proposal.reason-duplicate", `${p.id} answers the same reason as ${other} ("${key}"); a third occurrence counts onto one proposal, it does not file another`));
+    else seenReason.set(key, p.id);
+  }
+  const hookNames = new Set((repo.settings?.hooks ?? []).map((h) => h.name));
   for (const s of repo.skills) {
     if (s.mustHold && !s.backedBy) out.push(warn(undefined, `.claude/skills/${s.name}/SKILL.md`, "skill.must-hold.advisory", `skill ${s.name} must hold but no hook backs it`));
+    if (s.backedBy && repo.settings && !hookNames.has(s.backedBy)) out.push(warn(undefined, `.claude/skills/${s.name}/SKILL.md`, "skill.backed-by.unknown", `skill ${s.name} says it is backed by hook ${s.backedBy}, which is not in .claude/settings.json — advisory until the hook is installed`));
   }
   if (repo.config.present) {
     const highRisk = [...repo.changes.values()].some((c) => c.change?.risk === "high");

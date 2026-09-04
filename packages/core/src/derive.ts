@@ -1,8 +1,9 @@
-import type { Change, Diagnostic, Event, EvalCase, GateNumber, PerChangeRun, Pr, RecordsMode } from "@sdlc/schemas";
+import type { ArtifactName, Change, Diagnostic, Event, EvalCase, GateNumber, PerChangeRun, Pr, RecordsMode, VerificationContract, WritebackKind } from "@sdlc/schemas";
 import { activityFeed, type ActivityEntry } from "./activity.js";
-import { deriveEligibility, type Eligibility } from "./eligibility.js";
+import { deriveEligibility, uiPaths, type Eligibility } from "./eligibility.js";
 import { eventsNamed, eventsOfCycle, firstEvent, indexOf, lastEvent, latestOf } from "./events.js";
 import { fingerprintMatches } from "./fingerprint.js";
+import { commitWritebackFailure, commitWrittenBack, effectiveMode, recordLabel, requiredWritebacks, shortSha, syncedAt, type WritebackState } from "./records.js";
 import type { ChangeFiles, Repo } from "./repo.js";
 import {
   ARTIFACT_INDEX_FOR_GATE,
@@ -15,6 +16,24 @@ import {
   type GateRole,
   type StageNumber,
 } from "./stages.js";
+
+export interface VisualView {
+  uiPaths: string[];
+  tool: VerificationContract["visualTool"] | null;
+  /** First image under `design/`, served read-only beside round screenshots. */
+  mock: { path: string; sha: string } | null;
+  warning: string | null;
+}
+
+const MOCK_EXT = /\.(png|jpe?g|gif|webp|svg)$/i;
+
+export function deriveVisual(files: ChangeFiles, planFiles: readonly string[], verification: VerificationContract | null): VisualView {
+  const ui = uiPaths(planFiles);
+  const tool = verification?.visualTool ?? null;
+  const mock = files.design.find((d) => MOCK_EXT.test(d.path)) ?? null;
+  const warning = ui.length > 0 && tool === null ? `UI work without a visual check — ${ui.length} UI path${ui.length === 1 ? "" : "s"} in plan and no Visual: line in CLAUDE.md` : null;
+  return { uiPaths: ui, tool, mock, warning };
+}
 
 export type DocState = "absent" | "draft" | "pending-review" | "committed" | "stale";
 
@@ -30,6 +49,19 @@ export interface ReviewFindingView {
 
 const SEVERITY_RANK = { high: 0, medium: 1, low: 2 } as const;
 
+/** Records mode per artifact (FR-16): who is authoritative, the record chip, the last sync and the write-back the artifact waits on. */
+export interface DocRecordView {
+  artifactName: ArtifactName;
+  mode: RecordsMode;
+  /** "<system> <id>" once the change is linked to a record. */
+  chip: string | null;
+  url: string | null;
+  /** Time of the latest successful write-back of this artifact. */
+  syncedAt: string | null;
+  /** The latest write-back this artifact called for, and what the ledger says happened to it. */
+  writeback: { kind: WritebackKind; sha: string; state: WritebackState; at: string | null; error: string | null } | null;
+}
+
 export interface DocView {
   index: ArtifactIndex;
   name: string;
@@ -38,6 +70,7 @@ export interface DocView {
   sha: string | null;
   sourceOfTruth: RecordsMode;
   authoritative: boolean;
+  record: DocRecordView;
 }
 
 export interface GateView {
@@ -85,6 +118,8 @@ export interface ChangeView {
   agent: boolean;
   status: string;
   docs: Record<ArtifactIndex, DocView>;
+  /** Linked mode (FR-16): why the open gate cannot be accepted yet — no record, or the artifact commit not written back — else null. */
+  recordBlock: string | null;
   planRev: number;
   planState: "none" | "draft" | "committed";
   planMatches: boolean | null;
@@ -100,6 +135,14 @@ export interface ChangeView {
   artifactPrs: Partial<Record<ArtifactIndex, ArtifactPrView>>;
   /** Review findings reported against the current code PR (this cycle, after it opened), most severe first. */
   findings: ReviewFindingView[];
+  /** The eval case this change was harvested into (post-merge "Add as eval"), if any. */
+  harvested: { id: string; status: "draft" | "active" | "retired" } | null;
+  /** Visual check inputs (spec 5B): UI paths in the plan, the CLAUDE.md visual tool, the design mock, and the warning when UI work has no visual check. */
+  visual: VisualView;
+  /** Test-freeze lifts this cycle (one per file per change, FR-22); the hook and the runner honour them. */
+  freezeLifts: { path: string; reason: string; by: string; at: string }[];
+  /** The engineer's last "wrong failure" verdict on a repro test that is not yet committed. */
+  reproRejection: { testPath: string; reason: string; at: string } | null;
   waitingOnYou: string | null;
   activity: ActivityEntry[];
   tasks: NonNullable<ChangeFiles["tasks"]>["tasks"];
@@ -244,6 +287,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
 
   // ---- docs ----
   const docs = deriveDocs(repo, files, events, accepted, stage, gate, greenMatching, prMerged);
+  const recordBlock = gate && !change.closed ? linkedBlock(repo, files, gate, docs) : null;
 
   // ---- plan ----
   const planRev = files.plan?.frontMatter.rev ?? (lastEvent(events, "plan.drafted")?.data.rev ?? 0);
@@ -332,6 +376,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     agent: valid && !change.closed ? agent : false,
     status: !valid ? "validation error — fix the files to re-enter the queue" : change.closed ? `Closed — ${change.closed.reason}` : status,
     docs,
+    recordBlock: valid ? recordBlock : null,
     planRev,
     planState,
     planMatches,
@@ -346,6 +391,21 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     artifactPrs,
     pr: files.pr,
     findings,
+    visual: deriveVisual(files, planFiles, repo.verification),
+    freezeLifts: eventsNamed(events, "freeze.lifted").map((e) => ({ path: e.data.path, reason: e.data.reason, by: e.actor.id, at: e.ts })),
+    reproRejection: (() => {
+      if (change.repro?.state === "committed") return null;
+      const rejected = lastEvent(events, "repro.rejected");
+      const failed = lastEvent(events, "repro.failed");
+      if (!rejected) return null;
+      // a newer repro.failed means the session already answered the rejection
+      if (failed && indexOf(events, failed) > indexOf(events, rejected)) return null;
+      return { testPath: rejected.data.testPath, reason: rejected.data.reason, at: rejected.ts };
+    })(),
+    harvested: (() => {
+      const c = repo.evalCases.find((x) => x.source.type === "change" && x.source.ref === change.id);
+      return c ? { id: c.id, status: c.status } : null;
+    })(),
     waitingOnYou,
     activity: activityFeed(files.events),
     tasks: files.tasks?.tasks ?? [],
@@ -357,7 +417,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
 function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
   const docs = {} as Record<ArtifactIndex, DocView>;
   for (const s of STAGES) {
-    docs[s.artifactIndex] = { index: s.artifactIndex, name: s.file, path: `${files.dir}/${s.file}`, state: "absent", sha: null, sourceOfTruth: "repo", authoritative: true };
+    docs[s.artifactIndex] = { index: s.artifactIndex, name: s.file, path: `${files.dir}/${s.file}`, state: "absent", sha: null, sourceOfTruth: "repo", authoritative: true, record: { artifactName: s.artifact, mode: "repo", chip: null, url: null, syncedAt: null, writeback: null } };
   }
   return {
     id: files.id,
@@ -367,6 +427,7 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     cycle: 1,
     origin: { type: "idea" },
     record: null,
+    recordBlock: null,
     repro: null,
     closed: null,
     createdAt: "",
@@ -390,6 +451,10 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     pr: null,
     artifactPrs: {},
     findings: [],
+    harvested: null,
+    visual: { uiPaths: [], tool: null, mock: null, warning: null },
+    freezeLifts: [],
+    reproRejection: null,
     waitingOnYou: null,
     activity: activityFeed(files.events),
     tasks: [],
@@ -409,10 +474,21 @@ function deriveDocs(
   prMerged: boolean,
 ): Record<ArtifactIndex, DocView> {
   const docs = {} as Record<ArtifactIndex, DocView>;
+  const required = requiredWritebacks(repo, files);
+  const chip = recordLabel(files.change?.record ?? null);
   for (const s of STAGES) {
     const idx = s.artifactIndex;
     const present = files.present[s.artifact];
     const mode = repo.config.records[s.artifact];
+    const latest = required.filter((w) => w.artifact === idx).at(-1) ?? null;
+    const record: DocRecordView = {
+      artifactName: s.artifact,
+      mode: effectiveMode(repo, s.artifact),
+      chip,
+      url: files.change?.record?.url ?? null,
+      syncedAt: syncedAt(files, idx),
+      writeback: latest ? { kind: latest.kind, sha: latest.sha, state: latest.state, at: latest.at, error: latest.error } : null,
+    };
     let state: DocState = "absent";
     if (present) {
       const gateOpen = gate?.s === s.gate;
@@ -442,9 +518,23 @@ function deriveDocs(
       sha: s.n === 4 ? null : (files.shas[shaKey] ?? null),
       sourceOfTruth: mode,
       authoritative: mode === "repo",
+      record,
     };
   }
   return docs;
+}
+
+/** Linked mode (FR-16): the gate's artifact needs a record and its commit written back before the human decides. */
+function linkedBlock(repo: Repo, files: ChangeFiles, gate: GateView, docs: Record<ArtifactIndex, DocView>): string | null {
+  if (gate.s === 6) return null;
+  const idx = ARTIFACT_INDEX_FOR_GATE[gate.s];
+  const doc = docs[idx];
+  if (doc.record.mode !== "linked") return null;
+  const record = files.change?.record;
+  if (!record) return `Accept is blocked until ${doc.name} is linked to its external record — link the record first`;
+  if (!doc.sha || commitWrittenBack(files, idx, doc.sha)) return null;
+  const failed = commitWritebackFailure(files, idx, doc.sha);
+  return `Accept is blocked until ${record.system} ${record.id} carries commit ${shortSha(doc.sha)} — ${failed !== null ? `write-back failed · retry (${failed})` : "write-back pending"}`;
 }
 
 interface StatusInputs {

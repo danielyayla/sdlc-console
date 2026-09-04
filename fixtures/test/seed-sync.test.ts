@@ -26,4 +26,12 @@ describe("fixtures/seed is the generator's output", () => {
   it("ships four sessions", () => {
     expect(seedSessions().map((s) => s.mode)).toEqual(["SUPERVISED", "PLAN", "PLAN", "HEADLESS"]);
   });
+  it("ships one design mock (CHG-0018) and two visual rounds on its build session", () => {
+    expect(Object.keys(seedFiles()).filter((p) => p.includes("/design/"))).toEqual(["sdlc/changes/CHG-0018/design/export-dialog.svg"]);
+    const build = seedSessions().find((s) => s.id === "sess-0018-repro") as { loop: { rounds: { n: number; diffPct?: number; screenshotRef?: string }[] } } | undefined;
+    expect(build?.loop.rounds.map((r) => [r.n, r.diffPct, r.screenshotRef])).toEqual([
+      [1, 14.2, ".sdlc-state/sessions/sess-0018-repro/screenshots/round-1.png"],
+      [2, 3.1, ".sdlc-state/sessions/sess-0018-repro/screenshots/round-2.png"],
+    ]);
+  });
 });

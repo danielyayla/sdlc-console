@@ -1,12 +1,18 @@
-import { deriveChange, proposeTasks, confirmTasks, validateWritePlan, type ChangeView, type Repo } from "@sdlc/core";
+import { deriveChange, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, reasonKey, validateWritePlan, writebacksInState, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
 import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, type GitIdentity } from "@sdlc/adapter-git";
-import { launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
+import { readReproDraft } from "@sdlc/mcp";
+import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
 import { mirrorReview } from "./review.js";
+import { mirrorProposal } from "./proposals.js";
+import { runSuite, type SuiteOutcome } from "./suite.js";
+import { nextRunId } from "@sdlc/core";
+import type { EvalRun } from "@sdlc/schemas";
 import { gitHubCodeHostFrom, type WebhookEvent } from "@sdlc/adapter-github";
 import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
+import { runWriteback, type WritebackDeps, type WritebackRun } from "../records.js";
 
 export interface EngineOptions {
   store: StateStore;
@@ -26,6 +32,10 @@ export interface EngineOptions {
   syncIntervalMs?: number;
   /** GitHub mode: while webhook deliveries keep arriving, the poll backs off to this gap (default 10 min) — polling is the fallback, not the transport. */
   webhookQuietMs?: number;
+  /** Records write-backs (FR-16): connector, attempts and backoff per run. Defaults to the `.mcp.json` connector, 3 attempts, 2 s doubling. */
+  writeback?: WritebackDeps;
+  /** A failed write-back is retried on ticks after this gap (default 10 min); the retry action runs it at once. */
+  writebackRetryMs?: number;
 }
 
 /** What the engine did with a verified webhook delivery — one line, recorded with the delivery. */
@@ -49,6 +59,10 @@ export class Engine {
   private inflight: Promise<SyncSummary | null> | null = null;
   private warnedNoToken = false;
   private closed = false;
+  /** Changes whose build session is held by the capacity ceiling; logged once per hold. */
+  private readonly ceilingLogged = new Set<string>();
+  /** Last attempt per write-back job key (epoch ms) — the retry gap is wall-clock, not the injected `now`. */
+  private readonly writebackTried = new Map<string, number>();
   private readonly unsubscribe: () => void;
 
   constructor(private readonly opts: EngineOptions) {
@@ -84,7 +98,10 @@ export class Engine {
         if (!view.valid || view.closed) continue;
         await this.forChange(repo, view).catch((e: unknown) => this.log(`${view.id}: ${(e as Error).message}`));
       }
-      if (repo.config.codeHost === "github" && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
+      await this.forWritebacks(repo).catch((e: unknown) => this.log(`write-backs: ${(e as Error).message}`));
+      if (this.opts.autoLaunch) await this.forProposals(repo).catch((e: unknown) => this.log(`proposals: ${(e as Error).message}`));
+      // a poll is redundant while a pass is in flight: that pass reads the same state (a webhook's pass still queues behind it, see sync())
+      if (repo.config.codeHost === "github" && !this.inflight && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
     } finally {
       this.ticking = false;
       if (this.pending) {
@@ -302,7 +319,17 @@ export class Engine {
       const sessions = this.opts.registry.list().filter((s) => s.changeId === view.id && s.kind === "build" && s.cycle === view.cycle);
       const live = sessions.some((s) => s.status === "running" || s.status === "waiting" || s.status === "awaiting_engineer");
       const runs = repo.changes.get(view.id)?.runs.filter((r) => r.cycle === view.cycle).length ?? 0;
-      if (!live && (view.evalsState === "running" || sessions.length === 0)) await this.launch(view, `${view.id}:${view.cycle}:4:${sha(2)}:build:run-${runs}`, "build-session", "build");
+      if (!live && (view.evalsState === "running" || sessions.length === 0)) {
+        // FR-35: over the ceiling nothing is claimed, so the next tick after the backlog clears launches it
+        const capacity = capacityOf(this.opts.registry.list(), repo);
+        if (capacity.over) {
+          if (!this.ceilingLogged.has(view.id)) this.log(`${view.id}: build session held — review backlog ${capacity.backlog} over the ceiling ${capacity.ceiling}`);
+          this.ceilingLogged.add(view.id);
+        } else {
+          this.ceilingLogged.delete(view.id);
+          await this.launch(view, `${view.id}:${view.cycle}:4:${sha(2)}:build:run-${runs}`, "build-session", "build");
+        }
+      }
     }
     // stage 5: one review per PR head; `pr.review.headSha` (in git) is what makes this idempotent across restarts
     if (view.stage === 5 && view.pr && view.pr.mergedAt === undefined && view.pr.review?.headSha !== view.pr.headSha) {
@@ -311,12 +338,91 @@ export class Engine {
     }
   }
 
-  private async launch(view: ChangeView, key: string, kind: Job["kind"], sessionKind: Exclude<SessionKind, "intent" | "diagnose">): Promise<void> {
+  /**
+   * FR-43: one claude-md-proposal job per repeat reason nobody answered
+   * (`proposal:<reason key>`), launched on the newest cited change that is
+   * still open. The proposal the session drafts is filed when it ends; a
+   * reason with a proposal (open, accepted or dismissed) is never drafted again.
+   */
+  private async forProposals(repo: Repo): Promise<void> {
+    for (const signal of pendingRepeatSignals(repo)) {
+      const key = `proposal:${reasonKey(signal.reason)}`;
+      if (this.opts.jobs.get(key)) continue;
+      const cited = [...signal.occurrences].reverse().map((o) => o.changeId).find((id) => {
+        const files = repo.changes.get(id);
+        if (!files) return false;
+        const v = deriveChange(repo, files);
+        return v.valid && !v.closed;
+      });
+      if (!cited) {
+        this.log(`proposal for "${signal.reason}" (${signal.count}×): no cited change is open; nothing launched`);
+        continue;
+      }
+      const files = repo.changes.get(cited);
+      if (!files) continue;
+      await this.launch(deriveChange(repo, files), key, "claude-md-proposal", "propose", signal);
+    }
+  }
+
+  /**
+   * FR-16: every write-back the ledgers call for runs as a job keyed on the
+   * fact (`writeback:<CHG>:<artifact>:<kind>:<sha7>`). A failed one is retried
+   * on later ticks every `writebackRetryMs` until it lands — the ledger keeps
+   * the first failure, a success records `record.writeback.ok`.
+   */
+  private async forWritebacks(repo: Repo): Promise<void> {
+    const retryMs = this.opts.writebackRetryMs ?? 600_000;
+    for (const w of [...pendingWritebacks(repo), ...writebacksInState(repo, "failed")]) {
+      if (this.closed) return;
+      const key = writebackJobKey(w);
+      const job = this.opts.jobs.get(key);
+      if (job?.state === "running" || job?.state === "done") continue;
+      const tried = this.writebackTried.get(key);
+      if (job?.state === "failed" && tried !== undefined && Date.now() - tried < retryMs) continue;
+      await this.writeBack(repo, w);
+    }
+  }
+
+  /** Run one write-back now (the tick, or the retry action) and keep its job current. */
+  async writeBack(repo: Repo, w: RequiredWriteback): Promise<Job | null> {
+    const key = writebackJobKey(w);
+    const cycle = repo.changes.get(w.changeId)?.change?.cycle ?? 0;
+    const job = this.opts.jobs.get(key) ? this.opts.jobs.update(key, { state: "running", error: null }, this.now()) : this.opts.jobs.claim({ key, kind: "record-writeback", changeId: w.changeId, cycle, stage: 0 }, this.now());
+    if (!job) return null;
+    this.writebackTried.set(key, Date.now());
+    try {
+      const run = await runWriteback(this.opts.store, w, { ...(this.opts.writeback ?? {}), ...(this.opts.now ? { now: this.opts.now } : {}) });
+      this.noteWriteback(run);
+    } catch (e) {
+      this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+      this.log(`${w.changeId}: write-back not recorded: ${(e as Error).message}`);
+      this.opts.store.rebuild();
+    }
+    return this.opts.jobs.get(key);
+  }
+
+  /** Record a write-back run's outcome on its job (also for runs the retry action made). */
+  noteWriteback(run: WritebackRun): void {
+    const w = run.writeback;
+    const key = writebackJobKey(w);
+    const what = `${w.file} ${w.kind} ${w.sha.slice(0, 7)} → ${w.record.system} ${w.record.id}`;
+    if (!this.opts.jobs.get(key)) this.opts.jobs.claim({ key, kind: "record-writeback", changeId: w.changeId, cycle: 0, stage: 0 }, this.now());
+    this.writebackTried.set(key, Date.now());
+    if (run.ok) {
+      this.opts.jobs.update(key, { state: "done", error: null, note: `${what} · attempt ${run.attempts}` }, this.now());
+      this.log(`${w.changeId}: wrote back ${what}`);
+    } else {
+      this.opts.jobs.update(key, { state: "failed", error: run.error, note: `${what} · ${run.attempts} attempt${run.attempts === 1 ? "" : "s"} · retry` }, this.now());
+      this.log(`${w.changeId}: write-back failed ${what}: ${run.error ?? "unknown error"}`);
+    }
+  }
+
+  private async launch(view: ChangeView, key: string, kind: Job["kind"], sessionKind: Exclude<SessionKind, "intent" | "diagnose">, signal: RepeatSignal | null = null): Promise<void> {
     const job = this.opts.jobs.claim({ key, kind, changeId: view.id, cycle: view.cycle, stage: view.stage }, this.now());
     if (!job) return;
     try {
       const r = await launchSession(
-        { changeId: view.id, kind: sessionKind, ...(sessionKind === "build" ? { mode: view.autoEligible.value ? ("AUTO" as const) : ("SUPERVISED" as const) } : {}) },
+        { changeId: view.id, kind: sessionKind, ...(sessionKind === "build" ? { mode: view.autoEligible.value ? ("AUTO" as const) : ("SUPERVISED" as const) } : {}), ...(signal ? { reason: signal.reason } : {}) },
         { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), onExit: (s) => void this.onSessionExit(s) },
       );
       this.opts.jobs.update(key, { sessionId: r.session.id, state: r.session.mode === "SUPERVISED" ? "done" : "running", note: r.session.mode === "SUPERVISED" ? "prepared for the engineer" : null }, this.now());
@@ -352,11 +458,17 @@ export class Engine {
     // the job that launched this session is finished with it
     for (const job of this.opts.jobs.list()) {
       if (job.sessionId === session.id && job.state === "running") {
-        this.opts.jobs.update(job.key, { state: session.status === "done" ? "done" : "failed", ...(session.error ? { error: session.error } : {}) }, this.now());
+        const downgraded = session.status === "awaiting_engineer";
+        this.opts.jobs.update(job.key, { state: session.status === "done" || downgraded ? "done" : "failed", ...(downgraded ? { note: "downgraded to SUPERVISED — the engineer continues" } : {}), ...(session.error ? { error: session.error } : {}) }, this.now());
       }
     }
     if (session.kind === "review" && session.status === "done") {
       await this.mirrorForSession(session);
+      return;
+    }
+    if (session.kind === "propose") {
+      if (session.status === "done") await this.fileProposalForSession(session);
+      else this.opts.store.rebuild();
       return;
     }
     if (session.kind !== "build" || session.status !== "done") {
@@ -390,6 +502,28 @@ export class Engine {
     return this.opts.jobs.get(key);
   }
 
+  /** A propose session finished: the line it drafted becomes `sdlc/proposals/PRP-NNNN.yaml` (once per session). */
+  async fileProposalForSession(session: StoredSession): Promise<Job | null> {
+    await this.opts.store.refresh(true);
+    const repo = this.opts.store.currentRepo;
+    if (!repo) return null;
+    const key = `proposal-mirror:${session.id}`;
+    const job = this.opts.jobs.claim({ key, kind: "proposal-mirror", changeId: session.changeId, cycle: session.cycle, stage: 0 }, this.now());
+    if (!job) return null;
+    try {
+      const outcome = await mirrorProposal({ root: this.opts.store.root, session, ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}) }, repo);
+      this.opts.jobs.update(key, { state: outcome.proposalId ? "done" : "skipped", note: outcome.note }, this.now());
+      this.log(`${session.changeId}: ${outcome.note}`);
+      this.opts.registry.patch(session.id, { reviewed: true });
+      await this.opts.store.refresh(true);
+    } catch (e) {
+      this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+      this.log(`${session.changeId}: proposal not filed: ${(e as Error).message}`);
+      this.opts.store.rebuild();
+    }
+    return this.opts.jobs.get(key);
+  }
+
   /** `trigger` names a run outside the session-exit path (`manual`, `webhook`); it is part of the job key. */
   async runForSession(session: StoredSession, trigger: string | null = null): Promise<Job | null> {
     await this.opts.store.refresh(true);
@@ -398,6 +532,12 @@ export class Engine {
     const files = repo.changes.get(session.changeId);
     if (!files) return null;
     const view = deriveChange(repo, files);
+    // repro first (spec 5B.3): a fix whose failing test awaits the engineer's judgment is not run — the red would only resume the agent into fixing before the confirmation
+    if (view.kind === "fix" && view.repro?.state !== "committed" && readReproDraft(session.worktreePath, session.id)) {
+      this.log(`${view.id}: repro test reported by ${session.id} — waiting on you: confirm or send back; no per-change run`);
+      this.opts.store.rebuild();
+      return null;
+    }
     // one run per (session, worktree head): a replayed exit cannot double-run, new code can
     const head = await headSha(session.worktreePath, "HEAD").catch(() => "nohead");
     const key = `${session.changeId}:${view.cycle}:4:run:${session.id}:r${session.resumeCount ?? 0}:${head.slice(0, 12)}${trigger ? `:${trigger}` : ""}`;
@@ -432,6 +572,40 @@ export class Engine {
     }
   }
 
+  /**
+   * Eval suite run as a keyed job (`evals:<trigger>:<RUN-id>`): the console
+   * queues it and returns; the CLI waits. The run file and any triage items
+   * are committed on the default branch by sdlc-bot.
+   */
+  async runSuite(trigger: EvalRun["trigger"], wait = true): Promise<{ job: Job | null; outcome: SuiteOutcome | null }> {
+    await this.opts.store.refresh(true);
+    const repo = this.opts.store.currentRepo;
+    if (!repo) return { job: null, outcome: null };
+    const key = `evals:${trigger}:${nextRunId(repo.evalRuns)}`;
+    const job = this.opts.jobs.claim({ key, kind: "evals-run", changeId: "", cycle: 0, stage: 4 }, this.now());
+    if (!job) return { job: this.opts.jobs.get(key), outcome: null };
+    const work = (async (): Promise<SuiteOutcome | null> => {
+      try {
+        const outcome = await runSuite({ root: this.opts.store.root, repo, trigger, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), log: (l) => this.log(l) });
+        const note = outcome.skipped ?? `${outcome.run?.id ?? "run"} ${outcome.run?.verdict ?? ""} · ${Math.round((outcome.run?.passRate ?? 0) * 100)}% (${outcome.run?.results.filter((r) => r.pass).length ?? 0}/${outcome.run?.results.length ?? 0})${outcome.signals.length > 0 ? ` · ${outcome.signals.length} triage item(s)` : ""}`;
+        this.opts.jobs.update(key, { state: outcome.skipped ? "skipped" : "done", note }, this.now());
+        await this.opts.store.refresh(true);
+        return outcome;
+      } catch (e) {
+        this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+        this.log(`evals: ${(e as Error).message}`);
+        await this.opts.store.refresh(true).catch(() => undefined);
+        return null;
+      }
+    })();
+    if (!wait) {
+      void work;
+      return { job, outcome: null };
+    }
+    const outcome = await work;
+    return { job: this.opts.jobs.get(key), outcome };
+  }
+
   /** Manual per-change run for a change: uses its most recent build session's worktree, or the task branch worktree. */
   async runForChange(changeId: string): Promise<Job | null> {
     const session = this.opts.registry.list().find((s) => s.changeId === changeId && s.kind === "build");
@@ -444,4 +618,8 @@ export class Engine {
     const task = view.tasks[0];
     return this.runForSession(this.fakeSession(view, task?.branch ?? `${changeId}/work`, task?.id ?? null), "manual");
   }
+}
+
+export function writebackJobKey(w: RequiredWriteback): string {
+  return `writeback:${w.changeId}:${w.artifact}:${w.kind}:${w.sha.slice(0, 7)}`;
 }

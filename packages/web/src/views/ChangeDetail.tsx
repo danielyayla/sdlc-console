@@ -14,6 +14,27 @@ export interface ChangeDetailProps {
   onSelectArt: (index: number) => void;
   onAccept: (gate: number) => void;
   onSendBack: (gate: number, feedback: string) => void;
+  /** Post-merge "Add as eval": drafts a case for the platform owner. */
+  onHarvest: () => void;
+  /** Repro-first (2.7): the build session's reported test awaiting the engineer, from the session registry. */
+  reproDraft?: ReproDraftView | null;
+  onReproConfirm?: () => void;
+  onReproReject?: (reason: string) => void;
+  onLiftFreeze?: (path: string, reason: string) => void;
+  onDismissAutoFinding?: (path: string, reason: string) => void;
+  /** Records mode (FR-16): link the change to its external record; retry a failed write-back for one artifact. */
+  onLinkRecord?: (system: string, id: string, url?: string) => void;
+  onRetryWriteback?: (artifact: number) => void;
+  prompt?: (text: string) => string | null;
+}
+
+export interface ReproDraftView {
+  session: string;
+  testPath: string;
+  failureReason: string;
+  sha: string;
+  output: string;
+  rejected?: { reason: string; at: string };
 }
 
 const STAGE_INDEX = [0, 1, 2, 3, 4, 5];
@@ -26,6 +47,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const load = p.loadArtifact ?? fetchArtifact;
+  const prompt = p.prompt ?? ((text: string) => window.prompt(text));
   useEffect(() => {
     let alive = true;
     setArtifact(null);
@@ -43,6 +65,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const techLead = gate?.mode === "via_pr";
   const selectedPr = view.artifactPrs[selected as 0 | 1 | 2 | 3 | 4 | 5] ?? null;
   const reviewPr = gate ? view.artifactPrs[({ 1: 0, 2: 1, 3: 2, 5: 4, 6: 5 } as const)[gate.s]] ?? null : null;
+  const external = STAGE_INDEX.map((i) => view.docs[i as 0 | 1 | 2 | 3 | 4 | 5]).filter((d) => d.record.mode !== "repo");
 
   return (
     <div className="detail">
@@ -81,7 +104,13 @@ export function ChangeDetail(p: ChangeDetailProps) {
             <span className="file">{ARTIFACT_FILES[selected]}</span>
             <span className="chip gray">{viewerState(doc, view)}</span>
             {selectedPr && !selectedPr.merged ? <a className="chip" href={selectedPr.url} target="_blank" rel="noreferrer">PR #{selectedPr.number}</a> : null}
-            {view.record ? <span className="chip">{view.record.system} {view.record.id}</span> : null}
+            {view.record ? (view.record.url ? <a className="chip" href={view.record.url} target="_blank" rel="noreferrer" title="external record">{view.record.system} {view.record.id}</a> : <span className="chip" title="external record">{view.record.system} {view.record.id}</span>) : null}
+            {doc.record.writeback && doc.record.writeback.state !== "ok" ? (
+              <>
+                <span className="chip amber" title={doc.record.writeback.error ?? undefined}>{doc.record.writeback.state === "failed" ? "write-back failed · retry" : "write-back pending"}</span>
+                {doc.record.writeback.state === "failed" && p.onRetryWriteback && (role === "eng" || role === "po") ? <button className="btn" disabled={busy} onClick={() => { setBusy(true); p.onRetryWriteback?.(doc.index); }}>Retry</button> : null}
+              </>
+            ) : null}
           </div>
           {doc.state === "absent" ? (
             <pre className="viewer-body"><span className="viewer-empty">Not committed yet — this artifact is produced when the stage runs.</span></pre>
@@ -105,8 +134,9 @@ export function ChangeDetail(p: ChangeDetailProps) {
                 <div className="waiting">Waiting on tech lead — approval happens via PR review on plan.md.{reviewPr ? <> <a href={reviewPr.url} target="_blank" rel="noreferrer">PR #{reviewPr.number}</a></> : null}</div>
               ) : owned ? (
                 <>
+                  {view.recordBlock ? <div className="waiting" role="note">{view.recordBlock}</div> : null}
                   <div className="actions">
-                    <button className="btn primary" disabled={busy || !view.valid} onClick={() => { setBusy(true); p.onAccept(gate.s); }}>{gate.acceptLabel}</button>
+                    <button className="btn primary" disabled={busy || !view.valid || view.recordBlock !== null} title={view.recordBlock ?? undefined} onClick={() => { setBusy(true); p.onAccept(gate.s); }}>{gate.acceptLabel}</button>
                     <button className="btn" disabled={busy || feedback.trim() === ""} onClick={() => { setBusy(true); p.onSendBack(gate.s, feedback); }}>Send back</button>
                   </div>
                   <textarea className="feedback" placeholder="Feedback (required to send back)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
@@ -128,16 +158,76 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="who">{view.waitingOnYou ? `waiting on you: ${view.waitingOnYou}` : "The next human gate opens when the artifact is committed."}</div>
             </div>
           )}
+          {external.length > 0 ? (
+            <div className="panel records">
+              <div className="eyebrow">Record · {view.record ? `${view.record.system} ${view.record.id}` : "none linked"}</div>
+              <ul className="activity">
+                {external.map((d) => (
+                  <li key={d.index}>
+                    <span className={`glyph ${d.record.writeback?.state === "failed" ? "system" : "human"}`}>{d.record.writeback?.state === "failed" ? "✗" : d.record.writeback?.state === "pending" ? "…" : d.record.syncedAt ? "✓" : "·"}</span>
+                    <span>{d.name} · {d.record.mode}</span>
+                    <span className="when">{d.record.writeback && d.record.writeback.state !== "ok" ? `${d.record.writeback.kind} ${d.record.writeback.sha.slice(0, 7)} · ${d.record.writeback.state === "failed" ? "write-back failed · retry" : "write-back pending"}` : d.record.syncedAt ? `synced ${d.record.syncedAt}` : "not synced"}</span>
+                  </li>
+                ))}
+              </ul>
+              {!view.record && p.onLinkRecord && (role === "eng" || role === "po") ? (
+                <div className="actions"><button className="btn" disabled={busy} title="change.yaml.record; verified through the records connector when one is configured" onClick={() => { const system = prompt("Record system (e.g. jira, servicenow):"); if (!system || system.trim() === "") return; const id = prompt(`Record id in ${system.trim()}:`); if (!id || id.trim() === "") return; const url = prompt("Record URL (optional):"); setBusy(true); p.onLinkRecord?.(system.trim(), id.trim(), url && url.trim() !== "" ? url.trim() : undefined); }}>Link record</button></div>
+              ) : null}
+            </div>
+          ) : null}
+          {view.kind === "fix" && (view.stage === 3 || view.stage === 4 || view.repro) ? (
+            <div className="panel repro">
+              <div className="eyebrow">Repro first · {view.repro?.state === "committed" ? "freeze active" : p.reproDraft ? (p.reproDraft.rejected ? "sent back" : "waiting on you") : "agent writing the failing test"}</div>
+              {view.repro?.state === "committed" ? (
+                <>
+                  <div className="who">repro test <span className="mono">{view.repro.testPath}</span> committed <span className="mono">{view.repro.sha?.slice(0, 7)}</span> · fails: {view.repro.failureReason}</div>
+                  <div className="who">no edits under the test globs until merge{view.freezeLifts.length > 0 ? ` · lifted once for ${view.freezeLifts.map((l) => l.path).join(", ")}` : ""}</div>
+                  {role === "eng" && view.stage <= 4 && p.onLiftFreeze ? (
+                    <div className="actions">
+                      <button className="btn" disabled={busy} title="one lift per file per change; logged on the ledger" onClick={() => { const path = prompt("Lift the test freeze for which file? (path)"); if (!path || path.trim() === "") return; const reason = prompt(`Reason for lifting the freeze on ${path.trim()} (required):`); if (!reason || reason.trim() === "") return; setBusy(true); p.onLiftFreeze?.(path.trim(), reason.trim()); }}>Lift freeze once</button>
+                    </div>
+                  ) : null}
+                </>
+              ) : p.reproDraft ? (
+                <>
+                  <div className="who"><span className="mono">{p.reproDraft.testPath}</span> · commit <span className="mono">{p.reproDraft.sha.slice(0, 7)}</span> (the test alone) · session {p.reproDraft.session}</div>
+                  <div className="who">fails: {p.reproDraft.failureReason}</div>
+                  <pre className="viewer-body cmd">{p.reproDraft.output}</pre>
+                  {p.reproDraft.rejected ? <div className="chip amber">sent back: {p.reproDraft.rejected.reason} — the session rewrites the test</div> : role === "eng" ? (
+                    <div className="actions">
+                      <button className="btn primary" disabled={busy} title="commits the repro block and the proof verbatim; the test freeze begins" onClick={() => { setBusy(true); p.onReproConfirm?.(); }}>Fails for the right reason → commit</button>
+                      <button className="btn" disabled={busy} onClick={() => { const reason = prompt("Wrong failure — why? (required, goes to the session)"); if (!reason || reason.trim() === "") return; setBusy(true); p.onReproReject?.(reason.trim()); }}>Wrong failure — send back</button>
+                    </div>
+                  ) : <div className="waiting">The engineer decides whether this failure is the right one.</div>}
+                </>
+              ) : (
+                <div className="who">{view.reproRejection ? `last verdict: wrong failure — ${view.reproRejection.reason}` : "The build session writes the failing test first and reports it; you confirm it fails for the right reason before any code changes."}</div>
+              )}
+            </div>
+          ) : null}
           {view.pr ? (
             <div className="panel pr">
               <div className="eyebrow">Pull request · {view.pr.provider}</div>
               <h3>{view.pr.url ? <a href={view.pr.url} target="_blank" rel="noreferrer">#{view.pr.number} {view.pr.branch}</a> : view.pr.branch}</h3>
               <div className="who">→ {view.pr.baseBranch} · head {view.pr.headSha.slice(0, 7)}{view.pr.mergeSha ? ` · merged ${view.pr.mergeSha.slice(0, 7)}` : ""}</div>
               <ul className="activity">
-                {view.pr.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.verdict}</span></li>)}
+                {view.pr.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.summary ? `${c.verdict} · ${c.summary}` : c.verdict}</span></li>)}
                 <li><span className={`glyph ${view.pr.planMatches === false ? "system" : "human"}`}>{view.pr.planMatches === null ? "?" : view.pr.planMatches ? "✓" : "✗"}</span><span>plan matches</span><span className="when">{view.pr.planMatches === null ? "unknown" : view.pr.planMatches ? "yes" : "reviewer judgment"}</span></li>
                 {view.pr.findings ? <li><span className="glyph system">·</span><span>findings</span><span className="when">{view.pr.findings.high} high · {view.pr.findings.medium} medium · {view.pr.findings.low} low</span></li> : null}
               </ul>
+              {(view.pr.autoFindings ?? []).length > 0 ? (
+                <ul className="findings">
+                  {(view.pr.autoFindings ?? []).map((f) => (
+                    <li key={`${f.rule}:${f.path}`}>
+                      <span className={`chip ${f.dismissal ? "gray" : "red"}`}>{f.dismissal ? "dismissed" : "blocks merge"}</span>
+                      <span className="title">{f.title}</span>
+                      <span className="when">{f.path}</span>
+                      <pre className="detail">{f.detail}{f.dismissal ? `\ndismissed by ${f.dismissal.by}: ${f.dismissal.reason}` : ""}</pre>
+                      {!f.dismissal && role === "eng" && !view.pr?.mergedAt && p.onDismissAutoFinding ? <div className="actions"><button className="btn" disabled={busy} onClick={() => { const reason = prompt(`Dismiss the finding on ${f.path} — reason (required):`); if (!reason || reason.trim() === "") return; setBusy(true); p.onDismissAutoFinding?.(f.path, reason.trim()); }}>Dismiss with reason</button></div> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {view.pr.reviewers.length > 0 ? <div className="who">reviewers: {view.pr.reviewers.join(", ")}</div> : null}
               <div className="who">
                 {view.pr.review
@@ -160,6 +250,16 @@ export function ChangeDetail(p: ChangeDetailProps) {
               ) : null}
             </div>
           ) : null}
+          {view.stage === 6 || view.pr?.mergedAt ? (
+            <div className="panel">
+              <div className="eyebrow">Eval suite</div>
+              {view.harvested ? (
+                <div className="who">harvested as <span className="mono">{view.harvested.id}</span> <span className={`chip ${view.harvested.status === "active" ? "green" : view.harvested.status === "draft" ? "amber" : "gray"}`}>{view.harvested.status}</span></div>
+              ) : (
+                <div className="actions"><button className="btn" disabled={busy} onClick={() => { setBusy(true); p.onHarvest(); }} title="draft a case from the intent and the acceptance line; the platform owner activates it">Add as eval</button></div>
+              )}
+            </div>
+          ) : null}
           {!view.valid ? (
             <div className="panel">
               <div className="eyebrow">Validation errors</div>
@@ -171,6 +271,8 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="eyebrow">Auto mode</div>
               <div className="who">{view.autoEligible.value ? "eligible" : "not eligible"}</div>
               <ul className="activity">{view.autoEligible.terms.map((t) => <li key={t.name}><span className={`glyph ${t.ok ? "human" : "system"}`}>{t.ok ? "✓" : "✗"}</span><span>{t.name}</span><span className="when">{t.detail}</span></li>)}</ul>
+              {view.visual.warning ? <div className="warn">{view.visual.warning}</div> : null}
+              {view.visual.mock ? <div className="card-status">mock {view.visual.mock.path.split("/").pop()}{view.visual.tool ? ` · visual tool ${view.visual.tool}` : " · no visual tool in CLAUDE.md"}</div> : null}
             </div>
           ) : null}
           <div className="panel">

@@ -39,6 +39,8 @@ export const riskLevel = z.enum(["routine", "high"]);
 export const changeKind = z.enum(["feature", "fix"]);
 export const sessionMode = z.enum(["AUTO", "PLAN", "SUPERVISED", "HEADLESS"]);
 export const recordsMode = z.enum(["repo", "external", "linked"]);
+/** What a write-back tells the external record: the artifact was committed at a sha (linked mode), or accepted at a gate (external and linked). */
+export const writebackKind = z.enum(["committed", "accepted"]);
 export const gateRole = z.enum(["po", "eng", "tech_lead"]);
 export const role = z.string().regex(/^[a-z][a-z0-9_]*$/, "expected a role slug");
 export const triageTier = z.enum([
@@ -79,6 +81,7 @@ export type RiskLevel = z.infer<typeof riskLevel>;
 export type ChangeKind = z.infer<typeof changeKind>;
 export type SessionMode = z.infer<typeof sessionMode>;
 export type RecordsMode = z.infer<typeof recordsMode>;
+export type WritebackKind = z.infer<typeof writebackKind>;
 export type GateNumber = z.infer<typeof gateNumber>;
 export type TriageTier = z.infer<typeof triageTier>;
 export type Severity = z.infer<typeof severity>;

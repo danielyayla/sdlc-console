@@ -1,5 +1,6 @@
 import type { ContextBundle } from "@sdlc/mcp";
-import type { ChangeView } from "@sdlc/core";
+import type { ChangeView, RepeatSignal } from "@sdlc/core";
+import { ONE_PAGE_WORDS } from "@sdlc/schemas";
 import type { SessionKind } from "./registry.js";
 
 export interface PromptInput {
@@ -10,6 +11,10 @@ export interface PromptInput {
   guidance?: string | null;
   /** REVIEW.md verbatim (review sessions); the console parses it, never edits it. */
   reviewPolicy?: string | null;
+  /** The repeat-reason cluster a `propose` session answers (FR-43). */
+  signal?: RepeatSignal | null;
+  /** CLAUDE.md as it is (propose sessions): the word budget is one page. */
+  claudeMd?: { wordCount: number; text: string } | null;
 }
 
 const COMMON = (p: PromptInput) => `You are working on change ${p.view.id} ("${p.view.title}", cycle ${p.view.cycle}) in an AI-native SDLC. Files in git are the source of truth; humans decide at gates; you never accept, merge or approve anything.
@@ -32,11 +37,23 @@ Task: turn the accepted intent.md into spec.md following sdlc/templates/spec.md 
       return `${COMMON(p)}
 
 Task: read the accepted intent.md and spec.md and this codebase (read-only), then write plan.md following sdlc/templates/plan.md with sections "Files that change" (one path per line, new files marked (new)), "Order of work" (numbered), "Risks", "Proof". Submit drafts with mcp__sdlc__submit_plan_revision (final=false); when you are confident an engineer who never saw this conversation could implement it, submit with final=true and an acceptanceLine (a quantifiable done criterion). Ask the engineer with mcp__sdlc__request_input only if a decision genuinely blocks you. Do not edit files other than through the tool.${guidance}`;
-    case "build":
+    case "build": {
+      const v = p.view.visual;
+      const visual = v.mock
+        ? `\nVisual check: a design mock is at ${v.mock.path}.${v.tool ? ` After every round that changes what the user sees, take a screenshot with the visual tool from CLAUDE.md, save it under .sdlc-state/sessions/${p.sessionId}/screenshots/round-<n>.png, and pass screenshotRef (that path, relative to the worktree) and diffPct (your estimate of how far the screenshot is from the mock, 0–100) to mcp__sdlc__report_round.` : " No visual tool is configured in CLAUDE.md, so the screen cannot be verified here; say so in your notes and keep the mock as the reference."}`
+        : v.warning
+          ? `\nVisual check: ${v.warning}. UI changes cannot be verified visually in this session; keep them minimal and describe them in your notes.`
+          : "";
+      const repro = p.view.kind === "fix" && p.view.repro?.state !== "committed"
+        ? `\nRepro first (this is a fix): ${p.view.reproRejection ? `the engineer sent your last repro test back — "${p.view.reproRejection.reason}". ` : ""}write the failing test under the test globs from CLAUDE.md before touching any code, run it, and call mcp__sdlc__report_repro with testPath, failureReason and the verbatim failing output (it commits the test alone). Then stop: the engineer confirms it fails for the right reason (the test freeze begins) or sends it back, and your session is resumed either way. Do not fix the code before that.`
+        : p.view.kind === "fix"
+          ? `\nTest freeze: the repro test ${p.view.repro?.testPath ?? ""} is committed at ${p.view.repro?.sha?.slice(0, 7) ?? ""} and must stay unchanged; no edits under the test globs (the test-freeze hook blocks them) — make the repro test pass by fixing the code, and propose any test change to the engineer with mcp__sdlc__request_input.`
+          : "";
       return `${COMMON(p)}
 
-Task: implement the accepted plan.md in this worktree on the current branch. Target (done criterion): ${p.target ?? "see plan.md acceptance line"}.
+Task: implement the accepted plan.md in this worktree on the current branch. Target (done criterion): ${p.target ?? "see plan.md acceptance line"}.${repro}${visual}
 Rules: stay within the files listed in plan.md (the plan-sync hook blocks commits outside it — update plan.md in the same commit if the plan must change); never edit tests under a test freeze (the test-freeze hook blocks it — use mcp__sdlc__request_input to propose test changes); run the verification commands from CLAUDE.md after every meaningful step and record each run with mcp__sdlc__report_round (one result per command, verbatim output excerpt); commit your work on this branch with messages like "sdlc(${p.view.id}): <what>"; when the last round is all green, call mcp__sdlc__report_done. Done is only accepted when the latest round is green with output.${guidance}`;
+    }
     case "review":
       return `${COMMON(p)}
 
@@ -45,6 +62,22 @@ Review policy (REVIEW.md, verbatim):
 ${p.reviewPolicy ?? "(no REVIEW.md in this repository — review for bugs, security and compliance with spec.md and plan.md)"}
 
 Report every finding with mcp__sdlc__report_finding (severity high|medium|low, title, path, detail with the exact evidence). Rank by severity; do not pad. Do not edit files, do not push, do not approve, request changes or merge — the code owner decides on the PR. When you have reported everything, stop.${guidance}`;
+    case "propose": {
+      const sig = p.signal;
+      if (!sig) return `${COMMON(p)}\n\nNo repeat reason to answer; stop.`;
+      const words = p.claudeMd?.wordCount ?? 0;
+      const left = Math.max(0, ONE_PAGE_WORDS - words);
+      const occurrences = sig.occurrences.map((o) => `- ${o.changeId} · cycle ${o.cycle} · ${o.event === "hook.blocked" ? `hook ${o.via} blocked` : `sent back at ${o.via}`}${o.session ? ` · session ${o.session}` : ""} · ${o.ts}: "${o.raw}"`).join("\n");
+      return `${COMMON(p)}
+
+Task: the same mistake was made ${sig.count} times across sessions — reason: "${sig.display}". Occurrences:
+${occurrences}
+
+Read CLAUDE.md (${words} words; one page is ${ONE_PAGE_WORDS}, so ${left} words are left in the budget) and the cited changes (mcp__sdlc__get_change for ${sig.citations.join(", ")}; their plans and ledgers are on disk). Then propose exactly one line for CLAUDE.md that would have prevented these: concrete, imperative, no more than 25 words, no duplicate of a line already there. Call mcp__sdlc__propose_claude_md_line with text, citations [${sig.citations.map((c) => `"${c}"`).join(", ")}] and reason "${sig.reason}" once, then stop. Do not edit CLAUDE.md or any other file — a human accepts the line into a PR reviewed by the code owners, or dismisses it.
+
+CLAUDE.md as it is:
+${p.claudeMd?.text ?? "(missing)"}${guidance}`;
+    }
     case "diagnose":
       return `${COMMON(p)}
 

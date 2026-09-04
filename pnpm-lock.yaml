@@ -157,6 +157,9 @@ importers:
 
   packages/server:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.30.0
+        version: 1.30.0(zod@4.5.4)
       '@sdlc/adapter-git':
         specifier: workspace:*
         version: link:../adapters/git
@@ -188,6 +191,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/web:
     dependencies:

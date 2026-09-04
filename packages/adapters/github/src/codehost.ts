@@ -68,7 +68,8 @@ export class GitHubCodeHost implements CodeHost {
         headSha: input.headSha,
         openedAt: input.now,
         reviewers: pull.reviewers,
-        checks: input.checks.map((c) => ({ name: c.name, verdict: c.verdict })),
+        checks: input.checks.map((c) => ({ name: c.name, verdict: c.verdict, ...(c.summary ? { summary: c.summary } : {}) })),
+      ...(input.autoFindings && input.autoFindings.length > 0 ? { autoFindings: input.autoFindings } : {}),
         planMatches: input.planMatches,
       };
       return await recordOpenedPr(input, pr);

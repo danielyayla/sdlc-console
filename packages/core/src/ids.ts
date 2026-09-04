@@ -1,5 +1,5 @@
 /** Next id = max(existing) + 1, zero-padded to 4 digits (docs/storage-layout.md). */
-export function nextId(prefix: "CHG" | "TRI" | "SEC" | "PRP", existing: Iterable<string>): string {
+export function nextId(prefix: "CHG" | "TRI" | "SEC" | "PRP" | "CASE" | "RUN", existing: Iterable<string>): string {
   const re = new RegExp(`^${prefix}-(\\d{4,})$`);
   let max = 0;
   for (const id of existing) {

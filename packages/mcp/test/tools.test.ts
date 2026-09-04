@@ -62,12 +62,79 @@ async function sdlc(dir: string, args: string[], identity = PO): Promise<{ code:
 const INTENT = "# Intent: Dunning reminders schedule\n\n## Problem\nOverdue invoices get no reminders.\n\n## Proposed outcome\nThree reminders at 7, 14 and 30 days.\n\n## Affected users and systems\nFinance; email service.\n\n## Constraints\nBrand voice; no reminders on disputed invoices.\n\n## Open questions\nEscalate after 30 days?\n";
 
 describe("sdlc-mcp tools", () => {
-  it("lists the ten tools and no accept/merge/approve", async () => {
+  it("lists the twelve tools and no accept/merge/approve/freeze-lift/repro-confirm", async () => {
     const dir = await seeded();
     const c = await client(dir);
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "report_done", "report_finding", "report_round", "request_input", "submit_plan_revision"]);
+    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "propose_claude_md_line", "report_done", "report_finding", "report_repro", "report_round", "request_input", "submit_plan_revision"]);
+    expect(names.some((n) => /accept|merge|approve|lift|confirm/.test(n))).toBe(false);
   });
+
+  it("propose_claude_md_line (2.8): keeps a one-line draft beside the session; a reason already answered by a proposal is refused", async () => {
+    const dir = await seeded();
+    const c = await client(dir, { SDLC_SESSION: "sess-prop" });
+    const answered = await call(c, "propose_claude_md_line", { changeId: "CHG-0018", text: "x", citations: ["CHG-0018"], reason: "Commit touches files outside plan.md's file list" });
+    expect(answered.isError).toBe(true);
+    expect(String(answered.value["error"])).toContain("PRP-0008 (open) already answers");
+    const multi = await call(c, "propose_claude_md_line", { changeId: "CHG-0018", text: "two\nlines", citations: ["CHG-0018"], reason: "test freeze active" });
+    expect(multi.isError).toBe(true);
+    const r = await call(c, "propose_claude_md_line", { changeId: "CHG-0018", text: "  Under a repro freeze, propose test changes with request_input; never edit the test.  ", citations: ["CHG-0018", "CHG-0019"], reason: "Test Freeze Active" });
+    expect(r.isError).toBe(false);
+    expect(r.value).toMatchObject({ text: "Under a repro freeze, propose test changes with request_input; never edit the test.", reason: "test freeze active", citations: ["CHG-0018", "CHG-0019"] });
+    const draft = JSON.parse(readFileSync(join(dir, ".sdlc-state/sessions/sess-prop/proposal.json"), "utf8")) as Record<string, unknown>;
+    expect(draft).toMatchObject({ text: "Under a repro freeze, propose test changes with request_input; never edit the test.", reason: "test freeze active", ts: "2026-09-03T12:00:00Z" });
+    // nothing committed, nothing under sdlc/proposals yet: the system files it when the session ends
+    expect((await git(dir, ["status", "--porcelain"])).trim()).toBe("");
+    expect((await git(dir, ["log", "-1", "--format=%s"])).trim()).toBe("sdlc(repo): seed");
+  });
+
+  it("report_repro (2.7): commits the failing test alone on the task branch, records repro.failed and keeps the draft; refuses features, committed repros, paths outside the test globs and commits that carry more than the test", async () => {
+    const dir = await seeded();
+    // CHG-0018 is the seed's fix with its repro already committed → refused; reset it to the reporting state
+    const changeYaml = join(dir, "sdlc/changes/CHG-0018/change.yaml");
+    const original = readFileSync(changeYaml, "utf8");
+    const { writeFileSync: write, mkdirSync: mkdir } = await import("node:fs");
+    const wt = join(dir, "..", `${dir.split("/").pop() ?? "wt"}-repro`);
+    cleanups.push(() => rmSync(wt, { recursive: true, force: true }));
+    await git(dir, ["worktree", "add", "-q", "-b", "CHG-0018/export-fix", wt, "main"]);
+    const c = await client(wt, { SDLC_SESSION: "sess-r1", SDLC_CHANGE: "CHG-0018" });
+    mkdir(join(wt, "test/export"), { recursive: true });
+    write(join(wt, "test/export/zero-total.test.ts"), "it('exports zero-total rows', () => { expect(rows).toHaveLength(4); });\n");
+    const committedAlready = await call(c, "report_repro", { testPath: "test/export/zero-total.test.ts", failureReason: "expected 4 rows, received 3", output: "AssertionError: expected 4 rows, received 3" });
+    expect(committedAlready.isError).toBe(true);
+    expect(String(committedAlready.value["error"])).toContain("already has its repro test committed");
+    write(join(wt, "sdlc/changes/CHG-0018/change.yaml"), original.replace(/repro:\n(?: {2}.*\n)+/, "repro: null\n"));
+    await git(wt, ["rm", "-q", "--cached", "sdlc/changes/CHG-0018/evals/repro.json"]);
+    rmSync(join(wt, "sdlc/changes/CHG-0018/evals/repro.json"));
+    await git(wt, ["add", "sdlc/changes/CHG-0018/change.yaml"]);
+    await git(wt, ["commit", "-q", "-m", "test: repro not yet reported"]);
+
+    const outside = await call(c, "report_repro", { testPath: "src/export/csv.ts", failureReason: "x", output: "y" });
+    expect(outside.isError).toBe(true);
+    expect(String(outside.value["error"])).toContain("does not exist in this worktree");
+    write(join(wt, "src-not-a-test.ts"), "x\n");
+    const notTest = await call(c, "report_repro", { testPath: "src-not-a-test.ts", failureReason: "x", output: "y" });
+    expect(String(notTest.value["error"])).toContain("is not under the test globs");
+
+    // a stray edit in the worktree is not swept into the repro commit
+    mkdir(join(wt, "src"), { recursive: true });
+    write(join(wt, "src/stray.ts"), "export const stray = 1;\n");
+    const r = await call(c, "report_repro", { testPath: "test/export/zero-total.test.ts", failureReason: "expected 4 rows, received 3", output: "AssertionError: expected 4 rows, received 3\n  at test/export/zero-total.test.ts:12:5" });
+    expect(r.isError).toBe(false);
+    const sha = String(r.value["sha"]);
+    expect(sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(String(r.value["note"])).toContain("stop here");
+    expect((await git(wt, ["diff-tree", "--no-commit-id", "--name-only", "-r", sha])).trim()).toBe("test/export/zero-total.test.ts");
+    expect((await git(wt, ["log", "-1", "--format=%s", sha])).trim()).toBe("sdlc(CHG-0018): repro test test/export/zero-total.test.ts");
+    expect((await git(wt, ["status", "--porcelain", "--", "src/stray.ts"])).trim()).toContain("src/stray.ts");
+    const draft = JSON.parse(readFileSync(join(wt, ".sdlc-state/sessions/sess-r1/repro.json"), "utf8")) as { testPath: string; sha: string; output: string };
+    expect(draft).toMatchObject({ testPath: "test/export/zero-total.test.ts", sha, output: "AssertionError: expected 4 rows, received 3\n  at test/export/zero-total.test.ts:12:5" });
+    const ledger = readFileSync(join(wt, "sdlc/changes/CHG-0018/log.jsonl"), "utf8").trim().split("\n");
+    expect(JSON.parse(ledger.at(-1) ?? "{}")).toMatchObject({ event: "repro.failed", actor: { type: "agent", session: "sess-r1" }, data: { testPath: "test/export/zero-total.test.ts", failureReason: "expected 4 rows, received 3" } });
+    // a feature has no repro
+    const feature = await call(c, "report_repro", { changeId: "CHG-0017", testPath: "test/export/zero-total.test.ts", failureReason: "x", output: "y" });
+    expect(String(feature.value["error"])).toContain("repro-first applies to fixes");
+  }, 30_000);
 
   it("list_work, get_change, get_context describe the awaited artifact and the bundle", async () => {
     const dir = await seeded();

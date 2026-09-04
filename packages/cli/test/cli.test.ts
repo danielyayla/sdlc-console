@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, initRepo } from "@sdlc/adapter-git";
 import { main, type Io } from "../src/index.js";
@@ -271,5 +272,197 @@ describe("sdlc hook", () => {
     expect((await sdlc(dir, ["hook", "verify-before-done"], {}, stopJson)).code).toBe(0);
     expect((await sdlc(dir, ["hook", "nope"], {}, "{}")).code).toBe(1);
     expect((await sdlc(dir, ["hook", "test-freeze"], {}, "not json")).code).toBe(0);
+  });
+});
+
+describe("eval suite in CI (2.5)", () => {
+  it("init writes the evals and validate workflows once", async () => {
+    const dir = await freshRepo();
+    const first = await sdlc(dir, ["init", "--json"]);
+    const created = first.json<{ created: string[] }>().created;
+    expect(created).toContain(".github/workflows/sdlc-evals.yml");
+    expect(created).toContain(".github/workflows/sdlc-validate.yml");
+    const evals = readFileSync(join(dir, ".github/workflows/sdlc-evals.yml"), "utf8");
+    expect(evals).toContain("evals run --trigger");
+    expect(evals).toContain("evals gate");
+    expect(evals).toContain("- CLAUDE.md");
+    expect(evals).toContain('- ".claude/**"');
+    expect(evals).toContain("sdlc/evals-runs");
+    expect(readFileSync(join(dir, ".github/workflows/sdlc-validate.yml"), "utf8")).toContain("validate");
+    const second = await sdlc(dir, ["init", "--json"]);
+    expect(second.json<{ skipped: string[] }>().skipped).toContain(".github/workflows/sdlc-evals.yml");
+  });
+
+  it("config-change gate (acceptance m): a CLAUDE.md change whose run regresses a case is blocked with before/after output; scheduled mode is not gated; harvest refuses an unmerged change", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    put(dir, "check.sh", "echo ok\n");
+    put(dir, "evals/cases/CASE-0001.json", JSON.stringify({ schema: 1, id: "CASE-0001", prompt: "Export a month as CSV.", checks: [{ name: "check", cmd: "sh ./check.sh", healthyOutput: "ok" }], source: { type: "manual" }, owner: "po@example.com", added: "2026-09-01T00:00:00Z", status: "active", paths: ["src/export.ts"] }, null, 2));
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "evals: CASE-0001"]);
+    const run1 = await sdlc(dir, ["evals", "run", "--trigger", "config-pr", "--json"]);
+    expect(run1.code).toBe(0);
+    expect(run1.json<{ run: { id: string; verdict: string; passRate: number } }>().run).toMatchObject({ id: "RUN-0001", verdict: "pass", passRate: 1 });
+    expect((await git(dir, ["log", "-1", "--format=%s %an"])).trim()).toBe("sdlc(evals): suite run RUN-0001 pass (1/1 of 1) sdlc-bot");
+    const gate1 = await sdlc(dir, ["evals", "gate"]);
+    expect(gate1.code).toBe(0);
+    expect(gate1.out).toContain("ok: RUN-0001 pass · 100% vs threshold 90%");
+    // the config changes and the check breaks
+    put(dir, "CLAUDE.md", "# P\n\n- Never guess.\n\n## Verifying your work\n- Build: `pnpm build`\n- Test: `pnpm test` (all green)\n- Lint: `pnpm lint`\n");
+    put(dir, "check.sh", "echo broken; exit 1\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "CLAUDE.md: never guess"]);
+    const gateStale = await sdlc(dir, ["evals", "gate"]);
+    expect(gateStale.code).toBe(1);
+    expect(gateStale.out).toContain("no suite run for the current config");
+    const run2 = await sdlc(dir, ["evals", "run", "--trigger", "config-pr"]);
+    expect(run2.code).toBe(0);
+    expect(run2.out).toContain("RUN-0002 fail · 0% (0/1)");
+    expect(run2.out).toContain("✗ CASE-0001");
+    expect(run2.out).toContain("broken");
+    const gate2 = await sdlc(dir, ["evals", "gate"]);
+    expect(gate2.code).toBe(1);
+    expect(gate2.out).toContain("blocked: RUN-0002 fail · 0% vs threshold 90% · 1 regressed");
+    expect(gate2.out).toContain("baseline RUN-0001");
+    expect(gate2.out).toContain("regressed CASE-0001");
+    expect(gate2.out).toMatch(/before:\n\s+--- check: sh \.\/check\.sh \(exit 0\)\n\s+ok/);
+    expect(gate2.out).toMatch(/after:\n\s+--- check: sh \.\/check\.sh \(exit 1\)\n\s+broken/);
+    const gateJson = await sdlc(dir, ["evals", "gate", "--json"]);
+    expect(gateJson.json<{ ok: boolean; regressed: { caseId: string }[] }>()).toMatchObject({ ok: false, regressed: [{ caseId: "CASE-0001" }] });
+    // scheduled mode: config PRs are not gated and the config-pr trigger runs nothing
+    put(dir, "sdlc/config.yaml", `${readFileSync(join(dir, "sdlc/config.yaml"), "utf8")}evals: { mode: scheduled, schedule: "0 3 * * *" }\n`);
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "config: scheduled evals"]);
+    const gate3 = await sdlc(dir, ["evals", "gate"]);
+    expect(gate3.code).toBe(0);
+    expect(gate3.out).toContain("not gated");
+    const skipped = await sdlc(dir, ["evals", "run", "--trigger", "config-pr", "--json"]);
+    expect(skipped.json<{ skipped: string }>().skipped).toContain("scheduled");
+    // agents cannot run or harvest
+    expect((await sdlc(dir, ["evals", "run"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
+    // harvest needs a merged change
+    const created = await sdlc(dir, ["change", "new", "--title", "Export", "--intent", "-", "--json"], {}, FULL_INTENT);
+    expect(created.code).toBe(0);
+    const harvest = await sdlc(dir, ["evals", "harvest", "CHG-0001"]);
+    expect(harvest.code).toBe(2);
+    expect(harvest.err).toContain("not merged (stage 1)");
+  }, 30_000);
+});
+
+describe("session downgrade (2.6)", () => {
+  it("is wired: usage without an id, not-found for an unknown session, and the usage line names it", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    const usage = await sdlc(dir, ["session", "downgrade"]);
+    expect(usage.code).toBe(1);
+    expect(usage.err).toContain("usage: sdlc session downgrade <id> [--reason <text>]");
+    const missing = await sdlc(dir, ["session", "downgrade", "sess-nope", "--reason", "x"]);
+    expect(missing.code).toBe(1);
+    expect(missing.err).toContain("sess-nope not found");
+    const agent = await sdlc(dir, ["session", "downgrade", "sess-nope"], { SDLC_ACTOR_TYPE: "agent" });
+    expect(agent.code).toBe(2);
+    const help = await sdlc(dir, ["nope"]);
+    expect(help.err).toContain("downgrade <id> [--reason r]   (downgrade: AUTO → SUPERVISED, never upward)");
+  });
+});
+
+describe("repro and freeze commands (2.7)", () => {
+  it("are wired: usage lines, human-only, and a change without a reported repro test is refused with the hand-written form", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    expect((await sdlc(dir, ["repro"])).err).toContain("usage: sdlc repro confirm <CHG>");
+    expect((await sdlc(dir, ["freeze", "lift", "CHG-0001"])).err).toContain("usage: sdlc freeze lift <CHG> --file <path> --reason <text>");
+    put(dir, "intent-body.md", FULL_INTENT);
+    const created = await sdlc(dir, ["change", "new", "--title", "Zero rows", "--kind", "fix", "--intent", "intent-body.md", "--json"]);
+    expect(created.code).toBe(0);
+    const agent = await sdlc(dir, ["repro", "reject", "CHG-0001", "--reason", "x"], { SDLC_ACTOR_TYPE: "agent" });
+    expect(agent.code).toBe(2);
+    const none = await sdlc(dir, ["repro", "confirm", "CHG-0001"]);
+    expect(none.code).toBe(2);
+    expect(none.err).toContain("has no reported repro test; pass --file, --reason and --sha");
+    const help = await sdlc(dir, ["nope"]);
+    expect(help.err).toContain("sdlc repro confirm <CHG>");
+    expect(help.err).toContain("sdlc freeze lift <CHG> --file p --reason r");
+  });
+});
+
+describe("proposal and trigger-test commands (2.8)", () => {
+  const FAKE = fileURLToPath(new URL("../../server/test/fixtures/fake-claude.sh", import.meta.url));
+
+  it("proposal accept|dismiss are wired, human-only, need eng or platform, and dismiss needs a reason", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    expect((await sdlc(dir, ["proposal"])).err).toContain("usage: sdlc proposal accept <PRP>");
+    put(dir, "sdlc/proposals/PRP-0001.yaml", "schema: 1\nid: PRP-0001\ntype: claude-md-line\ntext: Run the tests before reporting done.\ncitations: [CHG-0001]\nreason: tests not run\nstatus: open\ncreatedAt: 2026-09-02T09:40:00Z\n");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "proposal"]);
+    expect((await sdlc(dir, ["proposal", "accept", "PRP-0001"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
+    const po = await sdlc(dir, ["proposal", "accept", "PRP-0001"]);
+    expect(po.code).toBe(1);
+    expect(po.err).toContain("holds neither eng nor platform");
+    const noReason = await sdlc(dir, ["proposal", "dismiss", "PRP-0001"], { SDLC_IDENTITY: "eng@example.com" });
+    expect(noReason.code).toBe(2);
+    expect(noReason.err).toContain("--reason is required");
+    // local mode: accept cuts the branch with the line and marks the proposal; main's CLAUDE.md is untouched
+    const accepted = await sdlc(dir, ["proposal", "accept", "PRP-0001", "--json"], { SDLC_IDENTITY: "eng@example.com" });
+    expect(accepted.code).toBe(0);
+    expect(accepted.json<{ toast: string }>().toast).toBe("PRP-0001 accepted — branch sdlc/proposals/PRP-0001 carries the line — open a PR from it for the code owners");
+    expect(await git(dir, ["show", "sdlc/proposals/PRP-0001:CLAUDE.md"])).toContain("- Run the tests before reporting done.");
+    expect(await git(dir, ["show", "main:CLAUDE.md"])).not.toContain("Run the tests before reporting done.");
+    expect(await git(dir, ["show", "main:sdlc/proposals/PRP-0001.yaml"])).toContain("status: accepted");
+    expect((await git(dir, ["log", "-1", "--format=%an <%ae>", "sdlc/proposals/PRP-0001"])).trim()).toBe("Pat Owner <eng@example.com>"); // SDLC_IDENTITY overrides the email; the name comes from git
+    expect((await sdlc(dir, ["proposal", "accept", "PRP-0001"], { SDLC_IDENTITY: "eng@example.com" })).code).toBe(1);
+    const help = await sdlc(dir, ["nope"]);
+    expect(help.err).toContain("sdlc proposal accept <PRP>");
+    expect(help.err).toContain("sdlc evals trigger <skill> --prompt <text>");
+  });
+
+  it("evals trigger runs the harness headless and exits 0 only when the Skill tool loaded the skill", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    expect((await sdlc(dir, ["evals", "trigger"])).err).toContain("usage: sdlc evals trigger <skill> --prompt <text>");
+    const loaded = await sdlc(dir, ["evals", "trigger", "brand", "--prompt", "Write the reminder copy.", "--json"], { SDLC_CLAUDE_BIN: FAKE, FAKE_CLAUDE_SKILL: "brand" });
+    expect(loaded.code).toBe(0);
+    expect(loaded.json<{ loaded: boolean; evidence: string }>()).toMatchObject({ loaded: true, skill: "brand", prompt: "Write the reminder copy." });
+    expect(loaded.json<{ evidence: string }>().evidence).toContain('"name":"Skill"');
+    const other = await sdlc(dir, ["evals", "trigger", "brand", "--prompt", "Write the reminder copy."], { SDLC_CLAUDE_BIN: FAKE, FAKE_CLAUDE_SKILL: "compliance" });
+    expect(other.code).toBe(1);
+    expect(other.out).toContain("not loaded: skill brand");
+    const none = await sdlc(dir, ["evals", "trigger", "brand", "--prompt", "Write the reminder copy."], { SDLC_CLAUDE_BIN: FAKE });
+    expect(none.code).toBe(1);
+    expect(none.out).toContain("not loaded: skill brand");
+    expect(none.out).toContain("working"); // the transcript tail is the evidence, verbatim
+  });
+});
+
+describe("record commands (2.9, FR-16)", () => {
+  it("record link writes change.yaml.record and the ledger (human, once), status shows modes and sync, retry says when nothing is owed", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    put(dir, "intent-body.md", FULL_INTENT);
+    expect((await sdlc(dir, ["change", "new", "--title", "Export", "--intent", "intent-body.md", "--json"])).code).toBe(0);
+    expect((await sdlc(dir, ["record"])).err).toContain("usage: sdlc record link <CHG>");
+    expect((await sdlc(dir, ["record", "link", "CHG-0001", "--system", "jira"])).code).toBe(2);
+    expect((await sdlc(dir, ["record", "link", "CHG-0001", "--system", "jira", "--id", "EXP-1"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
+    const linked = await sdlc(dir, ["record", "link", "CHG-0001", "--system", "jira", "--id", "EXP-1", "--url", "https://jira.example/browse/EXP-1"]);
+    expect(linked.code).toBe(0);
+    expect(linked.out).toContain("CHG-0001 linked to jira EXP-1");
+    expect(readFileSync(join(dir, "sdlc/changes/CHG-0001/change.yaml"), "utf8")).toContain("id: EXP-1");
+    expect(readFileSync(join(dir, "sdlc/changes/CHG-0001/log.jsonl"), "utf8")).toContain('"event":"record.linked"');
+    const again = await sdlc(dir, ["record", "link", "CHG-0001", "--system", "jira", "--id", "EXP-2"]);
+    expect(again.code).not.toBe(0);
+    expect(again.err).toContain("already linked to jira EXP-1");
+    const status = await sdlc(dir, ["record", "status", "CHG-0001"]);
+    expect(status.code).toBe(0);
+    expect(status.out).toContain("record: jira EXP-1 (https://jira.example/browse/EXP-1)  connector: none");
+    expect(status.out).toContain("intent.md    repo      synced never");
+    const json = await sdlc(dir, ["record", "status", "CHG-0001", "--json"]);
+    expect(json.json<{ record: { id: string }; rows: { artifact: string; mode: string }[] }>().rows.map((r) => r.mode)).toEqual(["repo", "repo", "repo", "repo", "repo", "repo"]);
+    const retry = await sdlc(dir, ["record", "retry", "CHG-0001", "intent"]);
+    expect(retry.code).not.toBe(0);
+    expect(retry.err).toContain("nothing to write back");
+    expect((await sdlc(dir, ["record", "retry", "CHG-0001", "bogus"])).err).toContain("unknown artifact bogus");
+    const show = await sdlc(dir, ["change", "show", "CHG-0001"]);
+    expect(show.out).toContain("linked to jira EXP-1");
   });
 });

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { CodeHostError, git, initRepo, isAncestor, readTree } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo } from "@sdlc/core";
-import { PO, writeSeed } from "@sdlc/fixtures";
+import { PO, realizeSeedRepro, writeSeed } from "@sdlc/fixtures";
 import { appendFinding } from "@sdlc/mcp";
 import { ActionError, Engine, JobStore, SessionRegistry, StateStore, acceptGate, codeHostFor, launchSession, type Exec } from "../src/index.js";
 import { startFakeGitHub, type FakeGitHub } from "../../adapters/github/test/fake-github.js";
@@ -62,15 +62,19 @@ function harness(dir: string, env: Record<string, string>) {
 async function buildAndRun(dir: string, env: Record<string, string>) {
   const h = harness(dir, env);
   await h.store.refresh();
+  // the engine's first poll runs on that refresh; drain it here so it cannot race the commits below (main ahead → records PR)
+  await h.engine.sync();
   const launched = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
   const wt = launched.session.worktreePath;
+  // 2.7: a fix merges only with a real repro commit before the fix
+  const reproSha = await realizeSeedRepro(dir, wt);
   mkdirSync(join(wt, "src/export"), { recursive: true });
   writeFileSync(join(wt, "src/export/csv.ts"), "export const fixed = true;\n");
   await git(wt, ["add", "-A"]);
   await git(wt, ["commit", "-q", "-m", "sdlc(CHG-0018): remove truthiness filter"]);
   h.registry.patch(launched.session.id, { status: "done" });
   const job = await h.engine.runForSession({ ...launched.session, status: "done" });
-  return { ...h, job, session: launched.session, worktree: wt };
+  return { ...h, job, session: launched.session, worktree: wt, reproSha };
 }
 
 describe("GitHub mode (2.1): green run pushes the branch, opens a real PR, gate 5 merges through the API under branch protection", () => {
@@ -82,7 +86,7 @@ describe("GitHub mode (2.1): green run pushes the branch, opens a real PR, gate 
 
     const view = await viewOf(dir, "CHG-0018");
     expect(view.stage).toBe(5);
-    expect(view.pr).toMatchObject({ provider: "github", number: 1, url: "https://github.example/acme/widgets/pull/1", branch: "CHG-0018/export-fix", baseBranch: "main", checks: [{ name: "evidence", verdict: "pass" }, { name: "evals", verdict: "pass" }] });
+    expect(view.pr).toMatchObject({ provider: "github", number: 1, url: "https://github.example/acme/widgets/pull/1", branch: "CHG-0018/export-fix", baseBranch: "main", checks: [expect.objectContaining({ name: "evidence", verdict: "pass" }), expect.objectContaining({ name: "evals", verdict: "pass" }), expect.objectContaining({ name: "repro", verdict: "pass" })] });
     const pushed = (await git(gh.bare, ["rev-parse", "refs/heads/CHG-0018/export-fix"])).trim();
     expect(view.pr?.headSha).toBe(pushed);
     expect(gh.state.pulls[0]).toMatchObject({ head: "CHG-0018/export-fix", base: "main", title: expect.stringContaining("sdlc(CHG-0018)") });
@@ -90,6 +94,8 @@ describe("GitHub mode (2.1): green run pushes the branch, opens a real PR, gate 
     expect(gh.state.statuses).toEqual([
       { sha: pushed, body: { state: "success", context: "sdlc/evidence", description: expect.stringContaining("green"), target_url: "https://github.example/acme/widgets/pull/1" } },
       { sha: pushed, body: { state: "success", context: "sdlc/evals", description: expect.stringContaining("eval cases"), target_url: "https://github.example/acme/widgets/pull/1" } },
+      // 2.7: the fix's repro proof travels as a status too
+      { sha: pushed, body: { state: "success", context: "sdlc/repro", description: expect.stringContaining("unchanged in diff"), target_url: "https://github.example/acme/widgets/pull/1" } },
     ]);
     const opened = view.activity.find((a) => a.event === "pr.opened");
     expect(opened?.text).toContain("#1");
@@ -340,7 +346,7 @@ describe("review findings mirror + check runs in GitHub mode (2.3)", () => {
     const h = await buildAndRun(dir, env);
     expect(h.job?.state).toBe("done");
     const pushed = (await git(gh.bare, ["rev-parse", "refs/heads/CHG-0018/export-fix"])).trim();
-    expect(gh.state.statuses.map((s) => s.body["context"])).toEqual(["sdlc/evidence", "sdlc/evals"]);
+    expect(gh.state.statuses.map((s) => s.body["context"])).toEqual(["sdlc/evidence", "sdlc/evals", "sdlc/repro"]); // the fix carries its repro proof as a status (2.7)
 
     // the review session reads the PR branch worktree and commits nothing there: the PR head stays the tested head
     const review = await launchSession({ changeId: "CHG-0018", kind: "review", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
@@ -360,7 +366,7 @@ describe("review findings mirror + check runs in GitHub mode (2.3)", () => {
     const view = await viewOf(dir, "CHG-0018");
     expect(view.stage).toBe(5);
     expect(view.pr?.findings).toEqual({ high: 1, medium: 0, low: 1 });
-    expect(view.pr?.checks).toEqual([{ name: "evidence", verdict: "pass" }, { name: "evals", verdict: "pass" }, { name: "findings", verdict: "fail" }]);
+    expect(view.pr?.checks.map((c) => [c.name, c.verdict])).toEqual([["evidence", "pass"], ["evals", "pass"], ["repro", "pass"], ["findings", "fail"]]);
     expect(view.pr?.review).toEqual({ session: review.session.id, headSha: pushed, at: "2026-09-04T09:00:00Z" });
     expect(view.findings.map((f) => [f.severity, f.title, f.path, f.session])).toEqual([
       ["high", "export drops rows whose amount is 0", "src/export/csv.ts", review.session.id],

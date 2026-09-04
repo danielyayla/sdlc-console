@@ -179,7 +179,9 @@ describe("the seed reproduces the spec (design-spec §2)", () => {
     const files = repo.changes.get("CHG-0018");
     expect(check.testFreeze("test/export/csv.test.ts", v, files ?? null, repo.verification?.testGlobs ?? []).allowed).toBe(false);
     expect(check.testFreeze("src/export/csv.ts", v, files ?? null, repo.verification?.testGlobs ?? []).allowed).toBe(true);
-    expect(v.activity.filter((a) => a.event === "hook.blocked")).toHaveLength(1);
+    // one test-freeze block (counted as a test-edit attempt) and one plan-sync block (half of the seed's repeat signal, 2.8)
+    expect(v.activity.filter((a) => a.event === "hook.blocked")).toHaveLength(2);
+    expect(v.activity.filter((a) => a.text.includes("test-freeze"))).toHaveLength(1);
   });
 
   it("(l) green run moved CHG-0017 to Deploy with no click; red keeps CHG-0018 in Test", () => {

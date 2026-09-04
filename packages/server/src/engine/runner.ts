@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { commitWritePlan, git, headSha, newUlid, readTree } from "@sdlc/adapter-git";
 import { check, configFingerprint, intersectingCases, loadRepo, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
-import { stringifyJson, type CommandResult, type Event, type EvalResult, type PerChangeRun } from "@sdlc/schemas";
+import { compileGlobs, stringifyJson, type AutoFinding, type CommandResult, type Event, type EvalResult, type PerChangeRun, type Pr } from "@sdlc/schemas";
 import type { Env } from "@sdlc/adapter-github";
 import { SYSTEM_IDENTITY, codeHostFor, type CodeHost } from "./codehost.js";
 
@@ -127,12 +127,14 @@ export async function runPerChange(input: RunInput, repo: Repo): Promise<RunOutc
     const host = input.codeHost ?? codeHostFor(repo.config.codeHost, input.env);
     const cmdPassed = commandResults.filter((r) => r.pass).length;
     const casesPassed = results.filter((r) => r.pass).length;
-    const checks = [
+    const checks: { name: string; verdict: "pass" | "fail"; summary: string }[] = [
       { name: "evidence", verdict: "pass" as const, summary: `per-change run ${n} green · ${cmdPassed}/${commandResults.length} verification commands passed` },
       { name: "evals", verdict: "pass" as const, summary: results.length === 0 ? `per-change run ${n} · no eval cases intersect the diff` : `per-change run ${n} · ${casesPassed}/${results.length} intersecting eval cases passed` },
     ];
-    const prInput = { root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now(), checks };
     const existing = files.pr && files.pr.mergedAt === undefined && files.pr.branch === input.branch ? files.pr : null;
+    const proof = await reproProof(input, repo, view, contract?.testGlobs ?? [], existing);
+    checks.push(...proof.checks);
+    const prInput = { root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now(), checks, ...(proof.autoFindings.length > 0 ? { autoFindings: proof.autoFindings } : {}) };
     if (existing && existing.headSha === head) {
       // the PR already points at this head (a re-run): nothing to record on it
       prAction = "unchanged";
@@ -149,4 +151,39 @@ export async function runPerChange(input: RunInput, repo: Repo): Promise<RunOutc
     reds += 1;
   }
   return { run, runCommit, prCommit, prAction, consecutiveReds: reds };
+}
+
+/**
+ * Repro proof for a fix (spec 5B.3, FR-51): the repro test was committed
+ * before the fix, is unchanged in the diff since, and passes now (the run is
+ * green). Test files changed after the repro commit without a lift are the
+ * freeze's business: with managed hooks installed the hook blocked the agent
+ * (a human edit is theirs to make); without hooks nothing could block, so the
+ * run raises one auto-finding per file that blocks the console's merge until
+ * a human dismisses it with a reason.
+ */
+async function reproProof(input: RunInput, repo: Repo, view: ChangeView, testGlobs: readonly string[], existing: Pr | null): Promise<{ checks: { name: string; verdict: "pass" | "fail"; summary: string }[]; autoFindings: AutoFinding[] }> {
+  const repro = view.repro;
+  if (view.kind !== "fix" || repro?.state !== "committed" || !repro.sha || !repro.testPath) return { checks: [], autoFindings: [] };
+  const sha7 = repro.sha.slice(0, 7);
+  // the proof is the diff since the repro commit; a commit this clone does not have proves nothing
+  const diff = await git(input.worktree, ["diff", "--name-only", `${repro.sha}..HEAD`]).catch(() => null);
+  if (diff === null) return { checks: [{ name: "repro", verdict: "fail", summary: `repro test ${repro.testPath} recorded at ${sha7}, but that commit is not in this repository — the proof cannot be shown` }], autoFindings: [] };
+  const since = diff.split("\n").map((s) => s.trim()).filter(Boolean);
+  const lifted = new Set(view.freezeLifts.map((l) => l.path));
+  const reproChanged = since.includes(repro.testPath) && !lifted.has(repro.testPath);
+  const checks: { name: string; verdict: "pass" | "fail"; summary: string }[] = [
+    { name: "repro", verdict: reproChanged ? "fail" : "pass", summary: `repro test ${repro.testPath} committed ${sha7} before fix · ${reproChanged ? "modified after the repro commit without a lift" : lifted.has(repro.testPath) ? "edited under a lifted freeze" : "unchanged in diff"} · passing now` },
+  ];
+  const underTests = compileGlobs([...testGlobs]);
+  const edits = since.filter((f) => f !== repro.testPath && underTests(f) && !lifted.has(f));
+  const hooksEnforced = (repo.settings?.hooks ?? []).some((h) => /test-freeze/.test(h.script) || /test-freeze/.test(h.name));
+  if (edits.length === 0 || hooksEnforced) return { checks, autoFindings: [] };
+  checks.push({ name: "test-freeze", verdict: "fail", summary: `${edits.length} test file${edits.length === 1 ? "" : "s"} changed after the repro commit ${sha7} with no managed hook to block it: ${edits.join(", ")}` });
+  const previous = new Map((existing?.autoFindings ?? []).filter((f) => f.dismissal).map((f) => [f.path, f.dismissal]));
+  const autoFindings: AutoFinding[] = edits.map((path) => {
+    const carried = previous.get(path);
+    return { rule: "test-freeze", path, title: "diff touches a test file during a fix", detail: `${path} changed after the repro commit ${sha7} without a freeze lift; managed hooks are not installed, so the edit was not blocked`, ...(carried ? { dismissal: carried } : {}) };
+  });
+  return { checks, autoFindings };
 }

@@ -141,7 +141,7 @@ ${s.questions}
   );
 }
 
-function changeYaml(id: string, title: string, o: { kind?: "feature" | "fix"; risk?: "routine" | "high"; created: string; origin?: { type: string; ref?: string }; repro?: unknown; cycle?: number }): string {
+function changeYaml(id: string, title: string, o: { kind?: "feature" | "fix"; risk?: "routine" | "high"; created: string; origin?: { type: string; ref?: string }; record?: { system: string; id: string; url?: string }; repro?: unknown; cycle?: number }): string {
   return stringifyYaml({
     schema: 1,
     id,
@@ -150,7 +150,7 @@ function changeYaml(id: string, title: string, o: { kind?: "feature" | "fix"; ri
     risk: o.risk ?? "routine",
     created: { by: PO, at: o.created },
     origin: o.origin ?? { type: "idea" },
-    record: null,
+    record: o.record ?? null,
     cycle: o.cycle ?? 1,
     repro: o.repro ?? null,
     closed: null,
@@ -174,6 +174,14 @@ Working knowledge for agents in this repo. Keep it under one page.
 - Test files: \`test/**/*.test.ts\`
 - Max rounds: 5
 `;
+
+/** `.mcp.json`: the agent tools, and the platform team's records connector (`records.connector`) — a placeholder command the tests replace. */
+export const MCP_JSON = stringifyJson({
+  mcpServers: {
+    sdlc: { command: "sdlc", args: ["mcp"] },
+    records: { command: "sdlc-records-connector", args: ["--system", "servicenow"] },
+  },
+});
 
 export const SETTINGS_JSON = stringifyJson({
   permissions: {
@@ -246,7 +254,7 @@ export const CONFIG_YAML = stringifyYaml({
     { id: SEC, name: "Security lead", roles: ["security"] },
   ],
   thresholds: { autoFilesMax: 12, maxLoopRounds: 5, sessionCeiling: 4, suiteMinSize: 20 },
-  records: { intent: "repo", spec: "repo", plan: "repo", evals: "repo", pr: "repo", incident: "repo" },
+  records: { intent: "repo", spec: "repo", plan: "repo", evals: "repo", pr: "repo", incident: "external", connector: "records" },
   evals: { mode: "continuous", threshold: 0.9 },
   eligibility: { coverage: "lenient" },
   products: [{ name: "invoicing", path: "." }],
@@ -260,6 +268,7 @@ export function seedFiles(): Record<string, string> {
   files["REVIEW.md"] = REVIEW_MD;
   files["bands.yaml"] = BANDS_YAML;
   files[".claude/settings.json"] = SETTINGS_JSON;
+  files[".mcp.json"] = MCP_JSON;
   files[".claude/skills/brand/SKILL.md"] = SKILL_MD;
   files[".claude/agents/reviewer.md"] = AGENT_MD;
   files[".gitattributes"] = "* text=auto eol=lf\nsdlc/**/log.jsonl merge=union\n";
@@ -284,7 +293,7 @@ export function seedFiles(): Record<string, string> {
     const id = "CHG-0012";
     const dir = `sdlc/changes/${id}`;
     const title = "Invoice PDF rendering";
-    put(`${dir}/change.yaml`, changeYaml(id, title, { created: T("08-20", "09:00") }));
+    put(`${dir}/change.yaml`, changeYaml(id, title, { created: T("08-20", "09:00"), record: { system: "servicenow", id: "INC0041207", url: "https://servicenow.example/incident/INC0041207" } }));
     const intentSha = put(`${dir}/intent.md`, intentMd(id, title, T("08-20", "09:00"), { problem: "Invoices render as HTML only; customers ask for PDF.", outcome: "A PDF download per invoice, identical to the HTML layout.", affected: "Customers; invoicing web; storage.", constraints: "No third-party rendering service; PDFs under 1 MB.", questions: "None." }));
     const specSha = put(`${dir}/spec.md`, specMd(id, title, intentSha, T("08-20", "11:00"), { requirements: "Render invoice to PDF server-side; link on invoice page.", design: "Headless browser print pipeline behind a queue.", concerns: "C1 privacy: PDFs contain addresses — resolved with expiring links.", carried: "None." }, [{ id: "C1", policy: "privacy", owner: "legal@veri.example", resolved: true, note: "expiring links" }]));
     const planFiles = ["src/invoice/pdf.ts (new)", "src/invoice/route.ts", "test/invoice/pdf.test.ts (new)"];
@@ -320,6 +329,7 @@ export function seedFiles(): Record<string, string> {
       { at: T("08-23", "09:50"), actor: human(ENG, "eng"), event: "deploy.authorized", data: { env: "production", version: "2026.08.23" } },
       { at: T("08-23", "10:00"), actor: system, event: "deploy.finished", data: { env: "production", version: "2026.08.23" } },
       { at: T("09-02", "07:30"), actor: agent("s-0012-diagnose"), event: "artifact.committed", data: { artifact: 5, path: `${dir}/incident.md`, sha: incidentSha } },
+      { at: T("09-02", "07:31"), actor: system, event: "record.writeback.ok", data: { system: "servicenow", id: "INC0041207", artifact: 5, kind: "committed", sha: incidentSha, url: "https://servicenow.example/incident/INC0041207#work-notes" } },
     ]);
   }
 
@@ -328,7 +338,7 @@ export function seedFiles(): Record<string, string> {
     const id = "CHG-0017";
     const dir = `sdlc/changes/${id}`;
     const title = "Invoice CSV export";
-    put(`${dir}/change.yaml`, changeYaml(id, title, { created: T("08-26", "09:00"), origin: { type: "ticket", ref: "JIRA-4411" } }));
+    put(`${dir}/change.yaml`, changeYaml(id, title, { created: T("08-26", "09:00"), origin: { type: "ticket", ref: "JIRA-4411" }, record: { system: "jira", id: "JIRA-4411", url: "https://jira.example/browse/JIRA-4411" } }));
     const intentSha = put(`${dir}/intent.md`, intentMd(id, title, T("08-26", "09:00"), { problem: "Finance re-keys invoices into spreadsheets every month.", outcome: "One CSV per month with all invoice lines.", affected: "Finance team; invoicing API.", constraints: "No PII beyond invoice ids and totals.", questions: "None." }));
     const specSha = put(`${dir}/spec.md`, specMd(id, title, intentSha, T("08-26", "11:00"), { requirements: "GET /export?month=YYYY-MM returns CSV.", design: "Streaming CSV from the invoice repository.", concerns: "None flagged.", carried: "None." }));
     const planFiles = ["src/export/csv.ts (new)", "src/export/route.ts (new)", "test/export/csv.test.ts (new)"];
@@ -351,6 +361,7 @@ export function seedFiles(): Record<string, string> {
       { at: T("08-27", "10:00"), actor: system, event: "stage.entered", data: { stage: 4 } },
       { at: T("08-27", "10:05"), actor: agent("s-0017-plan"), event: "tasks.proposed", data: { tasks: [{ id: "export", title: "Work in src/export", files: ["src/export/csv.ts", "src/export/route.ts"], sequential: false }, { id: "test", title: "Work in test/export", files: ["test/export/csv.test.ts"], sequential: false }] } },
       { at: T("08-27", "10:10"), actor: human(ENG, "eng"), event: "tasks.confirmed", data: { taskIds: ["export", "test"] } },
+      { at: T("09-01", "15:30"), actor: agent("s-0017-build"), event: "hook.blocked", data: { hook: "plan-sync", reason: "commit touches files outside plan.md's file list", path: "src/export/format.ts" } },
       { at: T("09-01", "15:50"), actor: agent("s-0017-build"), event: "round", data: { n: 2, results: [{ name: "build", pass: true, outputExcerpt: "tsc -b" }, { name: "test", pass: true, outputExcerpt: "44 passed" }, { name: "lint", pass: true, outputExcerpt: "" }] } },
       { at: T("09-01", "15:55"), actor: agent("s-0017-build"), event: "hook.allowed", data: { hook: "plan-sync" } },
       { at: T("09-01", "16:05"), actor: system, event: "evals.green", data: { run: "run-1", passed: 4, total: 4 } },
@@ -370,6 +381,7 @@ export function seedFiles(): Record<string, string> {
     const intentSha = put(`${dir}/intent.md`, intentMd(id, title, T("08-29", "09:00"), { problem: "Invoices with a zero total are missing from the CSV export.", outcome: "Every invoice of the month appears, zero totals included.", affected: "Finance; export API.", constraints: "Failing test first; no other test changes.", questions: "None." }));
     const specSha = put(`${dir}/spec.md`, specMd(id, title, intentSha, T("08-29", "10:00"), { requirements: "Rows with total 0 are exported.", design: "Remove the truthiness filter in the row mapper.", concerns: "None flagged.", carried: "None." }));
     put(`${dir}/plan.md`, planMd(id, title, specSha, 1, ["src/export/csv.ts", "test/export/zero-total.test.ts (new)"], "test/export/zero-total.test.ts passes; no other test changes", { by: ENG, at: T("08-29", "11:00") }, { order: ["repro test", "fix filter"], risks: "None.", proof: "repro test green, unchanged in diff" }));
+    put(`${dir}/design/export-dialog.svg`, exportDialogMock());
     put(`${dir}/evals/repro.json`, stringifyJson({ schema: 1, testPath: "test/export/zero-total.test.ts", failureReason: "expected 4 rows, received 3", sha: reproSha, output: "AssertionError: expected 4 rows, received 3\n  at test/export/zero-total.test.ts:12:5", confirmedBy: ENG, confirmedAt: T("09-02", "09:00") }));
     put(`${dir}/evals/run-1.json`, stringifyJson({ schema: 1, n: 1, changeId: id, cycle: 1, worktree: `${id}/export-fix`, headSha: "f5b7a3e6b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6", fileSet: ["src/export/csv.ts"], configRef: fingerprint, results: [{ caseId: "CASE-0001", pass: false, output: "1 failed: zero-total row missing" }], commandResults: [{ name: "build", cmd: "pnpm build", exitCode: 0, pass: true, output: "tsc -b\n" }, { name: "test", cmd: "pnpm test", exitCode: 1, pass: false, output: "Tests 1 failed | 44 passed (45)\n  ✗ zero-total row missing\n" }, { name: "lint", cmd: "pnpm lint", exitCode: 0, pass: true, output: "" }], verdict: "red", startedAt: T("09-02", "09:30"), finishedAt: T("09-02", "09:34") }));
     files[`${dir}/log.jsonl`] = eventsFor(id, [
@@ -387,6 +399,7 @@ export function seedFiles(): Record<string, string> {
       { at: T("09-02", "08:50"), actor: agent("sess-0018-repro"), event: "repro.failed", data: { testPath: "test/export/zero-total.test.ts", failureReason: "expected 4 rows, received 3" } },
       { at: T("09-02", "09:00"), actor: human(ENG, "eng"), event: "repro.confirmed", data: { testPath: "test/export/zero-total.test.ts", sha: reproSha } },
       { at: T("09-02", "09:20"), actor: agent("sess-0018-repro"), event: "hook.blocked", data: { hook: "test-freeze", reason: "test freeze active", path: "test/export/csv.test.ts" } },
+      { at: T("09-02", "09:25"), actor: agent("sess-0018-repro"), event: "hook.blocked", data: { hook: "plan-sync", reason: "Commit touches files outside plan.md's file list", path: "src/export/route.ts" } },
       { at: T("09-02", "09:34"), actor: system, event: "evals.red", data: { run: "run-1", passed: 3, total: 4 } },
     ]);
     put(`${dir}/tasks.yaml`, stringifyYaml({ schema: 1, changeId: id, cycle: 1, tasks: [{ id: "export-fix", title: "Fix zero-total filter", files: ["src/export/csv.ts", "test/export/zero-total.test.ts"], sequential: false, target: "test/export/zero-total.test.ts passes; no other test changes", worktree: `${id}/export-fix`, branch: `${id}/export-fix`, state: "running" }] }));
@@ -533,14 +546,32 @@ Idempotency key at the API edge or in the numbering service?
 
   // ---------------- proposals ----------------
   files["sdlc/proposals/PRP-0007.yaml"] = stringifyYaml({ schema: 1, id: "PRP-0007", type: "claude-md-line", text: "Never filter invoice rows by truthiness of the total; zero is a valid amount.", citations: ["CHG-0018", "CHG-0004"], status: "open", createdAt: T("09-02", "09:40") });
+  files["sdlc/proposals/PRP-0008.yaml"] = stringifyYaml({ schema: 1, id: "PRP-0008", type: "claude-md-line", text: "Before committing, check every touched path against plan.md's \"Files that change\"; add a new path to plan.md in the same commit.", citations: ["CHG-0017", "CHG-0018"], reason: "commit touches files outside plan.md's file list", status: "open", createdAt: T("09-02", "09:45") });
 
   // ---------------- evals ----------------
   files["evals/cases/CASE-0001.json"] = stringifyJson({ schema: 1, id: "CASE-0001", prompt: "Export a month of invoices as CSV and verify every invoice appears once with the template column order.", checks: [{ name: "test", cmd: "pnpm test -- test/export", healthyOutput: "passed" }], source: { type: "change", ref: "CHG-0017" }, owner: PLATFORM, added: T("08-27", "12:00"), status: "active", paths: ["src/export/csv.ts", "src/export/route.ts", "test/export/csv.test.ts"] });
   files["evals/cases/CASE-0002.json"] = stringifyJson({ schema: 1, id: "CASE-0002", prompt: "Render the three fixture invoices to PDF and verify size and layout.", checks: [{ name: "test", cmd: "pnpm test -- test/invoice/pdf", healthyOutput: "passed" }], source: { type: "change", ref: "CHG-0012" }, owner: PLATFORM, added: T("08-23", "12:00"), status: "active", paths: ["src/invoice/pdf.ts", "src/invoice/route.ts", "test/invoice/pdf.test.ts"] });
   files["evals/cases/CASE-0003.json"] = stringifyJson({ schema: 1, id: "CASE-0003", prompt: "Search invoices by number on the portal.", checks: [], source: { type: "manual" }, owner: PLATFORM, added: T("09-01", "12:00"), status: "draft", paths: ["src/portal/search.ts"] });
-  files["evals/runs/RUN-0001.json"] = stringifyJson({ schema: 1, id: "RUN-0001", trigger: "schedule", configRef: fingerprint, results: [{ caseId: "CASE-0001", pass: true, output: "1 passed" }, { caseId: "CASE-0002", pass: true, output: "1 passed" }], passRate: 1, threshold: 0.9, verdict: "pass", cost: 1.42, startedAt: T("09-02", "03:00"), finishedAt: T("09-02", "03:09") });
+  files["evals/cases/CASE-0004.json"] = stringifyJson({ schema: 1, id: "CASE-0004", prompt: "Write the customer-facing copy for the overdue invoice reminder email.", checks: [{ name: "trigger", cmd: "sdlc evals trigger brand --prompt \"Write the customer-facing copy for the overdue invoice reminder email.\"", healthyOutput: "loaded: skill brand" }], source: { type: "manual" }, owner: "marketing@veri.example", added: T("08-28", "12:00"), status: "active", paths: [], skill: "brand" });
+  files["evals/runs/RUN-0001.json"] = stringifyJson({ schema: 1, id: "RUN-0001", trigger: "schedule", configRef: fingerprint, results: [{ caseId: "CASE-0001", pass: true, output: "1 passed" }, { caseId: "CASE-0002", pass: true, output: "1 passed" }, { caseId: "CASE-0004", pass: true, output: "loaded: skill brand for \"Write the customer-facing copy for the overdue invoice reminder email.\"" }], passRate: 1, threshold: 0.9, verdict: "pass", cost: 1.42, startedAt: T("09-02", "03:00"), finishedAt: T("09-02", "03:09") });
 
   return files;
 }
 
 export const SEED_CHANGE_IDS = ["CHG-0012", "CHG-0017", "CHG-0018", "CHG-0019", "CHG-0020", "CHG-0021", "CHG-0022", "CHG-0023"] as const;
+
+/** The seed's one design mock (spec §5B: "click opens screenshot beside mock"): the export dialog CHG-0018 fixes. */
+function exportDialogMock(): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="240" viewBox="0 0 480 240">
+  <rect width="480" height="240" rx="8" fill="#f6f5f0" stroke="#c9c5b8"/>
+  <text x="24" y="40" font-family="sans-serif" font-size="18" fill="#2a2a2a">Export invoices · August 2026</text>
+  <rect x="24" y="64" width="432" height="112" rx="4" fill="#ffffff" stroke="#c9c5b8"/>
+  <text x="36" y="92" font-family="monospace" font-size="12" fill="#2a2a2a">INV-2026-0801   Acme Ltd        1,240.00</text>
+  <text x="36" y="116" font-family="monospace" font-size="12" fill="#2a2a2a">INV-2026-0802   Birch GmbH          0.00</text>
+  <text x="36" y="140" font-family="monospace" font-size="12" fill="#2a2a2a">INV-2026-0803   Cedar Inc         980.00</text>
+  <text x="36" y="164" font-family="monospace" font-size="12" fill="#2a2a2a">INV-2026-0804   Dune SAS        3,115.50</text>
+  <rect x="352" y="192" width="104" height="32" rx="4" fill="#2f6f4f"/>
+  <text x="404" y="213" font-family="sans-serif" font-size="13" fill="#ffffff" text-anchor="middle">Download CSV</text>
+</svg>
+`;
+}

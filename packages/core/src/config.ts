@@ -5,10 +5,12 @@ export interface ResolvedThresholds {
   autoFilesMax: number;
   evalPassThreshold: number;
   maxLoopRounds: number;
-  sessionCeiling: number;
+  /** `null` = no ceiling. */
+  sessionCeiling: number | null;
   suiteMinSize: number;
   noDiscriminationRuns: number;
   brokenCheckRuns: number;
+  skillPassThreshold: number;
 }
 
 /** Identity whose `github` login matches (case-insensitive), for attributing merges done on the code host. */
@@ -25,9 +27,11 @@ export interface ResolvedConfig {
   identities: Identity[];
   thresholds: ResolvedThresholds;
   records: Record<"intent" | "spec" | "plan" | "evals" | "pr" | "incident", RecordsMode>;
-  evals: { mode: "continuous" | "scheduled"; threshold: number; budget: number | null };
+  evals: { mode: "continuous" | "scheduled"; threshold: number; budget: number | null; schedule: string | null };
   eligibility: { coverage: "strict" | "lenient" };
   extraRoles: string[];
+  /** `records.connector`: the MCP server in `.mcp.json` that owns the external records (FR-16); null when unset. */
+  recordsConnector: string | null;
 }
 
 /** Apply defaults from the schema layer; never writes anything back. */
@@ -45,10 +49,11 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
       autoFilesMax: t.autoFilesMax ?? d.autoFilesMax,
       evalPassThreshold: t.evalPassThreshold ?? d.evalPassThreshold,
       maxLoopRounds: t.maxLoopRounds ?? d.maxLoopRounds,
-      sessionCeiling: t.sessionCeiling ?? d.sessionCeiling,
+      sessionCeiling: t.sessionCeiling === undefined ? d.sessionCeiling : t.sessionCeiling,
       suiteMinSize: t.suiteMinSize ?? d.suiteMinSize,
       noDiscriminationRuns: t.noDiscriminationRuns ?? d.noDiscriminationRuns,
       brokenCheckRuns: t.brokenCheckRuns ?? d.brokenCheckRuns,
+      skillPassThreshold: t.skillPassThreshold ?? d.skillPassThreshold,
     },
     records: {
       intent: r.intent ?? "repo",
@@ -62,9 +67,11 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
       mode: config?.evals?.mode ?? CONFIG_DEFAULTS.evals.mode,
       threshold: config?.evals?.threshold ?? t.evalPassThreshold ?? d.evalPassThreshold,
       budget: config?.evals?.budget ?? null,
+      schedule: config?.evals?.schedule ?? null,
     },
     eligibility: { coverage: config?.eligibility?.coverage ?? CONFIG_DEFAULTS.eligibility.coverage },
     extraRoles: (config?.roles ?? []).map((x) => x.name),
+    recordsConnector: config?.records?.connector ?? null,
   };
 }
 

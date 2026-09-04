@@ -1,0 +1,10 @@
+schema: 1
+id: PRP-0008
+type: claude-md-line
+text: Before committing, check every touched path against plan.md's "Files that change"; add a new path to plan.md in the same commit.
+citations:
+  - CHG-0017
+  - CHG-0018
+reason: commit touches files outside plan.md's file list
+status: open
+createdAt: 2026-09-02T09:45:00Z

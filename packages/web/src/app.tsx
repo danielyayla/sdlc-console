@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { act, subscribe, type Artifact } from "./api";
 import type { Role } from "./lib/format";
 import { initialState, reduce, type UIState } from "./state";
-import { ChangeDetail } from "./views/ChangeDetail";
+import { ChangeDetail, type ReproDraftView } from "./views/ChangeDetail";
 import { Config } from "./views/Config";
 import { Gates } from "./views/Gates";
 import { Loop } from "./views/Loop";
@@ -23,6 +23,16 @@ export interface AppProps {
   live?: boolean;
   /** Injected prompt for tests; defaults to window.prompt. */
   promptImpl?: (text: string) => string | null;
+}
+
+/** The repro test a build session reported for the change and the engineer has not judged (from the session registry, never stored). */
+function reproDraftOf(snapshot: Snapshot, changeId: string): ReproDraftView | null {
+  for (const s of snapshot.sessions) {
+    if (s.changeId !== changeId) continue;
+    const draft = s["repro"] as Omit<ReproDraftView, "session"> | null | undefined;
+    if (draft) return { session: s.id, ...draft };
+  }
+  return null;
 }
 
 export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true, promptImpl }: AppProps) {
@@ -79,6 +89,15 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onSelectArt={(i) => dispatch({ type: "art", index: i })}
         onAccept={(gate) => void run(`/changes/${selected.id}/accept`, { gate })}
         onSendBack={(gate, feedback) => void run(`/changes/${selected.id}/send-back`, { gate, feedback })}
+        onLinkRecord={(system, id, url) => void run(`/changes/${selected.id}/records/link`, { system, id, ...(url ? { url } : {}) })}
+        onRetryWriteback={(artifact) => void run(`/changes/${selected.id}/records/retry`, { artifact })}
+        onHarvest={() => void run(`/changes/${selected.id}/harvest`, {})}
+        reproDraft={reproDraftOf(snapshot, selected.id)}
+        onReproConfirm={() => void run(`/changes/${selected.id}/repro/confirm`, {})}
+        onReproReject={(reason) => void run(`/changes/${selected.id}/repro/reject`, { reason })}
+        onLiftFreeze={(path, reason) => void run(`/changes/${selected.id}/freeze/lift`, { path, reason })}
+        onDismissAutoFinding={(path, reason) => void run(`/changes/${selected.id}/auto-findings/dismiss`, { path, reason })}
+        {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );
   else if (state.view === "gates") body = <Gates changes={changes} queues={snapshot.queues[state.role]} role={state.role} now={now} onSelect={(id) => dispatch({ type: "select", id })} />;
@@ -92,7 +111,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );
-  else if (state.view === "config") body = <Config snapshot={snapshot} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} {...(promptImpl ? { prompt: promptImpl } : {})} />;
+  else if (state.view === "config") body = <Config snapshot={snapshot} role={state.role} onAcceptProposal={(id) => void run(`/proposals/${id}/accept`, {})} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} onRunSuite={() => void run("/evals/run", {})} {...(promptImpl ? { prompt: promptImpl } : {})} />;
   else if (state.view === "loop")
     body = (
       <Loop

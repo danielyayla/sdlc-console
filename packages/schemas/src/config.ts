@@ -15,10 +15,13 @@ export const thresholds = z.strictObject({
   autoFilesMax: z.number().int().min(1).optional(),
   evalPassThreshold: ratio.optional(),
   maxLoopRounds: z.number().int().min(1).optional(),
-  sessionCeiling: z.number().int().min(1).optional(),
+  /** Review backlog above which no new session starts; `null` = no ceiling (header shows counts only). */
+  sessionCeiling: z.number().int().min(1).nullable().optional(),
   suiteMinSize: z.number().int().min(0).optional(),
   noDiscriminationRuns: z.number().int().min(1).optional(),
   brokenCheckRuns: z.number().int().min(1).optional(),
+  /** Share of a skill's trigger tests that must load it; below → amber and a "skill not triggering" triage item. */
+  skillPassThreshold: ratio.optional(),
 });
 
 /** Defaults applied by core when `sdlc/config.yaml` leaves a threshold unset. */
@@ -31,6 +34,7 @@ export const CONFIG_DEFAULTS = {
     suiteMinSize: 20,
     noDiscriminationRuns: 20,
     brokenCheckRuns: 3,
+    skillPassThreshold: 0.8,
   },
   evals: { mode: "continuous" as const },
   eligibility: { coverage: "lenient" as const },
@@ -43,6 +47,7 @@ export const recordsMapping = z.strictObject({
   evals: recordsMode.optional(),
   pr: recordsMode.optional(),
   incident: recordsMode.optional(),
+  /** Name of the MCP server in `.mcp.json` (`mcpServers.<name>`) that owns the external records: `record_get` and `record_write_back` tools (FR-16). */
   connector: z.string().optional(),
 });
 

@@ -71,7 +71,7 @@ export function observe(child: ChildProcess, registry: SessionRegistry, sessionI
     child.on("exit", (code) => {
       if (buffer.trim() !== "") handle(buffer);
       const current = registry.get(sessionId);
-      const taken = current?.status === "taken_over" || current?.status === "stopped";
+      const taken = current?.status === "taken_over" || current?.status === "stopped" || current?.status === "awaiting_engineer";
       const status = taken ? current.status : code === 0 && sawResult && !isError ? "done" : "error";
       registry.patch(sessionId, { status, exitCode: code, pid: null, heartbeatAt: now(), ...(status === "error" && !current?.error ? { error: stderr.trim().slice(-500) || `harness exited with code ${code}` } : {}) });
       void Promise.resolve(opts.onExit?.(code, { status })).finally(() => resolve(code));

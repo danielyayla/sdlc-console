@@ -1,17 +1,23 @@
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, normalize } from "node:path";
-import { readFile, type Tree } from "@sdlc/core";
+import { extname, join, normalize, resolve, sep } from "node:path";
+import { gitRaw } from "@sdlc/adapter-git";
+import { readFile, type ArtifactIndex, type Tree } from "@sdlc/core";
+import { readRounds } from "@sdlc/mcp";
 import { parseFrontMatter, type GateNumber } from "@sdlc/schemas";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
   acceptGate,
   confirmReproTest,
+  dismissPrAutoFinding,
+  liftTestFreeze,
+  rejectReproTest,
   confirmTaskSplit,
   findingDismiss,
   findingEscalate,
   findingPatch,
   findingsImport,
+  harvestChange,
   loopChange,
   newChange,
   proposalDismiss,
@@ -22,10 +28,18 @@ import {
 } from "./actions.js";
 import type { Engine, JobStore } from "./engine/index.js";
 import { receiveWebhook, type DeliveryLog } from "./github/webhooks.js";
-import { launchSession, stopSession, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
+import { clearRepro, downgradeSession, launchSession, markReproRejected, reproDraftFor, resumeAfterRepro, stopSession, verifyReproCommit, type LaunchDeps, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
+import { acceptProposalAction } from "./proposals.js";
+import { linkRecordAction, retryWritebackAction, type WritebackDeps } from "./records.js";
 import { ActionError, type StateStore } from "./store.js";
 
 type Body = Record<string, unknown>;
+
+/** Launcher dependencies from the app options; null when sessions cannot be launched here. */
+function launchDeps(options: AppOptions, store: StateStore, registry: SessionRegistry | null): LaunchDeps | null {
+  if (!registry || !options.sdlcBin) return null;
+  return { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) };
+}
 
 function json(res: ServerResponse, status: number, value: unknown): void {
   const text = JSON.stringify(value);
@@ -73,6 +87,19 @@ function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
 function header(req: IncomingMessage, name: string): string | undefined {
   const v = req.headers[name];
   return Array.isArray(v) ? v[0] : v;
+}
+
+const ARTIFACT_NAMES = ["intent", "spec", "plan", "evals", "pr", "incident"] as const;
+
+function artifactOf(body: Body): ArtifactIndex {
+  const v = body["artifact"];
+  if (typeof v === "string") {
+    const i = ARTIFACT_NAMES.indexOf(v as (typeof ARTIFACT_NAMES)[number]);
+    if (i >= 0) return i as ArtifactIndex;
+  }
+  const n = typeof v === "number" ? v : Number(v);
+  if (Number.isInteger(n) && n >= 0 && n <= 5) return n as ArtifactIndex;
+  throw new ActionError(400, "artifact must be intent|spec|plan|evals|pr|incident or 0–5");
 }
 
 function gateOf(body: Body): GateNumber {
@@ -125,6 +152,8 @@ export interface AppOptions {
   sdlcBin?: string;
   claudeBin?: string;
   engine?: Engine;
+  /** Records write-backs (FR-16): the connector and retry policy the link/retry actions use; defaults to `.mcp.json`. */
+  writeback?: WritebackDeps;
   jobs?: JobStore;
   /** Processed webhook deliveries (replay guard); the receiver is off without it. */
   deliveries?: DeliveryLog;
@@ -222,6 +251,20 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         json(res, 200, artifact(repo.tree, id, Number(parts[4])));
         return;
       }
+      if (method === "GET" && parts[3] === "design" && parts[4] !== undefined && parts.length === 5) {
+        // the change's design mock, bytes straight from git (read-only; the console never edits design/)
+        await store.refresh();
+        const repo = store.currentRepo;
+        if (!repo) throw new ActionError(502, "repository not loaded", [], true);
+        const path = `sdlc/changes/${id}/design/${parts[4]}`;
+        const file = repo.changes.get(id)?.design.find((d) => d.path === path);
+        if (!file) throw new ActionError(404, `${path} not found`);
+        const blob = await gitRaw(store.root, ["cat-file", "blob", file.sha], { binary: true });
+        if (blob.code !== 0) throw new ActionError(404, `${path} not readable`);
+        res.writeHead(200, { "content-type": MIME[extname(parts[4]).toLowerCase()] ?? "application/octet-stream", "content-length": blob.buffer.length, "cache-control": "private, max-age=3600" });
+        res.end(blob.buffer);
+        return;
+      }
       if (method !== "POST") throw new ActionError(404, "not found");
       const body = await readBody(req);
       const action = parts.slice(3).join("/");
@@ -242,15 +285,83 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         case "loop":
           reply(res, await loopChange(store, id));
           return;
+        case "harvest":
+          reply(res, await harvestChange(store, id));
+          return;
         case "tasks/confirm":
           reply(res, await confirmTaskSplit(store, id, Array.isArray(body["tasks"]) ? (body["tasks"] as never) : undefined));
           return;
-        case "repro/confirm":
-          reply(res, await confirmReproTest(store, id, { testPath: str(body, "testPath"), failureReason: str(body, "failureReason"), sha: str(body, "sha"), output: str(body, "output", false) }));
+        case "repro/confirm": {
+          // the session's draft is the default; explicit fields (CLI, a manual repro) override it — the commit is verified by sha either way
+          const owner = options.registry ? reproDraftFor(options.registry, id) : null;
+          const input = { testPath: str(body, "testPath", false) || owner?.draft.testPath || "", failureReason: str(body, "failureReason", false) || owner?.draft.failureReason || "", sha: str(body, "sha", false) || owner?.draft.sha || "", output: str(body, "output", false) || owner?.draft.output || "" };
+          if (!input.testPath || !input.failureReason || !input.sha) throw new ActionError(400, "repro confirm needs testPath, failureReason and sha — or a session that reported the repro test");
+          await verifyReproCommit(store.root, input.sha, input.testPath);
+          const r = await confirmReproTest(store, id, input);
+          let resumed: string | null = null;
+          if (owner) {
+            clearRepro(owner);
+            const s = await resumeAfterRepro(owner, `The engineer confirmed the repro test ${input.testPath} at ${input.sha.slice(0, 7)}: it fails for the right reason. The test freeze is active — fix the code without editing files under the test globs (propose test changes with mcp__sdlc__request_input), run the verification commands, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when the repro test and everything else are green.`, launchDeps(options, store, options.registry ?? null));
+            resumed = s?.id ?? null;
+            store.rebuild();
+          }
+          reply(res, { ...r, toast: `${r.toast}${resumed ? ` · ${resumed} resumed to fix` : ""}` });
           return;
+        }
+        case "repro/reject": {
+          const owner = options.registry ? reproDraftFor(options.registry, id) : null;
+          const testPath = str(body, "testPath", false) || owner?.draft.testPath || "";
+          if (!testPath) throw new ActionError(400, "repro reject needs testPath — or a session that reported the repro test");
+          const reason = str(body, "reason");
+          const r = await rejectReproTest(store, id, { testPath, reason });
+          let resumed: string | null = null;
+          if (owner) {
+            markReproRejected(owner, reason, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
+            const s = await resumeAfterRepro(owner, `The engineer sent the repro test ${testPath} back — wrong failure: ${reason}. Rewrite the test so it fails for the right reason, run it, and call mcp__sdlc__report_repro again with the verbatim output. Do not fix the code yet.`, launchDeps(options, store, options.registry ?? null));
+            resumed = s?.id ?? null;
+            store.rebuild();
+          }
+          reply(res, { ...r, toast: `${r.toast}${resumed ? ` · ${resumed} resumed to rewrite it` : ""}` });
+          return;
+        }
+        case "freeze/lift":
+          reply(res, await liftTestFreeze(store, id, { path: str(body, "path"), reason: str(body, "reason") }));
+          return;
+        case "auto-findings/dismiss":
+          reply(res, await dismissPrAutoFinding(store, id, { path: str(body, "path"), reason: str(body, "reason") }));
+          return;
+        case "records/link": {
+          const url = str(body, "url", false);
+          reply(res, await linkRecordAction(store, id, { system: str(body, "system"), id: str(body, "id"), ...(url ? { url } : {}) }, options.writeback ?? {}));
+          return;
+        }
+        case "records/retry": {
+          // FR-16 "write-back failed · retry": runs now; 502 retryable when the connector fails again
+          const r = await retryWritebackAction(store, id, artifactOf(body), options.writeback ?? {});
+          options.engine?.noteWriteback(r.run);
+          reply(res, r);
+          return;
+        }
         default:
           throw new ActionError(404, `unknown action ${action}`);
       }
+    }
+    if (parts[1] === "evals") {
+      if (method === "GET" && parts.length === 2) {
+        json(res, 200, (await store.refresh()).evals);
+        return;
+      }
+      if (method === "POST" && parts[2] === "run" && parts.length === 3) {
+        if (!options.engine) throw new ActionError(409, "suite runs need the engine (start the server with sdlcBin)");
+        const body = await readBody(req);
+        const trigger = typeof body["trigger"] === "string" ? body["trigger"] : "manual";
+        if (!["manual", "schedule", "config-pr"].includes(trigger)) throw new ActionError(400, "trigger must be manual, schedule or config-pr");
+        const { job } = await options.engine.runSuite(trigger as "manual" | "schedule" | "config-pr", false);
+        if (!job) throw new ActionError(502, "repository not loaded", [], true);
+        json(res, 200, { ok: true, job, toast: job.state === "running" ? `suite run queued (${job.key.split(":").at(-1)}) — the strip updates when it commits` : `${job.key}: ${job.note ?? job.error ?? job.state}`, revision: store.current?.revision ?? 0 });
+        return;
+      }
+      throw new ActionError(404, "not found");
     }
     if (parts[1] === "webhooks") {
       const env = options.env ?? process.env;
@@ -284,13 +395,27 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
       json(res, 200, { ok: true, sync: summary, toast, revision: store.current?.revision ?? 0 });
       return;
     }
+    if (parts[1] === "sessions" && method === "GET" && parts[2] && parts[3] === "rounds" && parts[4] && parts[5] === "screenshot" && parts.length === 6) {
+      // a round's screenshot as the session saved it (screenshotRef, relative to the worktree); nothing outside the worktree is served
+      const registry = options.registry;
+      const s = registry?.get(parts[2]);
+      if (!s) throw new ActionError(404, `${parts[2]} not found`);
+      const round = (readRounds(s.worktreePath, s.id) as { n: number; screenshotRef?: string }[]).find((r) => r.n === Number(parts[4]));
+      if (!round?.screenshotRef) throw new ActionError(404, `round ${parts[4]} of ${s.id} has no screenshot`);
+      const base = resolve(s.worktreePath);
+      const abs = resolve(base, round.screenshotRef);
+      if (!abs.startsWith(base + sep) || !existsSync(abs) || !statSync(abs).isFile()) throw new ActionError(404, `screenshot ${round.screenshotRef} is not in the worktree`);
+      res.writeHead(200, { "content-type": MIME[extname(abs).toLowerCase()] ?? "application/octet-stream", "content-length": statSync(abs).size, "cache-control": "private, max-age=60" });
+      createReadStream(abs).pipe(res);
+      return;
+    }
     if (parts[1] === "sessions" && method === "POST") {
       const registry = options.registry;
       if (!registry || !options.sdlcBin) throw new ActionError(409, "sessions are unavailable: the server was started without a session registry");
       const body = await readBody(req);
       const id = parts[2];
       if (!id) {
-        const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}) };
+        const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}), ...(typeof body["reason"] === "string" && body["reason"].trim() !== "" ? { reason: body["reason"] } : {}) };
         const r = await launchSession(input, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) });
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: r.session.mode === "SUPERVISED" ? `${r.session.id} prepared — run the command from the card` : `${r.session.id} started (${r.session.mode}) on ${r.session.branch}`, revision: store.current?.revision ?? 0 });
@@ -301,6 +426,12 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
         const s = stopSession(registry, id, action === "stop" ? "stopped" : "taken_over");
         store.rebuild();
         json(res, 200, { ok: true, session: s, toast: action === "stop" ? `${id} stopped` : `${id} taken over — worktree ${s.worktreePath}`, revision: store.current?.revision ?? 0 });
+        return;
+      }
+      if (action === "downgrade") {
+        const r = await downgradeSession({ store, registry, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}) }, id, str(body, "reason", false) || undefined);
+        store.rebuild();
+        json(res, 200, { ok: true, commit: r.commit, changeId: r.session.changeId, session: r.session, toast: `${id} downgraded to SUPERVISED — run the command from the card`, revision: store.current?.revision ?? 0 });
         return;
       }
       if (action === "raise-cap") {
@@ -326,7 +457,7 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
     if (parts[1] === "proposals" && parts[2] && method === "POST") {
       const body = await readBody(req);
       if (parts[3] === "dismiss") return reply(res, await proposalDismiss(store, parts[2], str(body, "reason")));
-      if (parts[3] === "accept") throw new ActionError(409, "accepting a proposal opens a PR on the code host (GitHub mode, Phase 2)");
+      if (parts[3] === "accept") return reply(res, await acceptProposalAction(store, parts[2], options.env ?? process.env));
     }
     if (parts[1] === "triage" && parts[2] && method === "POST") {
       const body = await readBody(req);

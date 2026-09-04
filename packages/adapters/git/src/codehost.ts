@@ -1,5 +1,5 @@
 import { type ChangeView, type WritePlan } from "@sdlc/core";
-import { stringifyYaml, type Event, type Pr } from "@sdlc/schemas";
+import { stringifyYaml, type AutoFinding, type Event, type Pr } from "@sdlc/schemas";
 import { commitWritePlan, mergeBranch } from "./commit.js";
 import { git, headSha, type GitIdentity } from "./git.js";
 import { newUlid } from "./ids.js";
@@ -15,8 +15,10 @@ export interface OpenPrInput {
   planMatches: boolean | null;
   nextSeq: number;
   now: string;
-  /** Checks carried by the run that opened the PR (`evidence`, `evals`); each becomes a `pr.yaml` check and, on GitHub, a commit status `sdlc/<name>`. */
+  /** Checks carried by the run that opened the PR (`evidence`, `evals`, `repro`, `test-freeze`); each becomes a `pr.yaml` check and, on GitHub, a commit status `sdlc/<name>`. */
   checks: PrCheck[];
+  /** System-raised findings on the PR (test-freeze fallback, 2.7); they block the console's merge until dismissed with a reason. */
+  autoFindings?: AutoFinding[];
 }
 
 export interface PrCheck {
@@ -94,7 +96,10 @@ export async function recordOpenedPr(input: OpenPrInput, pr: Pr): Promise<OpenPr
 
 /** Commit `pr.yaml` at the new head plus `pr.synchronized` on the local default branch as sdlc-bot. */
 export async function recordSyncedPr(input: OpenPrInput, existing: Pr): Promise<OpenPrResult> {
-  const pr: Pr = { ...existing, headSha: input.headSha, checks: input.checks.map((c) => ({ name: c.name, verdict: c.verdict })), planMatches: input.planMatches };
+  const pr: Pr = { ...existing, headSha: input.headSha, checks: input.checks.map((c) => ({ name: c.name, verdict: c.verdict, ...(c.summary ? { summary: c.summary } : {}) })), planMatches: input.planMatches };
+  // auto-findings belong to the tested head: the run recomputes them (carrying dismissals for paths still flagged)
+  delete pr.autoFindings;
+  if (input.autoFindings && input.autoFindings.length > 0) pr.autoFindings = input.autoFindings;
   // the tally and the reviewed head belonged to the old head; the events keep them as history
   delete pr.findings;
   delete pr.review;
@@ -124,7 +129,8 @@ export class LocalCodeHost implements CodeHost {
       headSha: input.headSha,
       openedAt: input.now,
       reviewers: [],
-      checks: input.checks.map((c) => ({ name: c.name, verdict: c.verdict })),
+      checks: input.checks.map((c) => ({ name: c.name, verdict: c.verdict, ...(c.summary ? { summary: c.summary } : {}) })),
+      ...(input.autoFindings && input.autoFindings.length > 0 ? { autoFindings: input.autoFindings } : {}),
       planMatches: input.planMatches,
     };
     return recordOpenedPr(input, pr);

@@ -6,6 +6,10 @@ import { hookCommand } from "./commands/hook.js";
 import { init } from "./commands/init.js";
 import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
+import { evalsGate, evalsHarvest, evalsRun, evalsTrigger, renderGate, renderRun, renderTrigger } from "./commands/evals.js";
+import { proposalCommand } from "./commands/proposal.js";
+import { recordCommand } from "./commands/record.js";
+import { freezeCommand, reproCommand } from "./commands/repro.js";
 import { sessionCommand } from "./commands/session.js";
 import { syncCommand } from "./commands/sync.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
@@ -33,11 +37,24 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc security import <file|->
   sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
   sdlc mcp                                              (agent tools over stdio)
-  sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose)
-  sdlc session list | stop <id>
+  sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose propose)
+  sdlc session list | stop <id> | downgrade <id> [--reason r]   (downgrade: AUTO → SUPERVISED, never upward)
+  sdlc repro confirm <CHG> [--file t --reason r --sha s]   (fix: the reported test fails for the right reason → freeze)
+  sdlc repro reject <CHG> --reason r                    (wrong failure — send back to the session)
+  sdlc freeze lift <CHG> --file p --reason r            (once per file per change; logged)
+  sdlc freeze dismiss <CHG> --file p --reason r         (dismiss the test-freeze auto-finding blocking the merge)
   sdlc run <CHG>                                        (per-change run: verification + intersecting evals; green opens the PR)
   sdlc serve --engine                                   (launch sessions and runs automatically on transitions)
   sdlc sync                                             (GitHub mode: open artifact PRs, record merges done on GitHub, refresh the records PR)
+  sdlc evals run [--trigger manual|schedule|config-pr] [--ref r]   (run every active case; commits evals/runs/RUN-NNNN.json; raises retire/broken-check triage)
+  sdlc evals gate [--run RUN-id]                        (config-change gate: exit 1 below threshold, regressed cases with before/after)
+  sdlc evals harvest <CHG>                              (post-merge "Add as eval": draft case for the platform owner)
+  sdlc evals trigger <skill> --prompt <text>            (trigger test: exit 0 iff the harness loaded the skill; the check a skill:<name> case uses)
+  sdlc proposal accept <PRP>                            (CLAUDE.md line → branch sdlc/proposals/<PRP> and, in GitHub mode, a PR for the code owners)
+  sdlc proposal dismiss <PRP> --reason <text>
+  sdlc record link <CHG> --system <s> --id <id> [--url <u>]   (change.yaml.record; verified through records.connector when set)
+  sdlc record retry <CHG> <artifact>                     (run the outstanding write-back now — "write-back failed · retry")
+  sdlc record status <CHG>                               (mode, synced time and write-back per artifact)
   POST /api/webhooks/github                             (GitHub mode: signed deliveries under GITHUB_WEBHOOK_SECRET; polling stays on as the fallback)
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
@@ -61,7 +78,12 @@ const OPTIONS = {
   incident: { type: "string" },
   port: { type: "string" },
   host: { type: "string" },
+  trigger: { type: "string" },
+  run: { type: "string" },
   reason: { type: "string" },
+  file: { type: "string" },
+  sha: { type: "string" },
+  output: { type: "string" },
   task: { type: "string" },
   target: { type: "string" },
   mode: { type: "string" },
@@ -70,6 +92,10 @@ const OPTIONS = {
   tune: { type: "string" },
   role: { type: "string" },
   "no-wait": { type: "boolean", default: false },
+  prompt: { type: "string" },
+  system: { type: "string" },
+  id: { type: "string" },
+  url: { type: "string" },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -196,6 +222,26 @@ export async function main(argv: string[], io: Io): Promise<number> {
         emit(io, json, r, () => `${sub}: ${r.note ?? r.state}${r.error ? ` — ${r.error}` : ""}`);
         return r.state === "failed" ? 1 : 0;
       }
+      case "repro": {
+        const r = await reproCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
+        return 0;
+      }
+      case "record": {
+        const r = await recordCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
+        return 0;
+      }
+      case "proposal": {
+        const r = await proposalCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
+        return 0;
+      }
+      case "freeze": {
+        const r = await freezeCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        emit(io, json, r.value, () => r.text);
+        return 0;
+      }
       case "session": {
         const r = await sessionCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
@@ -225,6 +271,34 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const r = await syncCommand(ctx);
         emit(io, json, r, () => `sync: ${r.opened.length} PR(s) opened${r.opened.map((o) => ` · ${o.changeId} ${o.branch} → #${o.number}`).join("")} · ${r.merges.filter((m) => m.recorded).length} merge(s) recorded${r.merges.filter((m) => !m.recorded && m.reason !== "already recorded").map((m) => ` · ${m.changeId} PR #${m.number} by ${m.mergedBy} not recorded: ${m.reason ?? ""}`).join("")} · records ${r.records.pushed ? `PR #${r.records.number ?? "?"} (${r.records.ahead} commit(s) ahead)` : r.records.error ? `failed: ${r.records.error}` : "in sync"}${r.errors.length > 0 ? `\n${r.errors.join("\n")}` : ""}`);
         return 0;
+      }
+      case "evals": {
+        const ctx = await repoContext(io, json);
+        if (sub === "run") {
+          const r = await evalsRun(ctx, { ...(values.trigger ? { trigger: values.trigger as "manual" } : {}), ...(values.ref ? { ref: values.ref } : {}) });
+          emit(io, json, r, () => renderRun(r));
+          return 0;
+        }
+        if (sub === "gate") {
+          const r = await evalsGate(ctx, values.run);
+          emit(io, json, r, () => renderGate(r));
+          return r.ok ? 0 : 1;
+        }
+        if (sub === "harvest") {
+          const id = positionals[2];
+          if (!id) throw new CliError("usage: sdlc evals harvest <CHG>");
+          const r = await evalsHarvest(ctx, id);
+          emit(io, json, r, () => `${r.caseId} drafted from ${id} (${r.commit.slice(0, 7)}) — the platform owner activates it under evals/cases`);
+          return 0;
+        }
+        if (sub === "trigger") {
+          const skill = positionals[2];
+          if (!skill || !values.prompt) throw new CliError("usage: sdlc evals trigger <skill> --prompt <text>");
+          const r = await evalsTrigger(io, skill, values.prompt);
+          emit(io, json, r, () => renderTrigger(r));
+          return r.loaded ? 0 : 1;
+        }
+        throw new CliError("usage: sdlc evals run|gate|harvest|trigger");
       }
       case "audit": {
         const ctx = await repoContext(io, json);

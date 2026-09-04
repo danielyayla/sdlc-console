@@ -76,7 +76,7 @@ describe("review findings mirror (2.3, local mode)", () => {
     const h = await toStage5(dir);
     const before = await viewOf(dir, "CHG-0018");
     expect(before.stage).toBe(5);
-    expect(before.pr?.checks).toEqual([{ name: "evidence", verdict: "pass" }, { name: "evals", verdict: "pass" }]);
+    expect(before.pr?.checks.map((c) => [c.name, c.verdict])).toEqual([["evidence", "pass"], ["evals", "pass"], ["repro", "fail"]]); // the seed's repro sha is a placeholder: no proof in this clone (2.7)
     expect(before.pr?.review).toBeUndefined();
     expect(before.findings).toEqual([]);
 
@@ -98,7 +98,7 @@ describe("review findings mirror (2.3, local mode)", () => {
     const view = await viewOf(dir, "CHG-0018");
     expect(view.stage).toBe(5);
     expect(view.pr?.findings).toEqual({ high: 1, medium: 1, low: 1 });
-    expect(view.pr?.checks).toEqual([{ name: "evidence", verdict: "pass" }, { name: "evals", verdict: "pass" }, { name: "findings", verdict: "fail" }]);
+    expect(view.pr?.checks.map((c) => [c.name, c.verdict])).toEqual([["evidence", "pass"], ["evals", "pass"], ["repro", "fail"], ["findings", "fail"]]);
     expect(view.pr?.review).toEqual({ session: review.session.id, headSha: h.head, at: "2026-09-04T09:00:00Z" });
     expect(view.pr?.headSha).toBe(h.head);
     // most severe first, then in reported order

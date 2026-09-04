@@ -23,6 +23,11 @@
       "caseId": "CASE-0002",
       "pass": true,
       "output": "1 passed"
+    },
+    {
+      "caseId": "CASE-0004",
+      "pass": true,
+      "output": "loaded: skill brand for \"Write the customer-facing copy for the overdue invoice reminder email.\""
     }
   ],
   "passRate": 1,

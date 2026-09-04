@@ -29,11 +29,11 @@ Exit: one change travels 1→6→1 with real files, hooks and a real Claude Code
 - [x] 2.2 Artifact PRs as gates in GitHub mode: intent/spec/plan/incident drafts pushed as `sdlc/<CHG>/<artifact>` PRs; accept = merge, send-back = "request changes" review + `gate.sent_back`; high-risk gate 3 tech-lead-via-PR routing (`source: pr.merge`, code owner); ledger sync to origin.
 - [x] 2.3 Review findings mirror + check runs: review job findings → `review.finding` events and `pr.yaml.findings`; evidence, severity tally and eval verdict published as statuses; PR panel in Change detail.
 - [x] 2.4 Webhooks: signature-verified receiver (PR opened/synchronize/review/merged, check completed, push) with polling fallback; merge detected → stage 6; idempotent job keys on replay.
-- [ ] 2.5 Eval suite in CI: generated workflows, config-change gate (verdict ≥ threshold, `incomplete` ≠ pass), run history strip, budget, harvest actions, retire/broken-check signals → triage.
-- [ ] 2.6 Build-stage depth: capacity ceiling, auto-eligibility with verification term, AUTO→SUPERVISED override, visual rounds strip with mock comparison.
-- [ ] 2.7 Repro-first fix flow end-to-end: repro confirm/reject, freeze lift once, fallback auto-finding blocking merge, PR repro proof.
-- [ ] 2.8 CLAUDE.md repeat-mistake proposals (accept → PR); skills pass % from trigger-test set; backed-by column.
-- [ ] 2.9 Records mode (`external`/`linked`) with MCP write-back and retry.
+- [x] 2.5 Eval suite in CI: generated workflows, config-change gate (verdict ≥ threshold, `incomplete` ≠ pass), run history strip, budget, harvest actions, retire/broken-check signals → triage.
+- [x] 2.6 Build-stage depth: capacity ceiling, auto-eligibility with verification term, AUTO→SUPERVISED override, visual rounds strip with mock comparison.
+- [x] 2.7 Repro-first fix flow end-to-end: repro confirm/reject, freeze lift once, fallback auto-finding blocking merge, PR repro proof.
+- [x] 2.8 CLAUDE.md repeat-mistake proposals (accept → PR); skills pass % from trigger-test set; backed-by column.
+- [x] 2.9 Records mode (`external`/`linked`) with MCP write-back and retry.
 - [ ] 2.10 Metrics from PR/CI/incident sources; trend chips.
 Exit: a change travels 1→6→1 against a GitHub repository with branch protection: every artifact and the code are PRs, gate decisions are merges, evidence is on the PR, `sdlc audit` clean.
 

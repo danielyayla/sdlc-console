@@ -7,12 +7,16 @@ import {
   acceptTriage,
   confirmRepro,
   confirmTasks,
+  dismissAutoFinding,
+  liftFreeze,
+  rejectRepro,
   createChange,
   deriveChange,
   dismissFinding,
   dismissProposal,
   dismissTriage,
   escalateFinding,
+  harvestCase,
   importFindings,
   loop,
   patchFinding,
@@ -52,6 +56,11 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
   let source: "console" | "pr.merge" = "console";
   if (gate === 5) {
     if (!before.gate || before.gate.s !== 5 || !before.pr) throw new ActionError(409, `${id} is not waiting at gate 5 (${before.status})`);
+    // spec 5B.3: the console merges nothing while a system-raised finding stands or a fix's repro proof is red — checked before the branch moves, so a refusal leaves nothing half-done
+    const open = (before.pr.autoFindings ?? []).filter((f) => !f.dismissal);
+    if (open.length > 0) throw new ActionError(409, `${open.length} auto-finding${open.length === 1 ? "" : "s"} block${open.length === 1 ? "s" : ""} the merge (${open.map((f) => `${f.title}: ${f.path}`).join("; ")}) — dismiss with a reason first`, open.map((f) => ({ path: `sdlc/changes/${id}/pr.yaml`, severity: "error" as const, rule: "merge.auto-finding", message: `${f.title}: ${f.path}` })));
+    const reproCheck = before.pr.checks.find((c) => c.name === "repro");
+    if (before.kind === "fix" && reproCheck && reproCheck.verdict !== "pass") throw new ActionError(409, `the repro proof is ${reproCheck.verdict}${reproCheck.summary ? ` (${reproCheck.summary})` : ""} — a fix merges only with its repro test committed before the fix, unchanged and passing`, [{ path: `sdlc/changes/${id}/pr.yaml`, severity: "error", rule: "merge.repro-red", message: reproCheck.summary ?? "repro check failed" }]);
     const root = store.root;
     const base = repo.config.defaultBranch;
     const current = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
@@ -138,6 +147,24 @@ export async function confirmReproTest(store: StateStore, id: string, input: Rep
   return { ...r, toast: `Repro test committed — freeze active on ${id}`, changeId: id };
 }
 
+/** "Wrong failure — send back": the engineer's verdict goes on the ledger; the session is resumed with it by the caller. */
+export async function rejectReproTest(store: StateStore, id: string, input: { testPath: string; reason: string }): Promise<ActionResult> {
+  const r = await store.act((repo, ctx) => rejectRepro(repo, view(repo, id), input, ctx));
+  return { ...r, toast: `Repro test sent back on ${id} — ${input.reason}`, changeId: id };
+}
+
+/** Freeze lift, once per file per change (FR-22). */
+export async function liftTestFreeze(store: StateStore, id: string, input: { path: string; reason: string }): Promise<ActionResult> {
+  const r = await store.act((repo, ctx) => liftFreeze(repo, view(repo, id), input, ctx));
+  return { ...r, toast: `Test freeze lifted once for ${input.path} on ${id}`, changeId: id };
+}
+
+/** Dismiss a system-raised PR finding with a reason; the console's merge unblocks. */
+export async function dismissPrAutoFinding(store: StateStore, id: string, input: { path: string; reason: string }): Promise<ActionResult> {
+  const r = await store.act((repo, ctx) => dismissAutoFinding(repo, view(repo, id), input, ctx));
+  return { ...r, toast: `Auto-finding on ${input.path} dismissed — ${input.reason}`, changeId: id };
+}
+
 export async function triageAccept(store: StateStore, triageId: string): Promise<ActionResult> {
   let created: string | null = null;
   const r = await store.act((repo, ctx) => {
@@ -185,4 +212,15 @@ export async function findingsImport(store: StateStore, text: string): Promise<A
 export async function proposalDismiss(store: StateStore, id: string, reason: string): Promise<ActionResult> {
   const r = await store.act((repo, ctx) => dismissProposal(repo, id, reason, ctx));
   return { ...r, toast: `${id} dismissed`, changeId: null };
+}
+
+/** Post-merge "Add as eval": a draft case for the platform owner (FR-53). */
+export async function harvestChange(store: StateStore, id: string): Promise<ActionResult> {
+  let caseId: string | null = null;
+  const r = await store.act((repo, ctx) => {
+    const res = harvestCase(repo, view(repo, id), ctx);
+    if (res.ok) caseId = res.caseId ?? null;
+    return res;
+  });
+  return { ...r, toast: `${caseId ?? "case"} drafted from ${id} — the platform owner activates it under evals/cases`, changeId: id };
 }
