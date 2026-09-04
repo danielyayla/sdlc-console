@@ -1,4 +1,5 @@
 import type { ArtifactBranch } from "@sdlc/adapter-git";
+import { collectSources, type CollectedSources, type MetricSourcesStatus } from "./metrics/index.js";
 import {
   badges,
   computeMetrics,
@@ -83,12 +84,15 @@ export interface Snapshot {
   agents: ParsedAgent[];
   bands: Bands | null;
   metrics: StageMetrics[];
+  /** Where the metrics' external feeds come from and how fresh they are (FR-70). */
+  metricSources: MetricSourcesStatus;
   validation: { blocking: boolean; diagnostics: RuleDiagnostic[] };
 }
 
 /** The full derived state the UI renders; recomputed on every refresh (P13). */
-export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionRecord[], revision: number, now = new Date()): Snapshot {
+export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionRecord[], revision: number, now = new Date(), facts?: CollectedSources): Snapshot {
   const all = deriveAll(repo);
+  const collected = facts ?? collectSources(repo, null);
   const ids = (q: { yours: ChangeView[]; other: ChangeView[] }): RoleQueues => ({ yours: q.yours.map((c) => c.id), other: q.other.map((c) => c.id) });
   const validation = validateTree(repo);
   return {
@@ -117,7 +121,8 @@ export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionR
     skillStatus: skillStatus(repo),
     agents: repo.agents,
     bands: repo.bands,
-    metrics: computeMetrics(repo, all.changes, { now: now.toISOString() }),
+    metrics: computeMetrics(repo, all.changes, { now: now.toISOString(), sources: collected.sources }),
+    metricSources: collected.status,
     validation: { blocking: validation.blocking, diagnostics: validation.diagnostics },
   };
 }

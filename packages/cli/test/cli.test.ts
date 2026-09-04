@@ -466,3 +466,27 @@ describe("record commands (2.9, FR-16)", () => {
     expect(show.out).toContain("linked to jira EXP-1");
   });
 });
+
+describe("metrics (FR-70)", () => {
+  it("prints the per-stage table with sources, says what a feed needs, and refuses bad windows and a refresh without GitHub", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    const table = await sdlc(dir, ["metrics"]);
+    expect(table.code).toBe(0);
+    expect(table.out).toContain("window 30d · PR metadata: none · CI: none · incident records: none");
+    expect(table.out).toContain("01 Plan");
+    expect(table.out).toContain("n/a · needs PR metadata");
+    expect(table.out).toContain("[ledger]");
+    const json = await sdlc(dir, ["metrics", "--stage", "4", "--window", "7d", "--json"]);
+    expect(json.code).toBe(0);
+    const r = json.json<{ window: string; metrics: { stage: number }[]; sources: { ci: { via: string } } }>();
+    expect(r.window).toBe("7d");
+    expect(r.metrics.map((s) => s.stage)).toEqual([4]);
+    expect(r.sources.ci.via).toBe("none");
+    expect((await sdlc(dir, ["metrics", "--window", "fortnight"])).code).toBe(2);
+    expect((await sdlc(dir, ["metrics", "--stage", "9"])).code).toBe(2);
+    const refresh = await sdlc(dir, ["metrics", "--refresh"]);
+    expect(refresh.code).toBe(2);
+    expect(refresh.err).toContain("config.codeHost github and GITHUB_TOKEN");
+  });
+});

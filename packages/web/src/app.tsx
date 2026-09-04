@@ -131,7 +131,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );
-  else if (state.view === "metrics") body = <Metrics metrics={snapshot.metrics} />;
+  else if (state.view === "metrics") body = <Metrics metrics={snapshot.metrics} sources={snapshot.metricSources} />;
   else body = <Pipeline changes={changes} now={now} onSelect={(id) => dispatch({ type: "select", id })} />;
 
   const blocking = snapshot?.validation.blocking ?? false;

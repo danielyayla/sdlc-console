@@ -165,6 +165,8 @@ a { color: inherit; }
 .metric-name { font-size: 12px; color: var(--text-muted); flex: 1; }
 .metric-value { font-size: 19px; font-variant-numeric: tabular-nums; color: var(--text-primary); }
 .metric-note { font-size: 11px; color: var(--text-faint); }
+.metric-sources { font-family: var(--font-mono); font-size: 10px; color: var(--text-faint); margin-right: 4px; }
+.metrics-sources { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; }
 
 /* sessions */
 .sessions { max-width: 960px; }

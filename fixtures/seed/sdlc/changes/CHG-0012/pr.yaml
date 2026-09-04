@@ -8,6 +8,10 @@ mergedAt: 2026-08-23T09:00:00Z
 mergeSha: c2e4d0b3e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3
 reviewers:
   - eng@veri.example
+review:
+  session: s-0012-review
+  headSha: b1f3c9a2d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2
+  at: 2026-08-22T16:00:00Z
 findings:
   high: 0
   medium: 1
