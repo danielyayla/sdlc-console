@@ -72,6 +72,9 @@ importers:
       '@sdlc/adapter-git':
         specifier: workspace:*
         version: link:../adapters/git
+      '@sdlc/adapter-github':
+        specifier: workspace:*
+        version: link:../adapters/github
       '@sdlc/core':
         specifier: workspace:*
         version: link:../core

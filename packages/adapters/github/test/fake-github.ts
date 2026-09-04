@@ -13,6 +13,7 @@ export interface FakePull {
   state: "open" | "closed";
   merged: boolean;
   merge_commit_sha: string | null;
+  merged_by: string | null;
 }
 
 export interface FakeState {
@@ -60,6 +61,7 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
     head: { sha: (await headOf(p.head)) ?? "0".repeat(40), ref: p.head },
     base: { ref: p.base },
     requested_reviewers: [],
+    merged_by: p.merged_by ? { login: p.merged_by } : null,
     draft: false,
     mergeable_state: state.protected ? "blocked" : "clean",
   });
@@ -77,7 +79,7 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const method = req.method ?? "GET";
-    const path = (req.url ?? "/").split("?")[0] ?? "/";
+    const [path = "/", query = ""] = (req.url ?? "/").split("?");
     const auth = typeof req.headers.authorization === "string" ? req.headers.authorization : null;
     state.requests.push({ method, path, auth });
     if (auth !== `Bearer ${token}`) return send(res, 401, { message: "Bad credentials" });
@@ -92,12 +94,19 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
       if (!sha) return send(res, 404, { message: "Branch not found" });
       return send(res, 200, { name, commit: { sha }, protected: state.protected });
     }
+    if (method === "GET" && rest === "/pulls") {
+      const q = new URLSearchParams(query);
+      const head = q.get("head")?.split(":")[1];
+      const st = q.get("state") ?? "open";
+      const hits = state.pulls.filter((p) => (st === "all" || p.state === st) && (!head || p.head === head));
+      return send(res, 200, await Promise.all(hits.map((p) => pullJson(p))));
+    }
     if (method === "POST" && rest === "/pulls") {
       const head = String(body["head"]);
       const base = String(body["base"]);
       if (!(await headOf(head))) return send(res, 422, { message: "Validation Failed", errors: [{ message: `head ${head} is invalid` }] });
       if (state.pulls.some((p) => p.head === head && p.state === "open")) return send(res, 422, { message: "Validation Failed", errors: [{ message: `A pull request already exists for ${head}.` }] });
-      const pull: FakePull = { number: state.pulls.length + 1, title: String(body["title"]), body: String(body["body"] ?? ""), head, base, state: "open", merged: false, merge_commit_sha: null };
+      const pull: FakePull = { number: state.pulls.length + 1, title: String(body["title"]), body: String(body["body"] ?? ""), head, base, state: "open", merged: false, merge_commit_sha: null, merged_by: null };
       state.pulls.push(pull);
       return send(res, 201, await pullJson(pull));
     }
@@ -123,6 +132,7 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
         pull.merged = true;
         pull.state = "closed";
         pull.merge_commit_sha = sha;
+        pull.merged_by = typeof req.headers["x-fake-login"] === "string" ? req.headers["x-fake-login"] : "token-user";
         return send(res, 200, { sha, merged: true, message: "Pull Request successfully merged" });
       } catch (e) {
         return send(res, 405, { message: `merge failed: ${(e as Error).message}` });

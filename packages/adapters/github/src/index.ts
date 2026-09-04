@@ -13,3 +13,4 @@ export * from "./statuses.js";
 export * from "./protection.js";
 export * from "./codeowners.js";
 export * from "./codehost.js";
+export * from "./webhooks.js";

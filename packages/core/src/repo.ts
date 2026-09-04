@@ -73,6 +73,8 @@ export interface Repo {
   rawConfig: Config | null;
   claudeMd: ParsedClaudeMd | null;
   verification: VerificationContract | null;
+  /** `REVIEW.md` (review policy) verbatim with its blob sha; parsed for the review job, never edited. */
+  reviewPolicy: { sha: string; text: string } | null;
   settings: ParsedSettings | null;
   skills: ParsedSkill[];
   agents: ParsedAgent[];
@@ -341,6 +343,10 @@ export function loadRepo(tree: Tree): Repo {
     rawConfig,
     claudeMd,
     verification: claudeMd?.verification ?? null,
+    reviewPolicy: (() => {
+      const f = readFile(tree, PATHS.reviewMd);
+      return f ? { sha: f.sha, text: f.content } : null;
+    })(),
     settings,
     skills,
     agents,

@@ -7,6 +7,7 @@ import { init } from "./commands/init.js";
 import { securityCommand, securityImportCommand } from "./commands/security.js";
 import { serveCommand } from "./commands/serve.js";
 import { sessionCommand } from "./commands/session.js";
+import { syncCommand } from "./commands/sync.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
 import { loopCommand } from "./commands/loop.js";
 import { mcpCommand } from "./commands/mcp.js";
@@ -26,16 +27,18 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc send-back <CHG> --gate n --feedback <text>
   sdlc loop <CHG> [--incident <file>]
   sdlc audit <CHG>
-  sdlc serve [--port n] [--role po|eng]
+  sdlc serve [--port n] [--host addr] [--role po|eng]
   sdlc triage accept|dismiss <TRI> [--reason <text>] [--tune <note>]
   sdlc security patch|escalate|dismiss <SEC> [--reason <text>]
   sdlc security import <file|->
   sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
   sdlc mcp                                              (agent tools over stdio)
-  sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]
+  sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose)
   sdlc session list | stop <id>
   sdlc run <CHG>                                        (per-change run: verification + intersecting evals; green opens the PR)
   sdlc serve --engine                                   (launch sessions and runs automatically on transitions)
+  sdlc sync                                             (GitHub mode: open artifact PRs, record merges done on GitHub, refresh the records PR)
+  POST /api/webhooks/github                             (GitHub mode: signed deliveries under GITHUB_WEBHOOK_SECRET; polling stays on as the fallback)
 
 Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
@@ -57,6 +60,7 @@ const OPTIONS = {
   feedback: { type: "string" },
   incident: { type: "string" },
   port: { type: "string" },
+  host: { type: "string" },
   reason: { type: "string" },
   task: { type: "string" },
   target: { type: "string" },
@@ -204,7 +208,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await hookCommand(io, sub);
       }
       case "serve": {
-        const server = await serveCommand(io, { ...(values.port ? { port: Number(values.port) } : {}), ...(values.role === "eng" ? { role: "eng" as const } : {}), engine: values.engine === true });
+        const server = await serveCommand(io, { ...(values.port ? { port: Number(values.port) } : {}), ...(values.host ? { host: values.host } : {}), ...(values.role === "eng" ? { role: "eng" as const } : {}), engine: values.engine === true });
         if (values["no-wait"]) {
           await server.close();
           return 0;
@@ -214,6 +218,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
           process.once("SIGTERM", resolve);
         });
         await server.close();
+        return 0;
+      }
+      case "sync": {
+        const ctx = await repoContext(io, json);
+        const r = await syncCommand(ctx);
+        emit(io, json, r, () => `sync: ${r.opened.length} PR(s) opened${r.opened.map((o) => ` · ${o.changeId} ${o.branch} → #${o.number}`).join("")} · ${r.merges.filter((m) => m.recorded).length} merge(s) recorded${r.merges.filter((m) => !m.recorded && m.reason !== "already recorded").map((m) => ` · ${m.changeId} PR #${m.number} by ${m.mergedBy} not recorded: ${m.reason ?? ""}`).join("")} · records ${r.records.pushed ? `PR #${r.records.number ?? "?"} (${r.records.ahead} commit(s) ahead)` : r.records.error ? `failed: ${r.records.error}` : "in sync"}${r.errors.length > 0 ? `\n${r.errors.join("\n")}` : ""}`);
         return 0;
       }
       case "audit": {

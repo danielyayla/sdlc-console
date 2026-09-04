@@ -18,6 +18,18 @@ import {
 
 export type DocState = "absent" | "draft" | "pending-review" | "committed" | "stale";
 
+export interface ReviewFindingView {
+  id: string;
+  severity: "high" | "medium" | "low";
+  title: string;
+  path: string | null;
+  detail: string | null;
+  at: string;
+  session: string | null;
+}
+
+const SEVERITY_RANK = { high: 0, medium: 1, low: 2 } as const;
+
 export interface DocView {
   index: ArtifactIndex;
   name: string;
@@ -44,6 +56,16 @@ export type EvalsState = "not-run" | "running" | "green" | "red" | "waiting" | "
 /** The INC case a looped change must activate before passing stage 4 again. */
 export function incCaseIdFor(changeId: string, cycle: number): string | null {
   return cycle > 1 ? `INC-${changeId}-${cycle - 1}` : null;
+}
+
+/** An artifact draft in review as a pull request (GitHub mode), from `pr.opened{artifact}` on its branch. */
+export interface ArtifactPrView {
+  number: number;
+  url: string;
+  branch: string;
+  headSha: string;
+  /** The gate this PR carries has been accepted (merged). */
+  merged: boolean;
 }
 
 export interface ChangeView {
@@ -75,6 +97,9 @@ export interface ChangeView {
   intersectingCases: string[];
   incCase: { id: string; status: "draft" | "active" | "retired" | "missing" } | null;
   pr: Pr | null;
+  artifactPrs: Partial<Record<ArtifactIndex, ArtifactPrView>>;
+  /** Review findings reported against the current code PR (this cycle, after it opened), most severe first. */
+  findings: ReviewFindingView[];
   waitingOnYou: string | null;
   activity: ActivityEntry[];
   tasks: NonNullable<ChangeFiles["tasks"]>["tasks"];
@@ -192,7 +217,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     const sentBack = lastEvent(events, "gate.sent_back", (e) => e.data.gate === g);
     const planFinal = g === 3 ? lastEvent(events, "plan.final") : null;
     const planDrafted = g === 3 ? lastEvent(events, "plan.drafted") : null;
-    const prOpened = g === 5 ? lastEvent(events, "pr.opened") : null;
+    const prOpened = g === 5 ? latestOf(events, [lastEvent(events, "pr.opened", (e) => e.data.artifact === undefined), lastEvent(events, "pr.synchronized")]) : null;
     const latest = latestOf(events, [committed, sentBack, planFinal, planDrafted, prOpened]);
     let open = false;
     let since = change.created.at;
@@ -273,6 +298,22 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     incomplete,
   });
 
+  const artifactPrs: Partial<Record<ArtifactIndex, ArtifactPrView>> = {};
+  for (const e of eventsNamed(events, "pr.opened")) {
+    const idx = e.data.artifact;
+    if (idx === undefined || e.data.number === undefined || e.data.url === undefined || e.data.branch === undefined) continue;
+    const gateOf = { 0: 1, 1: 2, 2: 3, 5: 6 }[idx];
+    artifactPrs[idx as ArtifactIndex] = { number: e.data.number, url: e.data.url, branch: e.data.branch, headSha: e.data.headSha, merged: gateOf !== undefined && accepted.has(gateOf as GateNumber) };
+  }
+
+  // findings belong to the head under review: those before the code PR opened, or before its head last moved, are history
+  const codePr = latestOf(events, [lastEvent(events, "pr.opened", (e) => e.data.artifact === undefined), lastEvent(events, "pr.synchronized")]);
+  const afterPr = indexOf(events, codePr);
+  const findings: ReviewFindingView[] = eventsNamed(events, "review.finding")
+    .filter((e) => indexOf(events, e) > afterPr)
+    .map((e) => ({ id: e.id, severity: e.data.severity, title: e.data.title, path: e.data.path ?? null, detail: e.data.detail ?? null, at: e.ts, session: e.actor.session ?? null }))
+    .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.at.localeCompare(b.at));
+
   const valid = errors.length === 0;
   return {
     id: change.id,
@@ -302,7 +343,9 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     latestRun,
     intersectingCases: cases.map((c) => c.id),
     incCase: incCaseId ? { id: incCaseId, status: incCase?.status ?? "missing" } : null,
+    artifactPrs,
     pr: files.pr,
+    findings,
     waitingOnYou,
     activity: activityFeed(files.events),
     tasks: files.tasks?.tasks ?? [],
@@ -345,6 +388,8 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     intersectingCases: [],
     incCase: null,
     pr: null,
+    artifactPrs: {},
+    findings: [],
     waitingOnYou: null,
     activity: activityFeed(files.events),
     tasks: [],

@@ -1,5 +1,7 @@
 import { CodeHostError, git, mergeIfUnmerged } from "@sdlc/adapter-git";
 import { codeHostFor } from "./engine/codehost.js";
+import { acceptViaPr, artifactPrFor, sendBackViaPr } from "./github/artifacts.js";
+import type { GitHubCodeHost } from "@sdlc/adapter-github";
 import {
   accept,
   acceptTriage,
@@ -63,6 +65,15 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
       throw new ActionError(retryable ? 502 : 409, `merge refused: ${(e as Error).message}`, [], retryable);
     }
   }
+  if (gate !== 5 && repo.config.codeHost === "github" && artifactPrFor(before, gate, store.current?.branches)) {
+    // GitHub mode: the artifact is a pull request; accepting is merging it
+    const host = codeHostFor("github", env) as GitHubCodeHost;
+    const r = await acceptViaPr({ host, identity: store.who }, store, id, gate);
+    const snap = store.current ?? (await store.refresh());
+    const after = snap.changes.find((c) => c.id === id);
+    const toast = gate === 6 ? `Loop closed — ${id} re-entered Plan` : `${before.gate?.label ?? `gate ${gate}`} — ${id} moved to ${after ? stageDef(after.stage).name : "next stage"} (PR #${r.number} merged)`;
+    return { commit: r.commit, snapshot: snap, toast, changeId: id };
+  }
   if (gate !== 5) {
     // local mode: a draft on sdlc/<CHG>/<artifact> reaches the default branch when the owner accepts
     const artifact = { 1: "intent", 2: "spec", 3: "plan", 6: "incident" }[gate];
@@ -82,8 +93,17 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
   return { ...r, toast, changeId: id };
 }
 
-export async function sendBackGate(store: StateStore, id: string, gate: GateNumber, feedback: string): Promise<ActionResult> {
-  const r = await store.act((repo, ctx) => sendBack(repo, view(repo, id), gate, feedback, ctx));
+export async function sendBackGate(store: StateStore, id: string, gate: GateNumber, feedback: string, env: Record<string, string | undefined> = process.env): Promise<ActionResult> {
+  await store.refresh();
+  const repo0 = store.currentRepo;
+  if (repo0 && gate !== 5 && repo0.config.codeHost === "github" && artifactPrFor(view(repo0, id), gate, store.current?.branches)) {
+    const host = codeHostFor("github", env) as GitHubCodeHost;
+    const r = await sendBackViaPr({ host, identity: store.who }, store, id, gate, feedback);
+    const snap = store.current ?? (await store.refresh());
+    const after = snap.changes.find((c) => c.id === id);
+    return { commit: r.commit, snapshot: snap, toast: `${after ? stageDef(after.stage).file : "artifact"} sent back on PR #${r.number} — ${id} stays in ${after ? stageDef(after.stage).name : "stage"}`, changeId: id };
+  }
+  const r = await store.act((repo, ctx) => sendBack(repo, view(repo, id), gate, feedback, { ...ctx, source: "console" }));
   const after = r.snapshot.changes.find((c) => c.id === id);
   return { ...r, toast: `${after ? stageDef(after.stage).file : "artifact"} sent back — ${id} stays in ${after ? stageDef(after.stage).name : "stage"}`, changeId: id };
 }

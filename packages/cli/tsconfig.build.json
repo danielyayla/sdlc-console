@@ -13,6 +13,9 @@
       "path": "../adapters/git/tsconfig.build.json"
     },
     {
+      "path": "../adapters/github/tsconfig.build.json"
+    },
+    {
       "path": "../core/tsconfig.build.json"
     },
     {
