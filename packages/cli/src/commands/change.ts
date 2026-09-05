@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { changeIdsByRef } from "@sdlc/adapter-git";
-import { createChange, deriveAll, type ChangeView, type CreateChangeInput } from "@sdlc/core";
+import { createChange, deriveAll, loadRepo, validateWritePlan, type ChangeView, type CreateChangeInput } from "@sdlc/core";
+import { readTree } from "@sdlc/adapter-git";
+import { commitOnBranch } from "@sdlc/server";
 import { actingIdentity, assertHuman, commitPlan, loadCommitted, transitionContext, viewOf, type CliContext } from "../context.js";
 import { CliError } from "../io.js";
 
@@ -18,6 +20,8 @@ export interface NewChangeResult {
   id: string;
   commit: string;
   view: ChangeView;
+  /** GitHub mode: the change was born on this branch; merging its PR is the gate 1 decision. */
+  inReview?: string;
 }
 
 export async function changeNew(ctx: CliContext, opts: NewChangeOptions): Promise<NewChangeResult> {
@@ -48,6 +52,15 @@ export async function changeNew(ctx: CliContext, opts: NewChangeOptions): Promis
   if (!r.ok) throw new CliError("change new refused", 2, r.diagnostics);
   const id = r.plan.changeId;
   if (!id) throw new CliError("createChange produced no change id");
+  if (repo.config.codeHost === "github") {
+    // GitHub mode: the change is born on sdlc/<CHG>/intent; its PR is the Plan gate (2.2)
+    const report = validateWritePlan(repo, r.plan);
+    if (report.blocking) throw new CliError("write-plan rejected by validation", 1, report.diagnostics.filter((d) => d.blocking));
+    const branch = `sdlc/${id}/intent`;
+    const commit = await commitOnBranch(ctx.root, branch, r.plan, who);
+    const onBranch = loadRepo(await readTree(ctx.root, branch));
+    return { id, commit, view: viewOf(onBranch, id), inReview: branch };
+  }
   const commit = await commitPlan(ctx, repo, r.plan, who);
   const after = await loadCommitted(ctx);
   return { id, commit, view: viewOf(after.repo, id) };

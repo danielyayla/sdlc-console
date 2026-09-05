@@ -146,7 +146,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
             origin: values.origin ?? "idea",
             ...(values.intent ? { intent: values.intent } : {}),
           });
-          emit(io, json, r, () => `${r.id} created at stage 1 (${r.view.status}) · ${r.commit.slice(0, 7)}`);
+          emit(io, json, r, () => (r.inReview ? `${r.id} created on ${r.inReview} · ${r.commit.slice(0, 7)} — the engine (or sdlc sync) opens its PR; merging it is the Plan gate` : `${r.id} created at stage 1 (${r.view.status}) · ${r.commit.slice(0, 7)}`));
           return 0;
         }
         if (sub === "list") {
