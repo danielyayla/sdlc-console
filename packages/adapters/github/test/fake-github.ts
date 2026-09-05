@@ -23,6 +23,8 @@ export interface FakeState {
   reviews: { number: number; body: Record<string, unknown> }[];
   comments: { number: number; body: string }[];
   requests: { method: string; path: string; auth: string | null }[];
+  /** GitHub computes mergeability after a push: while > 0, `GET /pulls/:n` reports `mergeable_state: unknown` (decrementing) and the merge answers 405. */
+  mergeabilityPending: number;
 }
 
 export interface FakeGitHub {
@@ -45,7 +47,7 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
   const owner = opts.owner ?? "acme";
   const repo = opts.repo ?? "widgets";
   const token = opts.token ?? "ghp_test";
-  const state: FakeState = { protected: opts.protected ?? true, pulls: [], statuses: [], reviews: [], comments: [], requests: [] };
+  const state: FakeState = { protected: opts.protected ?? true, pulls: [], statuses: [], reviews: [], comments: [], requests: [], mergeabilityPending: 0 };
   const prefix = `/repos/${owner}/${repo}`;
   // when the fake recorded a status or review, served as created_at/updated_at/submitted_at unless the body carries its own
   const recordedAt = new WeakMap<object, string>();
@@ -118,12 +120,17 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
     }
     if ((m = /^\/pulls\/(\d+)$/.exec(rest)) && method === "GET") {
       const pull = state.pulls[Number(m[1]) - 1];
-      return pull ? send(res, 200, await pullJson(pull)) : send(res, 404, { message: "Not Found" });
+      if (!pull) return send(res, 404, { message: "Not Found" });
+      if (state.mergeabilityPending > 0) {
+        state.mergeabilityPending--;
+        return send(res, 200, { ...(await pullJson(pull)), mergeable_state: "unknown" });
+      }
+      return send(res, 200, await pullJson(pull));
     }
     if ((m = /^\/pulls\/(\d+)\/merge$/.exec(rest)) && method === "PUT") {
       const pull = state.pulls[Number(m[1]) - 1];
       if (!pull) return send(res, 404, { message: "Not Found" });
-      if (pull.merged) return send(res, 405, { message: "Pull Request is not mergeable" });
+      if (pull.merged || state.mergeabilityPending > 0) return send(res, 405, { message: "Pull Request is not mergeable" });
       const head = await headOf(pull.head);
       if (typeof body["sha"] === "string" && body["sha"] !== head) return send(res, 409, { message: "Head branch was modified. Review and try the merge again." });
       const clone = mkdtempSync(join(tmpdir(), "fake-gh-merge-"));

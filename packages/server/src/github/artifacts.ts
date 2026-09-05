@@ -83,17 +83,30 @@ export interface OpenedArtifactPr {
   url: string;
 }
 
+export interface PushedArtifactBranch {
+  changeId: string;
+  artifact: ArtifactIndex;
+  branch: string;
+  number: number;
+  head: string;
+}
+
 /**
- * Every unmerged `sdlc/<CHG>/<artifact>` branch becomes a pull request: push,
- * open (or find) the PR, record `pr.opened{artifact}` on the branch, push
- * again. Idempotent: a branch whose PR is already recorded is skipped.
+ * Every unmerged `sdlc/<CHG>/<artifact>` branch that carries its artifact
+ * becomes a pull request: push, open (or find) the PR, record
+ * `pr.opened{artifact}` on the branch, push again. A branch with ledger lines
+ * only (a session started, or failed, before proposing) is not in review yet
+ * and opens nothing. Idempotent: a branch whose PR is already recorded is
+ * pushed again only when its head moved past origin's — the agent's revisions
+ * reach the PR the reviewer reads — and never reopened.
  */
-export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Promise<{ opened: OpenedArtifactPr[]; errors: string[] }> {
+export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Promise<{ opened: OpenedArtifactPr[]; pushed: PushedArtifactBranch[]; errors: string[] }> {
   const snap = await store.refresh();
   const repo = store.currentRepo;
-  if (!repo) return { opened: [], errors: ["repository not loaded"] };
+  if (!repo) return { opened: [], pushed: [], errors: ["repository not loaded"] };
   const base = repo.config.defaultBranch;
   const opened: OpenedArtifactPr[] = [];
+  const pushed: PushedArtifactBranch[] = [];
   const errors: string[] = [];
   const repoGh = await mode.host.repoFor(store.root);
   for (const b of snap.branches ?? []) {
@@ -104,12 +117,25 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
     } catch {
       continue;
     }
+    const doc = view.docs[index];
     const recorded = view.artifactPrs[index];
-    if (recorded && !recorded.merged && recorded.branch === b.branch) continue;
+    if (recorded && !recorded.merged && recorded.branch === b.branch) {
+      const origin = await gitRaw(store.root, ["rev-parse", "--verify", "-q", `refs/remotes/origin/${b.branch}`]);
+      if (origin.code === 0 && origin.stdout.trim() === b.head) continue;
+      try {
+        await pushBranch(store.root, b.branch);
+        pushed.push({ changeId: view.id, artifact: index, branch: b.branch, number: recorded.number, head: b.head });
+        mode.log?.(`${view.id}: ${doc.name} revised · PR #${recorded.number} updated`);
+      } catch (e) {
+        errors.push(`${b.branch}: ${(e as Error).message}`);
+        mode.log?.(`${b.branch}: ${(e as Error).message}`);
+      }
+      continue;
+    }
+    if (doc.state === "absent") continue;
     try {
       await assertProtected(mode.host.client, repoGh, base);
       await pushBranch(store.root, b.branch);
-      const doc = view.docs[index];
       const pull = (await findOpenPull(mode.host.client, repoGh, b.branch)) ?? (await openPull(mode.host.client, repoGh, {
         head: b.branch,
         base,
@@ -128,7 +154,7 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
     }
   }
   if (opened.length > 0) await store.refresh(true);
-  return { opened, errors };
+  return { opened, pushed, errors };
 }
 
 /** True when the gate's artifact sits on an unmerged branch with an open PR — the GitHub-mode path applies. */
@@ -323,18 +349,25 @@ export async function syncRecords(mode: GitHubMode, store: StateStore): Promise<
 
 export interface SyncSummary {
   opened: OpenedArtifactPr[];
+  /** Open artifact PRs whose branch was pushed again because the local head moved. */
+  pushed: PushedArtifactBranch[];
   merges: DetectedMerge[];
   records: RecordsSync;
   errors: string[];
 }
 
-/** One GitHub-mode pass: artifact PRs, merges done on GitHub, records PR. */
+/**
+ * One GitHub-mode pass: merges done on GitHub first (so a branch merged
+ * there is off the list before anything tries to open a PR for it), then
+ * artifact PRs, then the records PR.
+ */
 export async function syncGitHub(mode: GitHubMode, store: StateStore): Promise<SyncSummary> {
-  const opened = await openArtifactPrs(mode, store);
+  const errors: string[] = [];
   const merges = await detectMergedPrs(mode, store).catch((e: Error) => {
-    opened.errors.push(`merge detection: ${e.message}`);
+    errors.push(`merge detection: ${e.message}`);
     return [] as DetectedMerge[];
   });
+  const opened = await openArtifactPrs(mode, store);
   const records = await syncRecords(mode, store);
-  return { opened: opened.opened, merges, records, errors: opened.errors };
+  return { opened: opened.opened, pushed: opened.pushed, merges, records, errors: [...errors, ...opened.errors] };
 }

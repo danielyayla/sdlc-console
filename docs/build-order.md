@@ -37,4 +37,6 @@ Exit: one change travels 1→6→1 with real files, hooks and a real Claude Code
 - [x] 2.10 Metrics from PR/CI/incident sources; trend chips.
 Exit: a change travels 1→6→1 against a GitHub repository with branch protection: every artifact and the code are PRs, gate decisions are merges, evidence is on the PR, `sdlc audit` clean.
 
+- [x] Phase 2 exit run on 2026-09-04 against `danielyayla/sdlc-website` (main protected, PRs #1–#7): spec, plan, incident and the code went through PRs merged by the human (gates 2, 3, 5, 6 recorded as `pr.merge`); `sdlc/evidence` and `sdlc/evals` statuses on the code PR head; `sdlc audit CHG-0001` clean, `sdlc validate` ok. Known gaps left from the run: the intent (gate 1) is still a console decision on the default branch; the review's findings did not reach PR #5 (fixed after the fact, rows `2.3 → e2e`); metrics ignore archived cycles (`2.10 → e2e`). Six fixes landed from the run — see the `→ e2e` rows in decisions.md.
+
 ## Phase 3 — Hosted/team, Maintain automation, deployment tools, other adapters (items 20–23)

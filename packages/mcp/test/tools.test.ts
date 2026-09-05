@@ -42,7 +42,14 @@ async function client(dir: string, env: Record<string, string> = {}): Promise<Cl
 
 async function call(c: Client, name: string, args: Record<string, unknown>): Promise<{ isError: boolean; value: Record<string, unknown> }> {
   const r = (await c.callTool({ name, arguments: args })) as { isError?: boolean; structuredContent?: Record<string, unknown>; content: { text: string }[] };
-  return { isError: r.isError === true, value: r.structuredContent ?? (JSON.parse(r.content[0]?.text ?? "{}") as Record<string, unknown>) };
+  const text = r.content[0]?.text ?? "{}";
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    parsed = { error: text };
+  }
+  return { isError: r.isError === true, value: r.structuredContent ?? parsed };
 }
 
 async function viewOf(dir: string, id: string) {
@@ -261,5 +268,31 @@ describe("sdlc-mcp tools", () => {
     const merged = await call(c, "report_finding", { changeId: "CHG-0012", severity: "low", title: "late" });
     expect(merged.isError).toBe(true);
     expect(String(merged.value["error"])).toContain("already merged");
+  });
+
+  it("from a code-branch worktree the tools see the PR the run recorded on the default branch (pr.yaml lives there, not on the branch)", async () => {
+    const dir = await seeded();
+    const { appendFileSync: append } = await import("node:fs");
+    const wt = join(dir, "..", `${dir.split("/").pop() ?? "wt"}-review`);
+    cleanups.push(() => rmSync(wt, { recursive: true, force: true }));
+    // CHG-0017's code branch as the build session left it: cut before the run recorded the PR on main, with its own note on top
+    await git(dir, ["worktree", "add", "-q", "-b", "CHG-0017/export", wt, "main"]);
+    await git(wt, ["rm", "-q", "sdlc/changes/CHG-0017/pr.yaml"]);
+    append(join(wt, "sdlc/changes/CHG-0017/log.jsonl"), `${JSON.stringify({ schema: 1, id: "01J8Z6Q7Y2K3M4N5P6Q7R8S9T1", ts: "2026-09-04T09:00:00Z", seq: 99, cycle: 1, actor: { type: "agent", id: "claude-code", session: "sess-b1" }, event: "note", data: { text: "build session note" } })}\n`);
+    await git(wt, ["commit", "-q", "-am", "sdlc(CHG-0017): note"]);
+    const head = (await git(wt, ["rev-parse", "HEAD"])).trim();
+    expect((await git(wt, ["ls-tree", "--name-only", "HEAD", "sdlc/changes/CHG-0017/"])).includes("pr.yaml")).toBe(false);
+    // the review session runs in the branch worktree and still sees the PR
+    const c = await client(wt, { SDLC_SESSION: "sess-review02", SDLC_CHANGE: "CHG-0017" });
+    const ctx = await call(c, "get_change", { id: "CHG-0017" });
+    expect(ctx.value["error"] ?? null).toBeNull();
+    expect(ctx.isError).toBe(false);
+    expect(ctx.value).toMatchObject({ stage: 5 });
+    const one = await call(c, "report_finding", { changeId: "CHG-0017", severity: "medium", title: "header row dropped", path: "src/export/csv.ts" });
+    expect(one.isError).toBe(false);
+    expect(one.value).toMatchObject({ n: 1, changeId: "CHG-0017", tally: { high: 0, medium: 1, low: 0 } });
+    // the read changed nothing on the branch
+    expect((await git(wt, ["rev-parse", "HEAD"])).trim()).toBe(head);
+    expect((await git(wt, ["ls-tree", "--name-only", "HEAD", "sdlc/changes/CHG-0017/"])).includes("pr.yaml")).toBe(false);
   });
 });

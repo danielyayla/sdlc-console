@@ -86,7 +86,7 @@ export function loop(repo: Repo, view: ChangeView, ctx: TransitionContext): Tran
   const ev = new EventBuilder(ctx, files, view.id);
   const sha = view.docs[5].sha ?? "0".repeat(40);
   const events = [
-    ev.human("gate.accepted", check.role, n, { gate: 6, artifactSha: sha, source: "cli" }),
+    ev.human("gate.accepted", check.role, n, { gate: 6, artifactSha: sha, source: ctx.source ?? "cli" }),
     ev.system("cycle.archived", next, { cycle: n, into: `cycles/${n}` }),
     ev.system("artifact.committed", next, { artifact: 0, path: `${dir}/intent.md`, sha: blobShaOf(ctx, intent) }),
     ev.system("stage.entered", next, { stage: 1 }),

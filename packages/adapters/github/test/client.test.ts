@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { git } from "@sdlc/adapter-git";
-import { GitHubClient, GitHubError, branchProtected, combinedStatus, credentialsFrom, getPull, listReviews, parseGitHubRemote, parseRepoSlug, publishStatus } from "../src/index.js";
+import { GitHubClient, GitHubError, branchProtected, combinedStatus, credentialsFrom, getPull, listReviews, mergePull, parseGitHubRemote, parseRepoSlug, publishStatus } from "../src/index.js";
 import { startFakeGitHub, type FakeGitHub } from "./fake-github.js";
 
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -110,5 +110,47 @@ describe("reviews and combined status (metrics sources)", () => {
     ]);
     expect(combined.statuses[0]?.createdAt).toMatch(/^\d{4}-/);
     expect(await combinedStatus(client, repo, "b".repeat(40))).toEqual({ state: "pending", statuses: [] });
+  });
+});
+
+describe("merge waits for GitHub's mergeability check", () => {
+  async function featureBranch(bare: string): Promise<string> {
+    const work = mkdtempSync(join(tmpdir(), "sdlc-gh-work-"));
+    cleanups.push(() => rmSync(work, { recursive: true, force: true }));
+    await git(work, ["clone", "-q", bare, "."]);
+    await git(work, ["config", "user.email", "po@veri.example"]);
+    await git(work, ["config", "user.name", "Priya"]);
+    await git(work, ["checkout", "-q", "-b", "feature"]);
+    await git(work, ["commit", "-q", "--allow-empty", "-m", "feature"]);
+    await git(work, ["push", "-q", "origin", "feature"]);
+    return (await git(work, ["rev-parse", "HEAD"])).trim();
+  }
+
+  it("right after a push GitHub reports mergeable_state unknown and answers 405: the merge polls until the state is known, then succeeds", async () => {
+    const gh = await fake();
+    const client = new GitHubClient({ token: gh.token, apiUrl: gh.url });
+    const repo = { owner: gh.owner, repo: gh.repo };
+    const head = await featureBranch(gh.bare);
+    gh.state.pulls.push({ number: 1, title: "t", body: "", head: "feature", base: "main", state: "open", merged: false, merge_commit_sha: null, merged_by: null });
+    gh.state.mergeabilityPending = 2;
+    const merged = await mergePull(client, repo, 1, { sha: head, wait: { attempts: 5, delayMs: 5 } });
+    expect(merged.merged).toBe(true);
+    expect(gh.state.pulls[0]?.merged).toBe(true);
+    // two polls saw "unknown", the third saw the computed state; one merge call
+    expect(gh.state.requests.filter((r) => r.method === "GET" && r.path.endsWith("/pulls/1")).length).toBe(3);
+    expect(gh.state.requests.filter((r) => r.method === "PUT").length).toBe(1);
+  });
+
+  it("a 405 that persists once the state is known is the real answer (branch protection) and is thrown as retryable", async () => {
+    const gh = await fake();
+    const client = new GitHubClient({ token: gh.token, apiUrl: gh.url });
+    const repo = { owner: gh.owner, repo: gh.repo };
+    const head = await featureBranch(gh.bare);
+    gh.state.pulls.push({ number: 1, title: "t", body: "", head: "feature", base: "main", state: "open", merged: true, merge_commit_sha: null, merged_by: null });
+    const err = await mergePull(client, repo, 1, { sha: head, wait: { attempts: 3, delayMs: 5 } }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubError);
+    expect((err as GitHubError).status).toBe(405);
+    expect((err as GitHubError).retryable).toBe(true);
+    expect(gh.state.requests.filter((r) => r.method === "PUT").length).toBe(1);
   });
 });

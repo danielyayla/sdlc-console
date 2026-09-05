@@ -195,7 +195,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const ctx = await repoContext(io, json);
         if (!sub) throw new CliError("usage: sdlc loop <CHG> [--incident <file>]");
         const r = await loopCommand(ctx, sub, values.incident ? { incident: values.incident } : {});
-        emit(io, json, r, () => `${r.id}: loop closed → cycle ${r.cycle}, stage ${r.view.stage} (${r.view.status}) · ${r.commits.map((c) => c.slice(0, 7)).join(", ")}`);
+        emit(io, json, r, () => (r.inReview ? `${r.id}: incident.md committed on ${r.inReview} · ${r.commits.map((c) => c.slice(0, 7)).join(", ")} — the engine (or sdlc sync) opens its PR; merging it closes the loop` : `${r.id}: loop closed → cycle ${r.cycle}, stage ${r.view.stage} (${r.view.status}) · ${r.commits.map((c) => c.slice(0, 7)).join(", ")}`));
         return 0;
       }
       case "triage": {
@@ -273,7 +273,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
       case "sync": {
         const ctx = await repoContext(io, json);
         const r = await syncCommand(ctx);
-        emit(io, json, r, () => `sync: ${r.opened.length} PR(s) opened${r.opened.map((o) => ` · ${o.changeId} ${o.branch} → #${o.number}`).join("")} · ${r.merges.filter((m) => m.recorded).length} merge(s) recorded${r.merges.filter((m) => !m.recorded && m.reason !== "already recorded").map((m) => ` · ${m.changeId} PR #${m.number} by ${m.mergedBy} not recorded: ${m.reason ?? ""}`).join("")} · records ${r.records.pushed ? `PR #${r.records.number ?? "?"} (${r.records.ahead} commit(s) ahead)` : r.records.error ? `failed: ${r.records.error}` : "in sync"}${r.errors.length > 0 ? `\n${r.errors.join("\n")}` : ""}`);
+        emit(io, json, r, () => `sync: ${r.opened.length} PR(s) opened${r.opened.map((o) => ` · ${o.changeId} ${o.branch} → #${o.number}`).join("")} · ${r.pushed.length} PR(s) updated${r.pushed.map((o) => ` · ${o.changeId} #${o.number} at ${o.head.slice(0, 7)}`).join("")} · ${r.merges.filter((m) => m.recorded).length} merge(s) recorded${r.merges.filter((m) => !m.recorded && m.reason !== "already recorded").map((m) => ` · ${m.changeId} PR #${m.number} by ${m.mergedBy} not recorded: ${m.reason ?? ""}`).join("")} · records ${r.records.pushed ? `PR #${r.records.number ?? "?"} (${r.records.ahead} commit(s) ahead)` : r.records.error ? `failed: ${r.records.error}` : "in sync"}${r.errors.length > 0 ? `\n${r.errors.join("\n")}` : ""}`);
         return 0;
       }
       case "evals": {

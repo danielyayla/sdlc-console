@@ -63,3 +63,31 @@ export async function readTreeWithBranches(dir: string, ref = "HEAD", opts: Read
   }
   return { tree: { ref: base.ref, files }, branches };
 }
+
+/**
+ * A change branch's tree with the default branch's lifecycle records laid
+ * under it (blueprint §12: `pr.yaml`, per-change runs and the console's ledger
+ * events commit on the default branch, a session's own events on its branch).
+ * Files the branch has win; the ledgers are unioned. What a session's MCP
+ * tools read from a worktree, so a review on the code branch sees the PR the
+ * run opened. Files outside `sdlc/changes/<CHG>/` come from the branch only.
+ */
+export async function readTreeWithBase(dir: string, ref = "HEAD", base = "main", opts: ReadTreeOptions = {}): Promise<Tree> {
+  const branch = await readTree(dir, ref, opts);
+  const under = await readTree(dir, base, { prefixes: ["sdlc/changes"] }).catch(() => null);
+  if (!under) return branch;
+  const files = new Map<string, TreeFile>(branch.files);
+  for (const [path, file] of under.files) {
+    const m = /^sdlc\/changes\/([^/]+)\//.exec(path);
+    if (!m) continue;
+    const ledger = logPath(m[1] ?? "");
+    if (path === ledger) {
+      const merged = sortEvents(dedupeEvents([...parseLedger(files.get(path)?.content ?? "", path), ...parseLedger(file.content, path)]));
+      const content = stringifyJsonl(merged);
+      files.set(path, { content, sha: files.get(path)?.content === content ? (files.get(path)?.sha ?? file.sha) : file.sha });
+      continue;
+    }
+    if (!files.has(path)) files.set(path, file);
+  }
+  return { ref: branch.ref, files };
+}
