@@ -1,6 +1,6 @@
 import { CodeHostError, git, mergeIfUnmerged } from "@sdlc/adapter-git";
 import { codeHostFor } from "./engine/codehost.js";
-import { acceptViaPr, artifactPrFor, sendBackViaPr } from "./github/artifacts.js";
+import { acceptViaPr, artifactPrFor, commitOnBranch, sendBackViaPr } from "./github/artifacts.js";
 import type { GitHubCodeHost } from "@sdlc/adapter-github";
 import {
   accept,
@@ -28,6 +28,7 @@ import {
   type ReproInput,
   type Repo,
   type TaskInput,
+  validateWritePlan,
 } from "@sdlc/core";
 import { parseFindingsImport, type GateNumber } from "@sdlc/schemas";
 import { ActionError, type StateStore } from "./store.js";
@@ -123,6 +124,21 @@ export async function loopChange(store: StateStore, id: string): Promise<ActionR
 }
 
 export async function newChange(store: StateStore, input: CreateChangeInput): Promise<ActionResult> {
+  await store.refresh();
+  const repo0 = store.currentRepo;
+  if (repo0?.config.codeHost === "github") {
+    // GitHub mode: the intent is an artifact PR like spec, plan and incident — the change is born on sdlc/<CHG>/intent,
+    // the engine (or sdlc sync) opens the PR, and merging it is the gate 1 decision that puts the change on the default branch
+    const res = createChange(repo0, input, store.context());
+    if (!res.ok) throw new ActionError(409, res.diagnostics[0]?.message ?? "change refused", res.diagnostics);
+    const report = validateWritePlan(repo0, res.plan);
+    if (report.blocking) throw new ActionError(409, "write-plan rejected by validation", report.diagnostics.filter((d) => d.blocking));
+    const id = res.plan.changeId ?? "change";
+    const branch = `sdlc/${id}/intent`;
+    const commit = await commitOnBranch(store.root, branch, res.plan, store.who);
+    const snapshot = await store.refresh(true);
+    return { commit, snapshot, toast: `${id} created on ${branch} — its PR is the Plan gate`, changeId: id };
+  }
   let created: string | null = null;
   const r = await store.act((repo, ctx) => {
     const res = createChange(repo, input, ctx);
