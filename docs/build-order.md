@@ -40,3 +40,15 @@ Exit: a change travels 1→6→1 against a GitHub repository with branch protect
 - [x] Phase 2 exit run on 2026-09-04 against `danielyayla/sdlc-website` (main protected, PRs #1–#7): spec, plan, incident and the code went through PRs merged by the human (gates 2, 3, 5, 6 recorded as `pr.merge`); `sdlc/evidence` and `sdlc/evals` statuses on the code PR head; `sdlc audit CHG-0001` clean, `sdlc validate` ok. Known gaps left from the run: the intent (gate 1) is still a console decision on the default branch; the review's findings did not reach PR #5 (fixed after the fact, rows `2.3 → e2e`); metrics ignore archived cycles (`2.10 → e2e`). Six fixes landed from the run — see the `→ e2e` rows in decisions.md.
 
 ## Phase 3 — Hosted/team, Maintain automation, deployment tools, other adapters (items 20–23)
+Carry-overs from the Phase 2 exit run first (`→ e2e` rows in decisions.md), then blueprint items 20–23. Order within the phase is a starting point; re-order as the first hosted user shows up.
+
+- [ ] 3.0 Phase 2 carry-overs: `sdlc init --sdlc-bin <command>` so generated workflows run a team's own install instead of `npx sdlc` (`2.5 → e2e`); `factsFromRepo` / `computeMetrics` read archived cycles under `cycles/<n>/` so a closed loop keeps its runs, merges and incident in the window (`2.10 → e2e`).
+- [ ] 3.1 Hosted identity: OIDC login on `sdlc serve`, role from the identity provider's claims, role switcher restricted to what the identity allows; local identity + `defaultRole` stays the no-provider path.
+- [ ] 3.2 Hosted mode server: server-side cache/queue shared across operators (the SQLite cache stays disposable), GitHub App with "on behalf of" authorship and real check runs replacing commit statuses (`2.1`), multi-repo / monorepo product switching.
+- [ ] 3.3 OTel traces for sessions, jobs and runs; compliance export of the ledger and gate decisions per change.
+- [ ] 3.4 Maintain automation: detection script package writing snapshots the Bands table reads (`1.3`); `bands.yaml` tiers → headless diagnose/propose jobs; runbook allowlist for what a job may run.
+- [ ] 3.5 Maintain intake: Claude Security webhook ingestion into the Security view's findings; Claude Tag channel triage into the Loop's queue.
+- [ ] 3.6 Deployment: MCP tools per environment, `deploy.yaml` records, production-gate hook wiring; rollback rehearsal as a check on the production gate.
+- [ ] 3.7 GitLab adapter behind the same `CodeHost` contract (merge requests as gates, pipelines as checks).
+- [ ] 3.8 Non-Claude harness adapter with degraded-guarantee display (which hooks and tools the harness cannot honour, shown on the session); optional desktop wrapper. The board stays drag-free (spec forbids drag-and-drop).
+Exit: a team runs the console hosted against one protected repository with their own identities; a `bands.yaml` breach raises a triage item and a diagnose job without a human starting it; a change deploys through the production gate with a `deploy.yaml` record and a rehearsed rollback.
