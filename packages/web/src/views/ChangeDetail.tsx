@@ -26,6 +26,8 @@ export interface ChangeDetailProps {
   onLinkRecord?: (system: string, id: string, url?: string) => void;
   onRetryWriteback?: (artifact: number) => void;
   prompt?: (text: string) => string | null;
+  /** Compliance export (3.3): the API URL the Export link downloads; absent when there is no server. */
+  exportHref?: string;
 }
 
 export interface ReproDraftView {
@@ -77,6 +79,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
         <span className={`chip${view.risk === "high" ? " amber" : ""}`}>{riskLabel(view.risk)}</span>
         {view.cycle > 1 ? <span className="chip">cycle {view.cycle}</span> : null}
         {!view.valid ? <span className="chip red">validation error</span> : null}
+        {p.exportHref ? <a className="chip" href={p.exportHref} download={`${view.id}-export.json`} title="compliance export: change, every cycle, the ledger verbatim, gate decisions with their commits, PRs, runs and findings — JSON with a sha256 content hash">Export</a> : null}
       </div>
 
       <div className="stepper" role="tablist" aria-label="artifacts">

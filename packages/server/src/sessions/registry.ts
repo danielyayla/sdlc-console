@@ -45,6 +45,9 @@ export interface StoredSession extends SessionRecord {
   numTurns: number | null;
   lastLine: string | null;
   error: string | null;
+  /** The OTel trace of this session's span (3.3); null without an exporter. Resumes join the same trace. */
+  traceId?: string | null;
+  spanId?: string | null;
 }
 
 interface Row {

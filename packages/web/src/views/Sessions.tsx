@@ -1,6 +1,8 @@
 import type { ChangeView } from "@sdlc/core";
 import type { Snapshot } from "@sdlc/server";
 import { useState } from "react";
+import type { JobRow } from "../api";
+import { relativeTime, traceUrl } from "../lib/format";
 
 interface RoundCard {
   n: number;
@@ -26,6 +28,7 @@ interface SessionCard {
   autoRationale?: { terms: string[] };
   command?: string;
   error?: string | null;
+  traceId?: string | null;
 }
 
 export interface SessionsProps {
@@ -34,6 +37,11 @@ export interface SessionsProps {
   onAction: (id: string, action: "stop" | "takeover" | "raise-cap" | "message" | "downgrade", body?: Record<string, unknown>) => void;
   onSelect: (id: string) => void;
   prompt?: (text: string) => string | null;
+  /** The product's job queue (jobs, per-change runs, suite runs); the server's `/api/jobs`. */
+  jobs?: JobRow[];
+  /** `OTEL_TRACE_URL_TEMPLATE` from the server (3.3): with it, rows carrying a trace id link out. */
+  traceUrlTemplate?: string | null;
+  now?: Date;
 }
 
 const MODE_CLASS: Record<string, string> = { AUTO: "green", PLAN: "amber", HEADLESS: "gray", SUPERVISED: "" };
@@ -50,7 +58,9 @@ function mockUrl(change: ChangeView | undefined): string | null {
   return `/api/changes/${change?.id}/design/${mock.path.split("/").pop() ?? ""}`;
 }
 
-export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) => window.prompt(t) }: SessionsProps) {
+const JOB_CLASS: Record<string, string> = { done: "green", failed: "red", running: "amber", skipped: "gray", queued: "gray" };
+
+export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) => window.prompt(t), jobs = [], traceUrlTemplate = null, now = new Date() }: SessionsProps) {
   const sessions = snapshot.sessions as unknown as SessionCard[];
   const cap = snapshot.capacity;
   const byId = new Map(snapshot.changes.map((c) => [c.id, c]));
@@ -100,6 +110,7 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) =
           const lostEligibility = s.mode === "AUTO" && live && change && !change.autoEligible.value ? change.autoEligible.terms.filter((t) => !t.ok).map((t) => t.name).join(", ") : null;
           const showing = open?.session === s.id ? shots.find((r) => r.n === open.n) : undefined;
           const mock = mockUrl(change);
+          const trace = traceUrl(traceUrlTemplate, s.traceId);
           return (
             <article className="scard" key={s.id}>
               <div className="card-head">
@@ -108,6 +119,7 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) =
                 <span className={`chip ${MODE_CLASS[s.mode] ?? ""}`}>{s.mode === "PLAN" ? "PLAN MODE" : s.mode}</span>
                 <button className="chip agent linkchip" onClick={() => onSelect(s.changeId)}>{s.changeId}</button>
                 {s.taskId ? <span className="chip">{s.taskId}</span> : null}
+                {trace ? <a className="chip" href={trace} target="_blank" rel="noreferrer" title={`OTel trace ${s.traceId ?? ""}`}>trace</a> : null}
               </div>
               <div className="card-status">{s.status}{s.loop ? ` · loop ${s.loop.state}` : ""}{lastRound ? ` · round ${lastRound.n}: ${lastRound.results.map((r) => `${r.name} ${r.pass ? "✓" : "✗"}`).join(" ")}` : ""}</div>
               {s.target ? <div className="card-status">target: {s.target}</div> : null}
@@ -164,6 +176,31 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) =
           );
         })}
       </div>
+      {jobs.length > 0 ? (
+        <>
+          <h2 className="eyebrow">Jobs · {jobs.length}</h2>
+          <table className="bands" aria-label="jobs">
+            <thead>
+              <tr><th>Job</th><th>Change</th><th>State</th><th>Note</th><th>Updated</th><th>Trace</th></tr>
+            </thead>
+            <tbody>
+              {jobs.slice(0, 40).map((j) => {
+                const trace = traceUrl(traceUrlTemplate, j.traceId);
+                return (
+                  <tr key={j.key}>
+                    <td className="mono" title={j.key}>{j.kind}</td>
+                    <td>{j.changeId ? <button className="chip agent linkchip" onClick={() => onSelect(j.changeId)}>{j.changeId}</button> : <span className="muted">—</span>}{j.sessionId ? <span className="mono muted"> {j.sessionId}</span> : null}</td>
+                    <td><span className={`chip ${JOB_CLASS[j.state] ?? ""}`}>{j.state}</span></td>
+                    <td className="muted">{j.error ?? j.note ?? ""}</td>
+                    <td className="muted">{relativeTime(j.updatedAt, now)}</td>
+                    <td>{trace ? <a className="chip" href={trace} target="_blank" rel="noreferrer" title={`OTel trace ${j.traceId ?? ""}`}>trace</a> : <span className="muted">—</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </>
+      ) : null}
       <div className="footer">Sessions run Claude Code headless in a worktree per task; repo configuration (CLAUDE.md, .claude/**) steers them and is never edited here. Every session is logged per engineer. Autonomy is derived: AUTO can be taken away, never granted.</div>
     </div>
   );

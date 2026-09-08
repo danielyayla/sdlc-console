@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { deploy } from "./deploy.js";
 import { evalCase, evalRun, perChangeRun, reproProof, round } from "./evals.js";
 import { event } from "./event.js";
+import { changeExport } from "./export.js";
 import { finding } from "./finding.js";
 import {
   incidentFrontMatter,
@@ -38,6 +39,7 @@ export const registry = {
   "plan-frontmatter": planFrontMatter,
   "incident-frontmatter": incidentFrontMatter,
   bands,
+  "change-export": changeExport,
 } as const;
 
 export type SchemaName = keyof typeof registry;

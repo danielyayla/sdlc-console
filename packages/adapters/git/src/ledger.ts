@@ -1,5 +1,6 @@
 import { dedupeEvents, logPath, sortEvents } from "@sdlc/core";
 import { parseJsonl, type Diagnostic, type Event } from "@sdlc/schemas";
+import { commitTrailers, fileHistory } from "./commit.js";
 import { gitRaw, localBranches } from "./git.js";
 
 export interface LedgerUnion {
@@ -48,6 +49,21 @@ export async function changeIdsByRef(dir: string, refs?: readonly string[]): Pro
   for (const ref of branches) {
     const r = await gitRaw(dir, ["ls-tree", "--name-only", `${ref}:sdlc/changes`]);
     out[ref] = r.code === 0 ? r.stdout.split("\n").map((s) => s.trim()).filter((s) => /^CHG-\d{4}$/.test(s)) : [];
+  }
+  return out;
+}
+
+/**
+ * The commit carrying each ledger event's `SDLC-Event` trailer, by event id,
+ * from the history of the change's `log.jsonl` at `ref` (the same chain
+ * `sdlc audit` verifies). Events whose commit is not in this clone are absent.
+ */
+export async function ledgerCommits(dir: string, changeId: string, ref = "HEAD"): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  for (const c of await fileHistory(dir, logPath(changeId), ref)) {
+    const t = await commitTrailers(dir, c.sha);
+    const evId = t["SDLC-Event"];
+    if (evId && !(evId in out)) out[evId] = c.sha;
   }
   return out;
 }
