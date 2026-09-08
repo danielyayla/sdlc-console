@@ -53,6 +53,8 @@ a { color: inherit; }
 .badge { font-family: var(--font-mono); font-size: 10px; background: var(--amber); color: var(--accent-text); border-radius: 999px; padding: 0 6px; line-height: 16px; }
 .spacer { flex: 1; }
 .switcher { display: flex; align-items: center; gap: 8px; }
+.product-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
+.product-switch select { font: inherit; font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); background: var(--bg-hover); border: 1px solid var(--border-default); border-radius: var(--radius-control); padding: 2px 6px; }
 .whoami { display: flex; align-items: center; gap: 8px; margin-right: 16px; }
 .whoami .who-name { font-weight: 600; }
 .whoami .signout { color: var(--muted, #667); font-size: 12px; text-decoration: underline; }

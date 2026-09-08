@@ -1,6 +1,6 @@
 import type { Snapshot } from "@sdlc/server";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { act, subscribe, type Artifact } from "./api";
+import { act, fetchProducts, subscribe, type Artifact, type ProductInfo } from "./api";
 import type { Role } from "./lib/format";
 import { initialState, reduce, type UIState } from "./state";
 import { ChangeDetail, type ReproDraftView } from "./views/ChangeDetail";
@@ -23,6 +23,8 @@ export interface AppProps {
   live?: boolean;
   /** Injected prompt for tests; defaults to window.prompt. */
   promptImpl?: (text: string) => string | null;
+  /** Injected product list for server-side rendering; the browser fetches `/api/products`. */
+  products?: ProductInfo[];
 }
 
 /** The repro test a build session reported for the change and the engineer has not judged (from the session registry, never stored). */
@@ -35,15 +37,25 @@ function reproDraftOf(snapshot: Snapshot, changeId: string): ReproDraftView | nu
   return null;
 }
 
-export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true, promptImpl }: AppProps) {
+export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true, promptImpl, products: injectedProducts = [] }: AppProps) {
   const [state, dispatch] = useReducer(reduce, initial ?? initialState());
   const [snapshot, setSnapshot] = useState<Snapshot | null>(injected);
   const [connected, setConnected] = useState(injected !== null);
+  const [products, setProducts] = useState<ProductInfo[]>(injectedProducts);
   const seeded = useRef(initial !== undefined);
 
   useEffect(() => {
     if (!live) return;
-    return subscribe(setSnapshot, setConnected);
+    // one socket per product in view: switching products resubscribes and the first message replaces the snapshot
+    setSnapshot(null);
+    return subscribe(setSnapshot, setConnected, state.product);
+  }, [live, state.product]);
+
+  useEffect(() => {
+    if (!live) return;
+    fetchProducts()
+      .then((r) => setProducts(r.products))
+      .catch(() => setProducts([]));
   }, [live]);
 
   useEffect(() => {
@@ -64,7 +76,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
   }, [state.toast]);
 
   const run = async (path: string, body: unknown) => {
-    const r = await act(path, body);
+    const r = await act(path, body, state.product);
     if ("ok" in r) {
       dispatch({ type: "art", index: null });
       dispatch({ type: "toast", text: r.toast });
@@ -76,7 +88,9 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
 
   const changes = snapshot?.changes ?? [];
   const selected = state.sel ? changes.find((c) => c.id === state.sel) ?? null : null;
-  const repoLabel = snapshot?.config.present ? (snapshot.config as { products?: { name: string }[] }).products?.[0]?.name ?? "invoicing" : "repo";
+  const current = products.find((p) => (state.product ? p.name === state.product : p.primary)) ?? null;
+  const repoLabel = current?.name ?? state.product ?? (snapshot?.config.present ? "repo" : "repo");
+  const artifactLoader = loadArtifact ?? ((id: string, index: number) => import("./api").then((m) => m.fetchArtifact(id, index, state.product)));
 
   let body;
   if (!snapshot) body = <div className="connecting">connecting to sdlc serve…</div>;
@@ -87,7 +101,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         role={state.role}
         art={state.art}
         now={now}
-        {...(loadArtifact ? { loadArtifact } : {})}
+        loadArtifact={artifactLoader}
         onBack={() => dispatch({ type: "back" })}
         onSelectArt={(i) => dispatch({ type: "art", index: i })}
         onAccept={(gate) => void run(`/changes/${selected.id}/accept`, { gate })}
@@ -142,7 +156,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
 
   return (
     <div className="app">
-      <TopBar state={state} snapshot={snapshot} repoLabel={repoLabel} onTab={(view) => dispatch({ type: "tab", view })} onRole={(role: Role) => dispatch({ type: "role", role })} />
+      <TopBar state={state} snapshot={snapshot} repoLabel={repoLabel} products={products} onTab={(view) => dispatch({ type: "tab", view })} onRole={(role: Role) => dispatch({ type: "role", role })} onProduct={(name) => dispatch({ type: "product", name })} />
       <main className="main">
         {!connected && snapshot ? <div className="banner">reconnecting to sdlc serve…</div> : null}
         {blocking ? <div className="banner red">validation is blocking — run `sdlc validate` for the list</div> : warnings > 0 ? <div className="banner">{warnings} advisory diagnostic{warnings === 1 ? "" : "s"} — see Config</div> : null}

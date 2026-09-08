@@ -74,7 +74,7 @@ export async function sessionDowngrade(ctx: CliContext, id: string, reason?: str
 }
 
 export async function sessionCommand(io: Io, sub: string | undefined, rest: string[], values: Record<string, string | boolean | undefined>, json: boolean): Promise<{ value: unknown; text: string }> {
-  const ctx = await repoContext(io, json);
+  const ctx = await repoContext(io, json, typeof values["product"] === "string" ? values["product"] : undefined);
   if (sub === "start") {
     const id = rest[0];
     if (!id) throw new CliError("usage: sdlc session start <CHG> [--kind intent|design|plan|build|review|diagnose|propose] [--task <id>] [--target <text>] [--mode AUTO|PLAN|SUPERVISED|HEADLESS] [--reason <repeat reason>] [--detach]");

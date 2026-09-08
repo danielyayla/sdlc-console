@@ -6,6 +6,8 @@ export const PACKAGE_NAME = "@sdlc/server" as const;
 
 export * from "./snapshot.js";
 export * from "./store.js";
+export * from "./cache.js";
+export * from "./products.js";
 export * from "./watcher.js";
 export * from "./actions.js";
 export * from "./proposals.js";

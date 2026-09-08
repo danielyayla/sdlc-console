@@ -149,9 +149,25 @@ function serveStatic(webDir: string, url: URL, res: ServerResponse): boolean {
   return true;
 }
 
+/** What the app holds per product (3.2): its store and, when the server runs them, its registry, engine, queue, facts cache and delivery log. */
+export interface ProductApp {
+  name: string;
+  root: string;
+  home: string;
+  prefix: string;
+  store: StateStore;
+  registry?: SessionRegistry;
+  engine?: Engine;
+  jobs?: JobStore;
+  facts?: FactsCache;
+  deliveries?: DeliveryLog;
+}
+
 export interface AppOptions {
   /** Directory of the built web app; when absent only /api is served. */
   webDir?: string;
+  /** Every product served (the primary first); without it the base store is the only product. Requests pick one with `?product=` or `X-SDLC-Product`. */
+  products?: ProductApp[];
   registry?: SessionRegistry;
   sdlcBin?: string;
   claudeBin?: string;
@@ -178,10 +194,25 @@ export interface HttpApp {
 /** HTTP JSON + WebSocket snapshot transport (blueprint §9.2). */
 export function createApp(baseStore: StateStore, options: AppOptions = {}): HttpApp {
   const auth = options.auth ?? null;
+  const products: ProductApp[] = options.products ?? [
+    { name: baseStore.product ?? "default", root: baseStore.root, home: baseStore.root, prefix: "", store: baseStore, ...(options.registry ? { registry: options.registry } : {}), ...(options.engine ? { engine: options.engine } : {}), ...(options.jobs ? { jobs: options.jobs } : {}), ...(options.facts ? { facts: options.facts } : {}), ...(options.deliveries ? { deliveries: options.deliveries } : {}) },
+  ];
+  const primary = products[0] as ProductApp;
+  /** The product a request addresses: `?product=` or the `X-SDLC-Product` header; the primary without either. */
+  const productFor = (url: URL, req: IncomingMessage): ProductApp => {
+    const name = url.searchParams.get("product") ?? header(req, "x-sdlc-product");
+    if (!name) return primary;
+    const hit = products.find((p) => p.name === name);
+    if (!hit) throw new ActionError(404, `no product named ${name}; serving ${products.map((p) => p.name).join(", ")}`);
+    return hit;
+  };
+  /** The per-product handles laid over the shared options, so the routes below read one object. */
+  const scoped = (p: ProductApp): AppOptions => ({ ...options, ...(p.registry ? { registry: p.registry } : {}), ...(p.engine ? { engine: p.engine } : {}), ...(p.jobs ? { jobs: p.jobs } : {}), ...(p.facts ? { facts: p.facts } : {}), ...(p.deliveries ? { deliveries: p.deliveries } : {}) });
+  const productJson = (p: ProductApp) => ({ name: p.name, root: p.root, home: p.home, prefix: p.prefix, primary: p === primary, codeHost: p.store.currentRepo?.config.codeHost ?? "local", defaultBranch: p.store.currentRepo?.config.defaultBranch ?? null, engine: Boolean(p.engine), revision: p.store.current?.revision ?? 0 });
   /** Paths any caller may reach without a session: the webhook receiver has its own signature, health is for probes. */
   const open = (parts: string[]) => parts[1] === "webhooks" || parts[1] === "health";
   /** A viewer's own snapshot: the shared one with their identity (and so their held roles) in it. */
-  const forViewer = (snap: Snapshot, store: StateStore): Snapshot => (store === baseStore ? snap : { ...snap, identity: store.identity() });
+  const forViewer = (snap: Snapshot, store: StateStore, base: StateStore): Snapshot => (store === base ? snap : { ...snap, identity: store.identity() });
   const server = createServer((req, res) => {
     void route(req, res).catch((e: unknown) => {
       if (e instanceof ActionError) {
@@ -193,9 +224,17 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
   });
 
   const wss = new WebSocketServer({ noServer: true });
-  const clients = new Map<WebSocket, StateStore>();
+  const clients = new Map<WebSocket, { store: StateStore; product: ProductApp }>();
   server.on("upgrade", (req, socket, head) => {
-    if ((req.url ?? "").split("?")[0] !== "/api/events") {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    if (url.pathname !== "/api/events") {
+      socket.destroy();
+      return;
+    }
+    let product: ProductApp;
+    try {
+      product = productFor(url, req);
+    } catch {
       socket.destroy();
       return;
     }
@@ -206,17 +245,19 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         ws.close(4401, "sign in");
         return;
       }
-      const store = who ? baseStore.as(who) : baseStore;
-      clients.set(ws, store);
+      const store = who ? product.store.as(who) : product.store;
+      clients.set(ws, { store, product });
       ws.on("close", () => clients.delete(ws));
-      const snap = baseStore.current;
-      if (snap) ws.send(JSON.stringify({ type: "snapshot", snapshot: forViewer(snap, store) }));
+      const snap = product.store.current;
+      if (snap) ws.send(JSON.stringify({ type: "snapshot", product: product.name, snapshot: forViewer(snap, store, product.store) }));
     });
   });
-  const unsubscribe = baseStore.subscribe((snapshot) => {
-    const shared = JSON.stringify({ type: "snapshot", snapshot });
-    for (const [ws, store] of clients) if (ws.readyState === ws.OPEN) ws.send(store === baseStore ? shared : JSON.stringify({ type: "snapshot", snapshot: forViewer(snapshot, store) }));
-  });
+  const unsubscribes = products.map((product) =>
+    product.store.subscribe((snapshot) => {
+      const shared = JSON.stringify({ type: "snapshot", product: product.name, snapshot });
+      for (const [ws, c] of clients) if (c.product === product && ws.readyState === ws.OPEN) ws.send(c.store === product.store ? shared : JSON.stringify({ type: "snapshot", product: product.name, snapshot: forViewer(snapshot, c.store, product.store) }));
+    }),
+  );
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -227,28 +268,34 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
       if (method === "GET" && options.webDir && serveStatic(options.webDir, url, res)) return;
       throw new ActionError(404, "not found");
     }
-    // hosted mode: who is asking decides what the snapshot says and who signs the commit
-    let store = baseStore;
+    // multi-product (3.2): which product the request addresses; hosted mode: who is asking decides what the snapshot says and who signs the commit
+    const product = productFor(url, req);
+    const o = scoped(product);
+    let store = product.store;
     if (auth && !open(parts)) {
       const who = auth.identityOf(req);
       if (!who) {
         json(res, 401, { error: "sign in to use the console", login: "/auth/login", signedIn: parseCookies(req.headers.cookie)[SESSION_COOKIE] !== undefined ? "expired" : false });
         return;
       }
-      store = baseStore.as(who);
+      store = product.store.as(who);
     }
 
+    if (method === "GET" && parts[1] === "products" && parts.length === 2) {
+      json(res, 200, { current: product.name, products: products.map(productJson) });
+      return;
+    }
     if (method === "GET" && parts[1] === "me" && parts.length === 2) {
       await store.refresh();
-      json(res, 200, { identity: store.identity(), auth: auth ? { provider: auth.provider.provider, issuer: auth.provider.issuer, logout: "/auth/logout" } : { provider: "local" } });
+      json(res, 200, { identity: store.identity(), product: product.name, auth: auth ? { provider: auth.provider.provider, issuer: auth.provider.issuer, logout: "/auth/logout" } : { provider: "local" } });
       return;
     }
     if (method === "GET" && parts[1] === "state" && parts.length === 2) {
-      json(res, 200, forViewer(await store.refresh(), store));
+      json(res, 200, forViewer(await store.refresh(), store, product.store));
       return;
     }
     if (method === "GET" && parts[1] === "jobs") {
-      json(res, 200, options.jobs?.list() ?? []);
+      json(res, 200, o.jobs?.list() ?? []);
       return;
     }
     if (parts[1] === "metrics") {
@@ -258,13 +305,13 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         await store.refresh();
         const repo = store.currentRepo;
         if (!repo) throw new ActionError(502, "repository not loaded", [], true);
-        const collected = collectSources(repo, options.facts ?? null);
+        const collected = collectSources(repo, o.facts ?? null);
         const now = store.current?.generatedAt ?? new Date().toISOString();
         json(res, 200, { window: `${days}d`, generatedAt: now, sources: collected.status, metrics: computeMetrics(repo, deriveAll(repo).changes, { now, windowDays: days, sources: collected.sources }) });
         return;
       }
       if (method === "POST" && parts[2] === "refresh" && parts.length === 3) {
-        const r = options.engine ? await options.engine.refreshMetricFacts() : null;
+        const r = o.engine ? await o.engine.refreshMetricFacts() : null;
         if (!r) throw new ActionError(409, "metrics facts come from the git mirror here: refresh needs config.codeHost github, GITHUB_TOKEN and sdlc serve with the engine");
         json(res, 200, { ...r, snapshot: store.current });
         return;
@@ -325,17 +372,17 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
       const action = parts.slice(3).join("/");
       switch (action) {
         case "run": {
-          if (!options.engine) throw new ActionError(409, "per-change runs need the engine (start the server with sdlcBin)");
-          const job = await options.engine.runForChange(id);
+          if (!o.engine) throw new ActionError(409, "per-change runs need the engine (start the server with sdlcBin)");
+          const job = await o.engine.runForChange(id);
           if (!job) throw new ActionError(409, `no build session or task worktree for ${id}`);
           json(res, 200, { ok: true, job, toast: job.state === "failed" ? `run failed: ${job.error ?? ""}` : `${id}: ${job.note ?? job.state}`, revision: store.current?.revision ?? 0 });
           return;
         }
         case "accept":
-          reply(res, await acceptGate(store, id, gateOf(body), options.env ?? process.env));
+          reply(res, await acceptGate(store, id, gateOf(body), o.env ?? process.env));
           return;
         case "send-back":
-          reply(res, await sendBackGate(store, id, gateOf(body), str(body, "feedback"), options.env ?? process.env));
+          reply(res, await sendBackGate(store, id, gateOf(body), str(body, "feedback"), o.env ?? process.env));
           return;
         case "loop":
           reply(res, await loopChange(store, id));
@@ -348,7 +395,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           return;
         case "repro/confirm": {
           // the session's draft is the default; explicit fields (CLI, a manual repro) override it — the commit is verified by sha either way
-          const owner = options.registry ? reproDraftFor(options.registry, id) : null;
+          const owner = o.registry ? reproDraftFor(o.registry, id) : null;
           const input = { testPath: str(body, "testPath", false) || owner?.draft.testPath || "", failureReason: str(body, "failureReason", false) || owner?.draft.failureReason || "", sha: str(body, "sha", false) || owner?.draft.sha || "", output: str(body, "output", false) || owner?.draft.output || "" };
           if (!input.testPath || !input.failureReason || !input.sha) throw new ActionError(400, "repro confirm needs testPath, failureReason and sha — or a session that reported the repro test");
           await verifyReproCommit(store.root, input.sha, input.testPath);
@@ -356,7 +403,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           let resumed: string | null = null;
           if (owner) {
             clearRepro(owner);
-            const s = await resumeAfterRepro(owner, `The engineer confirmed the repro test ${input.testPath} at ${input.sha.slice(0, 7)}: it fails for the right reason. The test freeze is active — fix the code without editing files under the test globs (propose test changes with mcp__sdlc__request_input), run the verification commands, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when the repro test and everything else are green.`, launchDeps(options, store, options.registry ?? null));
+            const s = await resumeAfterRepro(owner, `The engineer confirmed the repro test ${input.testPath} at ${input.sha.slice(0, 7)}: it fails for the right reason. The test freeze is active — fix the code without editing files under the test globs (propose test changes with mcp__sdlc__request_input), run the verification commands, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when the repro test and everything else are green.`, launchDeps(options, store, o.registry ?? null));
             resumed = s?.id ?? null;
             store.rebuild();
           }
@@ -364,7 +411,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           return;
         }
         case "repro/reject": {
-          const owner = options.registry ? reproDraftFor(options.registry, id) : null;
+          const owner = o.registry ? reproDraftFor(o.registry, id) : null;
           const testPath = str(body, "testPath", false) || owner?.draft.testPath || "";
           if (!testPath) throw new ActionError(400, "repro reject needs testPath — or a session that reported the repro test");
           const reason = str(body, "reason");
@@ -372,7 +419,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           let resumed: string | null = null;
           if (owner) {
             markReproRejected(owner, reason, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
-            const s = await resumeAfterRepro(owner, `The engineer sent the repro test ${testPath} back — wrong failure: ${reason}. Rewrite the test so it fails for the right reason, run it, and call mcp__sdlc__report_repro again with the verbatim output. Do not fix the code yet.`, launchDeps(options, store, options.registry ?? null));
+            const s = await resumeAfterRepro(owner, `The engineer sent the repro test ${testPath} back — wrong failure: ${reason}. Rewrite the test so it fails for the right reason, run it, and call mcp__sdlc__report_repro again with the verbatim output. Do not fix the code yet.`, launchDeps(options, store, o.registry ?? null));
             resumed = s?.id ?? null;
             store.rebuild();
           }
@@ -387,13 +434,13 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           return;
         case "records/link": {
           const url = str(body, "url", false);
-          reply(res, await linkRecordAction(store, id, { system: str(body, "system"), id: str(body, "id"), ...(url ? { url } : {}) }, options.writeback ?? {}));
+          reply(res, await linkRecordAction(store, id, { system: str(body, "system"), id: str(body, "id"), ...(url ? { url } : {}) }, o.writeback ?? {}));
           return;
         }
         case "records/retry": {
           // FR-16 "write-back failed · retry": runs now; 502 retryable when the connector fails again
-          const r = await retryWritebackAction(store, id, artifactOf(body), options.writeback ?? {});
-          options.engine?.noteWriteback(r.run);
+          const r = await retryWritebackAction(store, id, artifactOf(body), o.writeback ?? {});
+          o.engine?.noteWriteback(r.run);
           reply(res, r);
           return;
         }
@@ -407,11 +454,11 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         return;
       }
       if (method === "POST" && parts[2] === "run" && parts.length === 3) {
-        if (!options.engine) throw new ActionError(409, "suite runs need the engine (start the server with sdlcBin)");
+        if (!o.engine) throw new ActionError(409, "suite runs need the engine (start the server with sdlcBin)");
         const body = await readBody(req);
         const trigger = typeof body["trigger"] === "string" ? body["trigger"] : "manual";
         if (!["manual", "schedule", "config-pr"].includes(trigger)) throw new ActionError(400, "trigger must be manual, schedule or config-pr");
-        const { job } = await options.engine.runSuite(trigger as "manual" | "schedule" | "config-pr", false);
+        const { job } = await o.engine.runSuite(trigger as "manual" | "schedule" | "config-pr", false);
         if (!job) throw new ActionError(502, "repository not loaded", [], true);
         json(res, 200, { ok: true, job, toast: job.state === "running" ? `suite run queued (${job.key.split(":").at(-1)}) — the strip updates when it commits` : `${job.key}: ${job.note ?? job.error ?? job.state}`, revision: store.current?.revision ?? 0 });
         return;
@@ -419,32 +466,32 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
       throw new ActionError(404, "not found");
     }
     if (parts[1] === "webhooks") {
-      const env = options.env ?? process.env;
+      const env = o.env ?? process.env;
       if (method === "GET" && parts.length === 2) {
-        const last = options.engine?.lastDeliveryAt ?? 0;
+        const last = o.engine?.lastDeliveryAt ?? 0;
         json(res, 200, {
           path: "/api/webhooks/github",
-          enabled: Boolean(env["GITHUB_WEBHOOK_SECRET"]) && Boolean(options.engine) && Boolean(options.deliveries),
+          enabled: Boolean(env["GITHUB_WEBHOOK_SECRET"]) && Boolean(o.engine) && Boolean(o.deliveries),
           secretSet: Boolean(env["GITHUB_WEBHOOK_SECRET"]),
-          engine: Boolean(options.engine),
+          engine: Boolean(o.engine),
           lastDeliveryAt: last > 0 ? new Date(last).toISOString() : null,
-          lastPollAt: (options.engine?.lastSyncAt ?? 0) > 0 ? new Date(options.engine?.lastSyncAt ?? 0).toISOString() : null,
-          pollIntervalMs: options.engine?.pollInterval() ?? null,
-          deliveries: options.deliveries?.recent(20) ?? [],
+          lastPollAt: (o.engine?.lastSyncAt ?? 0) > 0 ? new Date(o.engine?.lastSyncAt ?? 0).toISOString() : null,
+          pollIntervalMs: o.engine?.pollInterval() ?? null,
+          deliveries: o.deliveries?.recent(20) ?? [],
         });
         return;
       }
       if (method === "POST" && parts[2] === "github" && parts.length === 3) {
         const body = await readRaw(req, 1024 * 1024);
-        const r = await receiveWebhook({ store, engine: options.engine ?? null, deliveries: options.deliveries ?? null, env }, { headers: { event: header(req, "x-github-event"), delivery: header(req, "x-github-delivery"), signature: header(req, "x-hub-signature-256") }, body });
+        const r = await receiveWebhook({ store, engine: o.engine ?? null, deliveries: o.deliveries ?? null, env }, { headers: { event: header(req, "x-github-event"), delivery: header(req, "x-github-delivery"), signature: header(req, "x-hub-signature-256") }, body });
         json(res, r.status, r.body);
         return;
       }
       throw new ActionError(404, "not found");
     }
     if (parts[1] === "sync" && method === "POST") {
-      if (!options.engine) throw new ActionError(409, "sync needs the engine (start the server with sdlcBin)");
-      const summary = await options.engine.sync();
+      if (!o.engine) throw new ActionError(409, "sync needs the engine (start the server with sdlcBin)");
+      const summary = await o.engine.sync();
       if (!summary) throw new ActionError(409, "GitHub sync is off: config.codeHost is not github or GITHUB_TOKEN is not set");
       const toast = `sync: ${summary.opened.length} PR(s) opened · ${summary.pushed.length} PR(s) updated · ${summary.merges.filter((m) => m.recorded).length} merge(s) recorded · records ${summary.records.pushed ? `PR #${summary.records.number ?? "?"} (${summary.records.ahead} ahead)` : summary.records.error ? `failed: ${summary.records.error}` : "in sync"}${summary.errors.length > 0 ? ` · ${summary.errors.length} error(s)` : ""}`;
       json(res, 200, { ok: true, sync: summary, toast, revision: store.current?.revision ?? 0 });
@@ -452,7 +499,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
     }
     if (parts[1] === "sessions" && method === "GET" && parts[2] && parts[3] === "rounds" && parts[4] && parts[5] === "screenshot" && parts.length === 6) {
       // a round's screenshot as the session saved it (screenshotRef, relative to the worktree); nothing outside the worktree is served
-      const registry = options.registry;
+      const registry = o.registry;
       const s = registry?.get(parts[2]);
       if (!s) throw new ActionError(404, `${parts[2]} not found`);
       const round = (readRounds(s.worktreePath, s.id) as { n: number; screenshotRef?: string }[]).find((r) => r.n === Number(parts[4]));
@@ -465,13 +512,13 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
       return;
     }
     if (parts[1] === "sessions" && method === "POST") {
-      const registry = options.registry;
-      if (!registry || !options.sdlcBin) throw new ActionError(409, "sessions are unavailable: the server was started without a session registry");
+      const registry = o.registry;
+      if (!registry || !o.sdlcBin) throw new ActionError(409, "sessions are unavailable: the server was started without a session registry");
       const body = await readBody(req);
       const id = parts[2];
       if (!id) {
         const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}), ...(typeof body["reason"] === "string" && body["reason"].trim() !== "" ? { reason: body["reason"] } : {}) };
-        const r = await launchSession(input, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) });
+        const r = await launchSession(input, { root: store.root, registry, sdlcBin: o.sdlcBin, identity: store.who, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}), onExit: (s) => (o.engine ? void o.engine.onSessionExit(s) : store.rebuild()) });
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: r.session.mode === "SUPERVISED" ? `${r.session.id} prepared — run the command from the card` : `${r.session.id} started (${r.session.mode}) on ${r.session.branch}`, revision: store.current?.revision ?? 0 });
         return;
@@ -484,7 +531,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         return;
       }
       if (action === "downgrade") {
-        const r = await downgradeSession({ store, registry, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}) }, id, str(body, "reason", false) || undefined);
+        const r = await downgradeSession({ store, registry, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}) }, id, str(body, "reason", false) || undefined);
         store.rebuild();
         json(res, 200, { ok: true, commit: r.commit, changeId: r.session.changeId, session: r.session, toast: `${id} downgraded to SUPERVISED — run the command from the card`, revision: store.current?.revision ?? 0 });
         return;
@@ -502,7 +549,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         const s = registry.get(id);
         if (!s) throw new ActionError(404, `${id} not found`);
         if (s.status === "running") throw new ActionError(409, "the session is still running; guidance is delivered by resuming a finished or stalled session");
-        const r = await launchSession({ changeId: s.changeId, kind: s.kind, ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: id, guidance: str(body, "text") } }, { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) });
+        const r = await launchSession({ changeId: s.changeId, kind: s.kind, ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: id, guidance: str(body, "text") } }, { root: store.root, registry, sdlcBin: o.sdlcBin, identity: store.who, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}), onExit: (s) => (o.engine ? void o.engine.onSessionExit(s) : store.rebuild()) });
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: `guidance sent — ${id} resumed`, revision: store.current?.revision ?? 0 });
         return;
@@ -512,7 +559,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
     if (parts[1] === "proposals" && parts[2] && method === "POST") {
       const body = await readBody(req);
       if (parts[3] === "dismiss") return reply(res, await proposalDismiss(store, parts[2], str(body, "reason")));
-      if (parts[3] === "accept") return reply(res, await acceptProposalAction(store, parts[2], options.env ?? process.env));
+      if (parts[3] === "accept") return reply(res, await acceptProposalAction(store, parts[2], o.env ?? process.env));
     }
     if (parts[1] === "triage" && parts[2] && method === "POST") {
       const body = await readBody(req);
@@ -541,7 +588,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
     wss,
     close: () =>
       new Promise<void>((resolve) => {
-        unsubscribe();
+        for (const u of unsubscribes) u();
         for (const ws of clients.keys()) ws.close();
         wss.close();
         server.close(() => resolve());

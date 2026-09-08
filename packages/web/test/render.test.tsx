@@ -227,3 +227,31 @@ describe("Records mode (2.9, FR-16, spec 5A.6)", () => {
     expect(intent).toContain("pending review · authoritative");
   });
 });
+
+describe("product switcher (3.2)", () => {
+  const products = (n: number) => [{ name: "invoicing", root: "/r", home: "/r", prefix: "", primary: true, codeHost: "local", defaultBranch: "main", engine: false }, { name: "billing", root: "/r", home: "/r/apps/billing", prefix: "apps/billing/", primary: false, codeHost: "local", defaultBranch: "main", engine: false }].slice(0, n);
+  const renderWith = (n: number, state = initialState("po")) => renderToString(<App snapshot={snapshot} initial={state} now={now} live={false} products={products(n)} />).replace(/<!-- -->/g, "");
+  it("shows a select in the top bar only when the server holds more than one product; a single product keeps the repo label", () => {
+    const two = renderWith(2);
+    expect(two).toContain('aria-label="product"');
+    expect(two).toContain('<option value="invoicing" title="/r" selected="">invoicing</option>');
+    expect(two).toContain('<option value="billing" title="/r/apps/billing">billing</option>');
+    expect(two).not.toContain("/ invoicing / SDLC console");
+    const one = renderWith(1);
+    expect(one).not.toContain('aria-label="product"');
+    expect(one).toContain("/ invoicing / SDLC console");
+    const none = render();
+    expect(none).not.toContain('aria-label="product"');
+    expect(none).toContain("/ repo / SDLC console");
+  });
+  it("the selected product is the one in UIState; switching keeps the tab, drops the selection and leaves the detail view", async () => {
+    const { reduce } = await import("../src/state");
+    const start = { ...initialState("eng"), view: "detail" as const, sel: "CHG-0022", art: 1 };
+    const switched = reduce(start, { type: "product", name: "billing" });
+    expect(switched).toMatchObject({ product: "billing", view: "board", sel: null, art: null, role: "eng" });
+    expect(reduce({ ...start, view: "gates" }, { type: "product", name: "billing" }).view).toBe("gates");
+    expect(reduce(switched, { type: "product", name: "billing" })).toBe(switched);
+    expect(renderWith(2, switched)).toContain('<option value="billing" title="/r/apps/billing" selected="">');
+    expect(renderWith(2, switched)).not.toContain('<option value="invoicing" title="/r" selected="">');
+  });
+});

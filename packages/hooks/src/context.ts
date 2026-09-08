@@ -1,4 +1,4 @@
-import { currentBranch, isRepo, readTree, repoRoot } from "@sdlc/adapter-git";
+import { currentBranch, homeFor, isRepo, readTree } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo, type ChangeFiles, type ChangeView, type Repo } from "@sdlc/core";
 import type { HookInput } from "./input.js";
 
@@ -22,7 +22,8 @@ export function changeIdFrom(branch: string, env: Record<string, string | undefi
 /** Resolve the worktree, its change and the derived view; null when the hook runs outside a change context. */
 export async function hookContext(input: HookInput, env: Record<string, string | undefined>): Promise<HookContext | null> {
   if (!(await isRepo(input.cwd))) return null;
-  const root = await repoRoot(input.cwd);
+  // the SDLC home (a monorepo product's directory when the session was launched for one, 3.2)
+  const root = (await homeFor(input.cwd, env)).home;
   const branch = await currentBranch(root);
   const changeId = changeIdFrom(branch, env);
   if (!changeId) return null;

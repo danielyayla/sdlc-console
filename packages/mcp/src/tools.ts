@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { blobSha, commitWritePlan, currentBranch, defaultBranch, git, isRepo, newUlid, readTree, readTreeWithBase, repoRoot } from "@sdlc/adapter-git";
+import { blobSha, commitWritePlan, currentBranch, defaultBranch, git, homeFor, isRepo, newUlid, readTree, readTreeWithBase } from "@sdlc/adapter-git";
 import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, normalizeReason, proposalForReason, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
 import { appendHookEvent } from "@sdlc/hooks";
 import { changeId as changeIdSchema, compileGlobs, parseArtifact, parsePlan, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
@@ -52,7 +52,8 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
 
   async function load(): Promise<Loaded> {
     if (!(await isRepo(opts.cwd))) throw new Refusal(`${opts.cwd} is not a git repository`);
-    const root = await repoRoot(opts.cwd);
+    // the SDLC home: the worktree root, or the product's directory in a monorepo (`SDLC_HOME` from the launcher, 3.2)
+    const root = (await homeFor(opts.cwd, env)).home;
     const branch = await currentBranch(root);
     const own = loadRepo(await readTree(root, "HEAD"));
     const base = own.rawConfig?.defaultBranch ?? (await defaultBranch(root));

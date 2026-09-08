@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 export interface GitResult {
   stdout: string;
@@ -111,4 +113,47 @@ export async function branchExists(dir: string, name: string): Promise<boolean> 
 /** True when `ancestor` is reachable from `ref` (already merged). */
 export async function isAncestor(dir: string, ancestor: string, ref = "HEAD"): Promise<boolean> {
   return (await gitRaw(dir, ["merge-base", "--is-ancestor", ancestor, ref])).code === 0;
+}
+
+/** Path of `dir` inside its repository (`apps/billing/`), empty at the root. */
+export async function showPrefix(dir: string): Promise<string> {
+  return (await git(dir, ["rev-parse", "--show-prefix"])).trim();
+}
+
+export interface Home {
+  /** Repository top level. */
+  root: string;
+  /** The SDLC home: the directory holding `sdlc/` (the root, or a product's directory in a monorepo). */
+  home: string;
+  /** `home` relative to `root` with a trailing slash, empty at the root. */
+  prefix: string;
+}
+
+/**
+ * The SDLC home for a working directory (3.2, monorepo products): `SDLC_HOME`
+ * (absolute, or relative to the repository root) when set, otherwise the
+ * nearest directory from `cwd` up to the root that has `sdlc/config.yaml`,
+ * otherwise the root. A single-product repository resolves to its root.
+ */
+export async function homeFor(cwd: string, env: Record<string, string | undefined> = {}): Promise<Home> {
+  // git reports the real path of the top level; compare real paths so a symlinked temp dir (macOS /var → /private/var) still nests
+  const root = await repoRoot(cwd);
+  const explicit = env["SDLC_HOME"];
+  let home: string;
+  if (explicit && explicit.trim() !== "") {
+    home = realpathSync(resolve(root, explicit.trim()));
+  } else {
+    home = root;
+    let dir = realpathSync(resolve(cwd));
+    while (dir.startsWith(root)) {
+      if (existsSync(join(dir, "sdlc", "config.yaml"))) {
+        home = dir;
+        break;
+      }
+      if (dir === root) break;
+      dir = dirname(dir);
+    }
+  }
+  const rel = relative(root, home).split(sep).join("/");
+  return { root, home, prefix: rel === "" ? "" : `${rel}/` };
 }

@@ -76,7 +76,7 @@ export function recordStatus(ctx: CliContext, changeId: string): Promise<RecordS
 const USAGE = "usage: sdlc record link <CHG> --system <s> --id <id> [--url <u>] | sdlc record retry <CHG> <artifact> | sdlc record status <CHG>";
 
 export async function recordCommand(io: Io, sub: string | undefined, rest: string[], values: Record<string, string | boolean | undefined>, json: boolean): Promise<{ value: unknown; text: string }> {
-  const ctx = await repoContext(io, json);
+  const ctx = await repoContext(io, json, typeof values["product"] === "string" ? values["product"] : undefined);
   const changeId = rest[0];
   if (sub === "link" && changeId) {
     const system = typeof values["system"] === "string" ? values["system"] : "";

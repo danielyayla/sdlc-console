@@ -21,9 +21,9 @@ export async function fetchRemote(dir: string, remote = "origin", ref?: string):
  * under `who` joins the console's local lifecycle commits with the remote.
  * Returns the local head afterwards.
  */
-export async function mergeRemoteBranch(dir: string, branch: string, message: string, who: GitIdentity, remote = "origin"): Promise<string> {
+export async function mergeRemoteBranch(dir: string, branch: string, message: string, who: GitIdentity, remote = "origin", committer: GitIdentity = who): Promise<string> {
   await fetchRemote(dir, remote, branch);
-  const env = { GIT_AUTHOR_NAME: who.name, GIT_AUTHOR_EMAIL: who.id, GIT_COMMITTER_NAME: who.name, GIT_COMMITTER_EMAIL: who.id };
+  const env = { GIT_AUTHOR_NAME: who.name, GIT_AUTHOR_EMAIL: who.id, GIT_COMMITTER_NAME: committer.name, GIT_COMMITTER_EMAIL: committer.id };
   const ff = await gitRaw(dir, ["merge", "--ff-only", "--quiet", "FETCH_HEAD"], { env });
   if (ff.code !== 0) await git(dir, ["merge", "--no-edit", "-m", message, "FETCH_HEAD"], { env });
   return (await git(dir, ["rev-parse", "HEAD"])).trim();

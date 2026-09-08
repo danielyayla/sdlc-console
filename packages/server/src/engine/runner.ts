@@ -127,9 +127,10 @@ export async function runPerChange(input: RunInput, repo: Repo): Promise<RunOutc
     const host = input.codeHost ?? codeHostFor(repo.config.codeHost, input.env);
     const cmdPassed = commandResults.filter((r) => r.pass).length;
     const casesPassed = results.filter((r) => r.pass).length;
-    const checks: { name: string; verdict: "pass" | "fail"; summary: string }[] = [
-      { name: "evidence", verdict: "pass" as const, summary: `per-change run ${n} green · ${cmdPassed}/${commandResults.length} verification commands passed` },
-      { name: "evals", verdict: "pass" as const, summary: results.length === 0 ? `per-change run ${n} · no eval cases intersect the diff` : `per-change run ${n} · ${casesPassed}/${results.length} intersecting eval cases passed` },
+    // the evidence travels verbatim: a GitHub App puts it in the check run's text (3.2); a token carries the one-line summary only
+    const checks: { name: string; verdict: "pass" | "fail"; summary: string; evidence?: string }[] = [
+      { name: "evidence", verdict: "pass" as const, summary: `per-change run ${n} green · ${cmdPassed}/${commandResults.length} verification commands passed`, evidence: commandResults.map((r) => `--- ${r.name}: ${r.cmd} (exit ${r.exitCode})\n${r.output}`).join("\n") },
+      { name: "evals", verdict: "pass" as const, summary: results.length === 0 ? `per-change run ${n} · no eval cases intersect the diff` : `per-change run ${n} · ${casesPassed}/${results.length} intersecting eval cases passed`, evidence: results.length === 0 ? "no eval cases intersect the diff" : results.map((r) => `--- eval ${r.caseId}: ${r.pass ? "pass" : "fail"}\n${r.output}`).join("\n") },
     ];
     const existing = files.pr && files.pr.mergedAt === undefined && files.pr.branch === input.branch ? files.pr : null;
     const proof = await reproProof(input, repo, view, contract?.testGlobs ?? [], existing);

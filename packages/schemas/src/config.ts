@@ -93,7 +93,21 @@ export const config = z.strictObject({
     })
     .optional(),
   eligibility: z.strictObject({ coverage: z.enum(["strict", "lenient"]).optional() }).optional(),
-  products: z.array(z.strictObject({ name: nonEmpty, path: nonEmpty })).optional(),
+  /**
+   * Products the console serves (3.2). One entry per SDLC home: `path` is the
+   * directory holding that product's `sdlc/` (`.` for this home; a subdirectory
+   * for a monorepo product with its own `sdlc/config.yaml`). Absent = one
+   * product, this home, named after the repository directory.
+   */
+  products: z
+    .array(
+      z.strictObject({
+        name: nonEmpty,
+        path: nonEmpty,
+        description: z.string().optional(),
+      }),
+    )
+    .optional(),
   intentHome: z.string().optional(),
   /** Artifact names whose acceptance is recorded elsewhere; informational. */
   artifacts: z.array(artifactName).optional(),

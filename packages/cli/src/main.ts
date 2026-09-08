@@ -33,7 +33,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc loop <CHG> [--incident <file>]
   sdlc audit <CHG>
   sdlc metrics [--stage n] [--window 30d] [--refresh]   (per-stage leading/lagging over git, ledger, PR metadata, CI, incident records; --refresh fetches GitHub facts)
-  sdlc serve [--port n] [--host addr] [--role po|eng]
+  sdlc serve [--port n] [--host addr] [--role po|eng] [--repo <path>]…   (--repo: serve more repositories; config.products lists monorepo products)
   sdlc triage accept|dismiss <TRI> [--reason <text>] [--tune <note>]
   sdlc security patch|escalate|dismiss <SEC> [--reason <text>]
   sdlc security import <file|->
@@ -59,7 +59,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc record status <CHG>                               (mode, synced time and write-back per artifact)
   POST /api/webhooks/github                             (GitHub mode: signed deliveries under GITHUB_WEBHOOK_SECRET; polling stays on as the fallback)
 
-Every command accepts --json. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
+Every command accepts --json and, in a monorepo, --product <name> (or SDLC_PRODUCT / SDLC_HOME) to address one product. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
 
 const OPTIONS = {
@@ -101,6 +101,7 @@ const OPTIONS = {
   window: { type: "string" },
   refresh: { type: "boolean" },
   "sdlc-bin": { type: "string" },
+  repo: { type: "string", multiple: true },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -118,6 +119,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
   }
   const { values, positionals } = parsed;
   const json = values.json === true;
+  // `--repo` repeats (a string list); the sub-command modules read the scalar flags only
+  const { repo: _repos, ...flags } = values;
+  void _repos;
   const [cmd, sub, ...rest] = positionals;
   if (values.help || !cmd) {
     io.stdout(`${USAGE}\n`);
@@ -131,13 +135,13 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return 0;
       }
       case "validate": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         const r = await validateCommand(ctx, { ...(values.ref ? { ref: values.ref } : {}), working: values.working === true });
         emit(io, json, r, () => (r.diagnostics.length === 0 ? `${r.ref}: clean` : [...r.diagnostics.map(formatDiagnostic), r.blocking ? `${r.ref}: BLOCKING` : `${r.ref}: ok with warnings`].join("\n")));
         return r.blocking ? 1 : 0;
       }
       case "change": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         if (sub === "new") {
           if (!values.title) throw new CliError("--title is required");
           const r = await changeNew(ctx, {
@@ -179,28 +183,28 @@ export async function main(argv: string[], io: Io): Promise<number> {
         throw new CliError(`unknown subcommand: change ${sub ?? ""}\n${USAGE}`);
       }
       case "accept": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         if (!sub) throw new CliError("usage: sdlc accept <CHG> --gate n");
         const r = await acceptCommand(ctx, sub, parseGate(values.gate));
         emit(io, json, r, () => `${r.view.gate ? "" : ""}${r.id}: gate ${r.gate} accepted · now stage ${r.view.stage} (${r.view.status}) · ${r.commit.slice(0, 7)}`);
         return 0;
       }
       case "send-back": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         if (!sub) throw new CliError("usage: sdlc send-back <CHG> --gate n --feedback <text>");
         const r = await sendBackCommand(ctx, sub, parseGate(values.gate), values.feedback ?? "");
         emit(io, json, r, () => `${r.id}: gate ${r.gate} sent back · stage ${r.view.stage} (${r.view.status}) · ${r.commit.slice(0, 7)}`);
         return 0;
       }
       case "loop": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         if (!sub) throw new CliError("usage: sdlc loop <CHG> [--incident <file>]");
         const r = await loopCommand(ctx, sub, values.incident ? { incident: values.incident } : {});
         emit(io, json, r, () => (r.inReview ? `${r.id}: incident.md committed on ${r.inReview} · ${r.commits.map((c) => c.slice(0, 7)).join(", ")} — the engine (or sdlc sync) opens its PR; merging it closes the loop` : `${r.id}: loop closed → cycle ${r.cycle}, stage ${r.view.stage} (${r.view.status}) · ${r.commits.map((c) => c.slice(0, 7)).join(", ")}`));
         return 0;
       }
       case "triage": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         const id = rest[0];
         if (!id || (sub !== "accept" && sub !== "dismiss")) throw new CliError("usage: sdlc triage accept|dismiss <TRI>");
         const r = sub === "accept" ? await triageAcceptCommand(ctx, id) : await triageDismissCommand(ctx, id, values.reason ?? "", values.tune);
@@ -208,7 +212,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return 0;
       }
       case "security": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         const id = rest[0];
         if (sub === "import") {
           if (!id) throw new CliError("usage: sdlc security import <file|->");
@@ -228,27 +232,27 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return r.state === "failed" ? 1 : 0;
       }
       case "repro": {
-        const r = await reproCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        const r = await reproCommand(io, sub, rest, flags as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
         return 0;
       }
       case "record": {
-        const r = await recordCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        const r = await recordCommand(io, sub, rest, flags as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
         return 0;
       }
       case "proposal": {
-        const r = await proposalCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        const r = await proposalCommand(io, sub, rest, flags as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
         return 0;
       }
       case "freeze": {
-        const r = await freezeCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        const r = await freezeCommand(io, sub, rest, flags as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
         return 0;
       }
       case "session": {
-        const r = await sessionCommand(io, sub, rest, values as Record<string, string | boolean | undefined>, json);
+        const r = await sessionCommand(io, sub, rest, flags as Record<string, string | boolean | undefined>, json);
         emit(io, json, r.value, () => r.text);
         return 0;
       }
@@ -259,7 +263,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return await hookCommand(io, sub);
       }
       case "serve": {
-        const server = await serveCommand(io, { ...(values.port ? { port: Number(values.port) } : {}), ...(values.host ? { host: values.host } : {}), ...(values.role === "eng" ? { role: "eng" as const } : {}), engine: values.engine === true });
+        const server = await serveCommand(io, { ...(values.port ? { port: Number(values.port) } : {}), ...(values.host ? { host: values.host } : {}), ...(values.role === "eng" ? { role: "eng" as const } : {}), engine: values.engine === true, ...(values.repo && values.repo.length > 0 ? { repos: values.repo } : {}) });
         if (values["no-wait"]) {
           await server.close();
           return 0;
@@ -272,13 +276,13 @@ export async function main(argv: string[], io: Io): Promise<number> {
         return 0;
       }
       case "sync": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         const r = await syncCommand(ctx);
         emit(io, json, r, () => `sync: ${r.opened.length} PR(s) opened${r.opened.map((o) => ` · ${o.changeId} ${o.branch} → #${o.number}`).join("")} · ${r.pushed.length} PR(s) updated${r.pushed.map((o) => ` · ${o.changeId} #${o.number} at ${o.head.slice(0, 7)}`).join("")} · ${r.merges.filter((m) => m.recorded).length} merge(s) recorded${r.merges.filter((m) => !m.recorded && m.reason !== "already recorded").map((m) => ` · ${m.changeId} PR #${m.number} by ${m.mergedBy} not recorded: ${m.reason ?? ""}`).join("")} · records ${r.records.pushed ? `PR #${r.records.number ?? "?"} (${r.records.ahead} commit(s) ahead)` : r.records.error ? `failed: ${r.records.error}` : "in sync"}${r.errors.length > 0 ? `\n${r.errors.join("\n")}` : ""}`);
         return 0;
       }
       case "evals": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         if (sub === "run") {
           const r = await evalsRun(ctx, { ...(values.trigger ? { trigger: values.trigger as "manual" } : {}), ...(values.ref ? { ref: values.ref } : {}) });
           emit(io, json, r, () => renderRun(r));
@@ -306,12 +310,12 @@ export async function main(argv: string[], io: Io): Promise<number> {
         throw new CliError("usage: sdlc evals run|gate|harvest|trigger");
       }
       case "metrics": {
-        const r = await metricsReport(await repoContext(io, json), { stage: typeof values.stage === "string" ? values.stage : undefined, window: typeof values.window === "string" ? values.window : undefined, refresh: values.refresh === true });
+        const r = await metricsReport(await repoContext(io, json, values.product), { stage: typeof values.stage === "string" ? values.stage : undefined, window: typeof values.window === "string" ? values.window : undefined, refresh: values.refresh === true });
         emit(io, json, r, () => renderMetrics(r));
         return 0;
       }
       case "audit": {
-        const ctx = await repoContext(io, json);
+        const ctx = await repoContext(io, json, values.product);
         if (!sub) throw new CliError("usage: sdlc audit <CHG>");
         const r = await auditCommand(ctx, sub, values.ref ?? "HEAD");
         emit(io, json, r, () => renderAudit(r));
