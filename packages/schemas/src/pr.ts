@@ -51,6 +51,8 @@ export const pr = z.strictObject({
       session: nonEmpty,
       headSha: gitSha,
       at: isoTimestamp,
+      /** The PR merged before the review ended: findings are on record but the code owner never saw them before deciding. */
+      afterMerge: z.literal(true).optional(),
     })
     .optional(),
 });

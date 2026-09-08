@@ -326,13 +326,12 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
         const l = await load();
         const { view } = viewOf(l.repo, args.changeId);
         if (!view.pr) throw new Refusal(`${view.id} has no pull request yet (stage ${view.stage}: ${view.stageName}); findings belong to the PR review`);
-        if (view.pr.mergedAt !== undefined) throw new Refusal(`${view.id}'s PR is already merged`);
         const session = sessionIdFrom(env, args.sessionId);
         const previous = readFindings(l.root, session);
         const finding: StoredFinding = { n: previous.length + 1, ts: now(), severity: args.severity, title: args.title, ...(args.path ? { path: args.path } : {}), ...(args.detail ? { detail: args.detail } : {}) };
         appendFinding(l.root, session, finding);
         const all = [...previous, finding];
-        return ok({ n: finding.n, changeId: view.id, headSha: view.pr.headSha, tally: { high: all.filter((f) => f.severity === "high").length, medium: all.filter((f) => f.severity === "medium").length, low: all.filter((f) => f.severity === "low").length }, note: "mirrored into pr.yaml and the ledger when the session ends" });
+        return ok({ n: finding.n, changeId: view.id, headSha: view.pr.headSha, tally: { high: all.filter((f) => f.severity === "high").length, medium: all.filter((f) => f.severity === "medium").length, low: all.filter((f) => f.severity === "low").length }, note: view.pr.mergedAt !== undefined ? `${view.id}'s PR merged at ${view.pr.mergedAt}, before this review ended; the finding is mirrored into pr.yaml, the ledger and the PR for the record when the session ends` : "mirrored into pr.yaml and the ledger when the session ends" });
       }),
   );
 

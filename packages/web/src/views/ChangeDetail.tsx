@@ -231,7 +231,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
               {view.pr.reviewers.length > 0 ? <div className="who">reviewers: {view.pr.reviewers.join(", ")}</div> : null}
               <div className="who">
                 {view.pr.review
-                  ? `review of ${view.pr.review.headSha.slice(0, 7)} · session ${view.pr.review.session}${view.pr.review.headSha !== view.pr.headSha ? " · head moved since — review pending" : ""}`
+                  ? `review of ${view.pr.review.headSha.slice(0, 7)} · session ${view.pr.review.session}${view.pr.review.afterMerge ? " · ended after the merge" : ""}${view.pr.review.headSha !== view.pr.headSha ? " · head moved since — review pending" : ""}`
                   : view.pr.mergedAt
                     ? "not reviewed by an agent"
                     : "review pending"}

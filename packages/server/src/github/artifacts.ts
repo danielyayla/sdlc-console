@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { addWorktree, blobSha, CodeHostError, commitWritePlan, currentBranch, fetchRemote, git, gitRaw, headSha, listWorktrees, mergeRemoteBranch, newUlid, pushBranch, removeWorktree, type GitIdentity } from "@sdlc/adapter-git";
+import { addWorktree, blobSha, CodeHostError, commitWritePlan, currentBranch, diffFiles, fetchRemote, git, gitRaw, headSha, listWorktrees, mergeRemoteBranch, newUlid, pushBranch, removeWorktree, type GitIdentity } from "@sdlc/adapter-git";
 import { assertProtected, findOpenPull, getPull, GitHubError, mergePull, openPull, requestChanges, type GitHubCodeHost } from "@sdlc/adapter-github";
-import { accept, ARTIFACT_INDEX_FOR_GATE, deriveChange, identityForGitHubLogin, recordArtifactPr, sendBack, stageDef, validateWritePlan, type ArtifactIndex, type ChangeView, type Repo, type TransitionContext, type TransitionResult, type WritePlan } from "@sdlc/core";
+import { accept, ARTIFACT_INDEX_FOR_GATE, deriveChange, identityForGitHubLogin, logPath, recordArtifactPr, sendBack, stageDef, validateWritePlan, type ArtifactIndex, type ChangeView, type Repo, type TransitionContext, type TransitionResult, type WritePlan } from "@sdlc/core";
 import type { GateNumber } from "@sdlc/schemas";
 import { ActionError, StateStore } from "../store.js";
 
@@ -98,7 +98,8 @@ export interface PushedArtifactBranch {
  * only (a session started, or failed, before proposing) is not in review yet
  * and opens nothing. Idempotent: a branch whose PR is already recorded is
  * pushed again only when its head moved past origin's — the agent's revisions
- * reach the PR the reviewer reads — and never reopened.
+ * reach the PR the reviewer reads — and never reopened. A branch that differs
+ * from the base by ledger lines only is dropped: nothing to review.
  */
 export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Promise<{ opened: OpenedArtifactPr[]; pushed: PushedArtifactBranch[]; errors: string[] }> {
   const snap = await store.refresh();
@@ -119,6 +120,15 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
     }
     const doc = view.docs[index];
     const recorded = view.artifactPrs[index];
+    // a branch whose only commits past the base are ledger lines carries nothing to review: its PR merged before the
+    // console's own `pr.opened` line was pushed (a human merging within seconds of the open), so the artifact is already
+    // on main. The branch is dropped so it stops overlaying the change; only the console's own lines go with it.
+    const touched = await diffFiles(store.root, `${base}...${b.branch}`).catch(() => null); // what the branch adds since it forked, not what main gained since
+    if (touched && touched.every((path) => path === logPath(view.id))) {
+      await gitRaw(store.root, ["branch", "-D", b.branch]);
+      mode.log?.(`${b.branch}: only ledger lines past ${base}; nothing to review — branch dropped`);
+      continue;
+    }
     if (recorded && !recorded.merged && recorded.branch === b.branch) {
       const origin = await gitRaw(store.root, ["rev-parse", "--verify", "-q", `refs/remotes/origin/${b.branch}`]);
       if (origin.code === 0 && origin.stdout.trim() === b.head) continue;

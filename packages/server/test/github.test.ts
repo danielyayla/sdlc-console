@@ -343,6 +343,45 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     expect((await viewOf(dir, id)).stage).toBe(2);
   }, 60_000);
 
+  it("a human who merges the intent PR seconds after it opens, before the console pushed its pr.opened line, leaves a ledger-only branch — the next pass records the merge, opens no second PR and drops the branch", async () => {
+    const { dir, gh, env } = await githubSeed();
+    mapLogin(dir, PO, "priya-gh");
+    await git(dir, ["commit", "-q", "-am", "sdlc(config): map priya-gh"]);
+    await git(dir, ["push", "-q", "origin", "main"]);
+    const { engine } = harness(dir, env);
+    const po = new StateStore({ root: dir, identity: PO_ID });
+    await po.refresh();
+    const created = await newChange(po, { title: "Nightly digest", kind: "feature", risk: "routine", origin: { type: "idea" }, intentBody: "# Intent: Nightly digest\n\n## Problem\nNo digest.\n\n## Proposed outcome\nA digest.\n\n## Affected users and systems\nMail.\n\n## Constraints\nNone.\n\n## Open questions\nNone.\n" });
+    const id = created.changeId ?? "";
+    const branch = `sdlc/${id}/intent`;
+    const sync1 = await engine.sync();
+    expect(sync1?.opened).toHaveLength(1);
+    // origin's branch as GitHub saw it at the merge: the intent commit without the console's pr.opened line
+    const opened = (await git(dir, ["rev-parse", branch])).trim();
+    await git(gh.bare, ["update-ref", `refs/heads/${branch}`, `${opened}~1`]);
+    await mergeOnGitHub(gh, 1, "priya-gh");
+    // main moves on with unrelated work; the branch is judged by what it adds, not by what main gained since
+    writeFileSync(join(dir, "README.md"), "# widgets\n\nunrelated\n");
+    await git(dir, ["add", "README.md"]);
+    await git(dir, ["commit", "-q", "-m", "docs: readme"]);
+    const sync2 = await engine.sync();
+    expect(sync2?.merges).toMatchObject([{ changeId: id, gate: 1, mergedBy: "priya-gh", recorded: true }]);
+    expect(sync2?.opened).toEqual([]);
+    expect(sync2?.errors).toEqual([]);
+    const intentPulls = () => gh.state.pulls.filter((p) => p.head === branch);
+    expect(intentPulls()).toHaveLength(1);
+    expect(gh.state.pulls.map((p) => p.head)).toEqual([branch, "sdlc/records"]); // the recorded gate travels in the records PR, as usual
+    const v = await viewOf(dir, id);
+    expect(v.stage).toBe(2);
+    expect(v.acceptedGates).toEqual([1]);
+    // the local branch (one ledger commit past main) is dropped so it stops overlaying the change; a further pass has nothing to do
+    expect((await gitRawShow(dir, `${branch}:sdlc/changes/${id}/log.jsonl`))).toBeNull();
+    expect((await po.refresh(true)).branches.map((x) => x.branch)).not.toContain(branch);
+    const sync3 = await engine.sync();
+    expect(sync3?.opened).toEqual([]);
+    expect(intentPulls()).toHaveLength(1);
+  }, 60_000);
+
   it("a branch carrying ledger lines only (a session started or failed before proposing) opens no PR; the PR opens once the artifact is on it", async () => {
     const { dir, gh, env } = await githubSeed();
     const { engine } = harness(dir, env);
@@ -518,6 +557,39 @@ describe("review findings mirror + check runs in GitHub mode (2.3)", () => {
     const r = await acceptGate(h.store, "CHG-0018", 5, env);
     expect(r.toast).toContain("Maintain");
     expect((await viewOf(dir, "CHG-0018")).stage).toBe(6);
+  }, 40_000);
+
+  it("a code owner who merges before the review ends does not lose it: the review is recorded after the merge and its findings still reach the merged PR", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const h = await buildAndRun(dir, env);
+    expect(h.job?.state).toBe("done");
+    const pushed = (await git(gh.bare, ["rev-parse", "refs/heads/CHG-0018/export-fix"])).trim();
+    const review = await launchSession({ changeId: "CHG-0018", kind: "review", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
+    // the engineer merges through the API while the review session is still running
+    const r = await acceptGate(h.store, "CHG-0018", 5, env);
+    expect(r.toast).toContain("Maintain");
+    expect((await viewOf(dir, "CHG-0018")).stage).toBe(6);
+    expect(gh.state.pulls[0]?.merged).toBe(true);
+
+    appendFinding(h.worktree, review.session.id, { n: 1, ts: "2026-09-04T09:05:00Z", severity: "low", title: "renderFooter with no argument throws", path: "src/site.js" });
+    h.registry.patch(review.session.id, { status: "done" });
+    const job = await h.engine.mirrorForSession({ ...review.session, status: "done" });
+    expect(job?.state).toBe("done");
+    expect(job?.stage).toBe(6);
+    const view = await viewOf(dir, "CHG-0018");
+    expect(view.stage).toBe(6);
+    expect(view.pr?.review).toEqual({ session: review.session.id, headSha: pushed, at: "2026-09-04T09:00:00Z", afterMerge: true });
+    expect(view.pr?.findings).toEqual({ high: 0, medium: 0, low: 1 });
+    expect(view.findings.map((f) => [f.severity, f.title])).toEqual([["low", "renderFooter with no argument throws"]]);
+    expect((await git(dir, ["log", "-1", "--format=%s", "main"])).trim()).toContain("after the merge");
+    // on GitHub: the tally as a status on the reviewed head and the findings as a COMMENT review on the merged PR, which says the merge came first
+    expect(gh.state.statuses.at(-1)).toMatchObject({ sha: pushed, body: { state: "success", context: "sdlc/findings", description: `review of ${pushed.slice(0, 7)}: 0 high · 0 medium · 1 low` } });
+    expect(gh.state.reviews).toHaveLength(1);
+    expect(gh.state.reviews[0]?.number).toBe(1);
+    expect(gh.state.reviews[0]?.body["event"]).toBe("COMMENT");
+    const body = String(gh.state.reviews[0]?.body["body"]);
+    expect(body).toMatch(/This pull request merged at \S+, before the review ended/);
+    expect(body).toContain("- **low** renderFooter with no argument throws — `src/site.js`");
   }, 40_000);
 });
 

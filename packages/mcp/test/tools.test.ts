@@ -265,9 +265,10 @@ describe("sdlc-mcp tools", () => {
     expect(lines.map((l) => [l.n, l.severity, l.path ?? null])).toEqual([[1, "high", "src/export/csv.ts"], [2, "low", null]]);
     // nothing was committed: the system mirrors findings when the session ends
     expect((await git(dir, ["rev-parse", "HEAD"])).trim()).toBe(head);
+    // CHG-0012's PR is merged: the finding is still taken — findings inform, a merge before the review ends does not discard it
     const merged = await call(c, "report_finding", { changeId: "CHG-0012", severity: "low", title: "late" });
-    expect(merged.isError).toBe(true);
-    expect(String(merged.value["error"])).toContain("already merged");
+    expect(merged.isError).toBe(false);
+    expect(String(merged.value["note"])).toContain("merged at 2026-08-23T09:00:00Z, before this review ended");
   });
 
   it("from a code-branch worktree the tools see the PR the run recorded on the default branch (pr.yaml lives there, not on the branch)", async () => {
