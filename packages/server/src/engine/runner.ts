@@ -34,6 +34,14 @@ export interface RunInput {
   /** OTel (3.3): the run's `sdlc.run.per-change` span, a child of `parent` (the job's span) when given. */
   tracer?: Tracer;
   parent?: SpanContext | Span | null;
+  /**
+   * Whether the session that produced the diff ran plan-sync and test-freeze
+   * in-process (3.8). False for a harness without a PreToolUse hook: the run
+   * then checks the diff against plan.md (`plan-sync` check) and raises the
+   * test-freeze auto-findings whatever `.claude/settings.json` declares.
+   * Default true (a manual run has no session; the settings decide).
+   */
+  hooksInSession?: boolean;
 }
 
 export interface RunOutcome {
@@ -155,6 +163,11 @@ async function runPerChangeSpanned(input: RunInput, repo: Repo): Promise<RunOutc
     const existing = files.pr && files.pr.mergedAt === undefined && files.pr.branch === input.branch ? files.pr : null;
     const proof = await reproProof(input, repo, view, contract?.testGlobs ?? [], existing);
     checks.push(...proof.checks);
+    if (input.hooksInSession === false) {
+      // the session's harness has no PreToolUse hook (3.8): the plan-sync rule is applied to the diff here, as a check on the PR, verbatim
+      const sync = check.planSync(fileSet, view.planFiles, `${files.dir}/plan.md`);
+      checks.push({ name: "plan-sync", verdict: sync.allowed ? "pass" : "fail", summary: `no PreToolUse hook in the session — checked on the run: ${sync.reason}` });
+    }
     const prInput = { root: input.root, view, branch: input.branch, baseBranch: base, headSha: head, planMatches, nextSeq: seq + 1, now: now(), checks, ...(proof.autoFindings.length > 0 ? { autoFindings: proof.autoFindings } : {}) };
     if (existing && existing.headSha === head) {
       // the PR already points at this head (a re-run): nothing to record on it
@@ -198,7 +211,7 @@ async function reproProof(input: RunInput, repo: Repo, view: ChangeView, testGlo
   ];
   const underTests = compileGlobs([...testGlobs]);
   const edits = since.filter((f) => f !== repro.testPath && underTests(f) && !lifted.has(f));
-  const hooksEnforced = (repo.settings?.hooks ?? []).some((h) => /test-freeze/.test(h.script) || /test-freeze/.test(h.name));
+  const hooksEnforced = input.hooksInSession !== false && (repo.settings?.hooks ?? []).some((h) => /test-freeze/.test(h.script) || /test-freeze/.test(h.name));
   if (edits.length === 0 || hooksEnforced) return { checks, autoFindings: [] };
   checks.push({ name: "test-freeze", verdict: "fail", summary: `${edits.length} test file${edits.length === 1 ? "" : "s"} changed after the repro commit ${sha7} with no managed hook to block it: ${edits.join(", ")}` });
   const previous = new Map((existing?.autoFindings ?? []).filter((f) => f.dismissal).map((f) => [f.path, f.dismissal]));

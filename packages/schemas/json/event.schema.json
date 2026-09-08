@@ -1300,6 +1300,41 @@
             },
             "target": {
               "type": "string"
+            },
+            "harness": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "degraded": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "guarantee": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "reason": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "guarantee",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "id",
+                "degraded"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -1450,7 +1485,8 @@
                 "stopped",
                 "stalled",
                 "error",
-                "taken_over"
+                "taken_over",
+                "unverified"
               ]
             }
           },

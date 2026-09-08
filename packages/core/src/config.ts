@@ -1,4 +1,5 @@
 import { CONFIG_DEFAULTS, type Config, type EnvironmentKind, type Identity, type RecordsMode } from "@sdlc/schemas";
+import { resolveHarness, type ResolvedHarness } from "./harness.js";
 import type { GateRole } from "./stages.js";
 
 export interface ResolvedThresholds {
@@ -44,6 +45,8 @@ export interface ResolvedConfig {
   auth: ResolvedAuth | null;
   /** Deployment environments (3.6) in config order; empty when none are declared. */
   environments: ResolvedEnvironment[];
+  /** Harnesses (3.8) in config order; empty = Claude Code for every session kind. */
+  harnesses: ResolvedHarness[];
 }
 
 /** A deployment environment as the console runs it (3.6): declared commands only, and the production gate's roles. */
@@ -119,6 +122,7 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
       healthcheckCommand: e.healthcheck?.command ?? null,
       gateRoles: e.kind === "production" ? (e.gate?.roles ?? [...PRODUCTION_GATE_DEFAULT_ROLES]) : [],
     })),
+    harnesses: (config?.harness === undefined ? [] : Array.isArray(config.harness) ? config.harness : [config.harness]).map(resolveHarness),
     auth: config?.auth
       ? {
           provider: "oidc",

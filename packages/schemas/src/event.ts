@@ -97,6 +97,13 @@ export const events = {
       task: taskId.optional(),
       worktree: z.string().optional(),
       target: z.string().optional(),
+      /** The harness the session runs through (3.8) and the guarantees it cannot honour, verbatim as shown on the session. */
+      harness: z
+        .strictObject({
+          id: nonEmpty,
+          degraded: z.array(z.strictObject({ guarantee: nonEmpty, reason: nonEmpty })),
+        })
+        .optional(),
     }),
     actor,
   ),
@@ -104,7 +111,8 @@ export const events = {
     "session.stopped",
     z.strictObject({
       session: nonEmpty,
-      reason: z.enum(["done", "stopped", "stalled", "error", "taken_over"]),
+      /** `unverified` (3.8): the harness exited "done" without a Stop hook and the last recorded round was not green — no run follows. */
+      reason: z.enum(["done", "stopped", "stalled", "error", "taken_over", "unverified"]),
     }),
     actor,
   ),

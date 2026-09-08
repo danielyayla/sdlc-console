@@ -1,5 +1,6 @@
-import { deriveChange, overrideMode } from "@sdlc/core";
+import { deriveChange, harnessFor, overrideMode } from "@sdlc/core";
 import { ActionError, type StateStore } from "../store.js";
+import { harnessFromConfig } from "./harness.js";
 import { engineerCommand } from "./launcher.js";
 import type { SessionRegistry, StoredSession } from "./registry.js";
 
@@ -39,7 +40,8 @@ export async function downgradeSession(deps: DowngradeDeps, id: string, reason?:
     status: "awaiting_engineer",
     heartbeatAt: now,
     waitingOnYou: { reason: "downgraded — continue the session in your terminal" },
-    command: engineerCommand({ ...s, mode: "SUPERVISED" }, deps.claudeBin ?? "claude", true),
+    // the same harness the session ran through (3.8): a command harness is handed over as its own process line
+    command: engineerCommand({ ...s, mode: "SUPERVISED" }, deps.claudeBin ?? "claude", true, harnessFromConfig(harnessFor(deps.store.currentRepo?.config.harnesses ?? [], s.kind), deps.claudeBin ?? "claude")),
   });
   if (s.pid) {
     try {

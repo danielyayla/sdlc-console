@@ -1,0 +1,22 @@
+{
+  "name": "@sdlc/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Optional desktop wrapper (3.8): `sdlc-desktop` starts `sdlc serve` for the working directory on a free port and opens the console in the system browser. No native toolchain, no dependencies beyond the CLI.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "sdlc-desktop": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@sdlc/cli": "workspace:*"
+  }
+}

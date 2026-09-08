@@ -17,22 +17,32 @@ export interface StreamLine {
 
 export interface ObserveOptions {
   transcriptPath: string;
+  /** `stream-json` (Claude Code: init/result lines drive model, cost and the done verdict) or `text` (any other harness: lines kept verbatim, exit 0 = done). */
+  output?: "stream-json" | "text";
   now?: () => Date;
+  /** Last word on the status once the process exited (3.8): a stand-in for a Stop hook the harness lacks may turn `done` into `done-unverified`. */
+  finalStatus?: (status: string) => { status: string; patch?: Record<string, unknown> };
   onExit?: (code: number | null, record: { status: string }) => Promise<void> | void;
 }
 
-/** Follow a headless Claude Code session's stream-json output into the registry and a transcript file. */
+/** Follow a headless session's output into the registry and a transcript file: Claude Code's stream-json parsed, any other harness's lines verbatim. */
 export function observe(child: ChildProcess, registry: SessionRegistry, sessionId: string, opts: ObserveOptions): Promise<number | null> {
   mkdirSync(dirname(opts.transcriptPath), { recursive: true });
   const now = () => (opts.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const structured = (opts.output ?? "stream-json") === "stream-json";
   let buffer = "";
   let sawResult = false;
   let isError = false;
   let stderr = "";
   const handle = (line: string) => {
     if (line.trim() === "") return;
-    appendFileSync(opts.transcriptPath, `${line}\n`, "utf8");
+    try {
+      appendFileSync(opts.transcriptPath, `${line}\n`, "utf8");
+    } catch {
+      // the cache directory is disposable: a transcript whose directory went away is not worth the session
+    }
     const msg: StreamLine | null = (() => {
+      if (!structured) return null;
       try {
         return JSON.parse(line) as StreamLine;
       } catch {
@@ -72,8 +82,10 @@ export function observe(child: ChildProcess, registry: SessionRegistry, sessionI
       if (buffer.trim() !== "") handle(buffer);
       const current = registry.get(sessionId);
       const taken = current?.status === "taken_over" || current?.status === "stopped" || current?.status === "awaiting_engineer";
-      const status = taken ? current.status : code === 0 && sawResult && !isError ? "done" : "error";
-      registry.patch(sessionId, { status, exitCode: code, pid: null, heartbeatAt: now(), ...(status === "error" && !current?.error ? { error: stderr.trim().slice(-500) || `harness exited with code ${code}` } : {}) });
+      const exited = taken ? current.status : code === 0 && (structured ? sawResult && !isError : true) ? "done" : "error";
+      const final = taken ? { status: exited } : (opts.finalStatus?.(exited) ?? { status: exited });
+      const status = final.status;
+      registry.patch(sessionId, { status: status as never, exitCode: code, pid: null, heartbeatAt: now(), ...(final.patch ?? {}), ...(status === "error" && !current?.error ? { error: stderr.trim().slice(-500) || `harness exited with code ${code}` } : {}) });
       void Promise.resolve(opts.onExit?.(code, { status })).finally(() => resolve(code));
     });
   });

@@ -21,6 +21,7 @@ export default defineConfig({
       "@sdlc/mcp": src("mcp"),
       "@sdlc/server": src("server"),
       "@sdlc/cli": src("cli"),
+      "@sdlc/desktop": src("desktop"),
       "@sdlc/fixtures": fixtures,
     },
   },

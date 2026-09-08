@@ -2,6 +2,7 @@ import type { ChangeView } from "@sdlc/core";
 import { useEffect, useState } from "react";
 import { fetchArtifact, type Artifact } from "../api";
 import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, dotClass, ownsGate, prLabel, prNoun, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
+import { HarnessChips } from "./Sessions";
 
 export interface ChangeDetailProps {
   view: ChangeView;
@@ -33,6 +34,18 @@ export interface ChangeDetailProps {
   /** Deployment (3.6): deploy an environment / rehearse its rollback as the viewer; production is the gate's Deploy. */
   onDeploy?: (env: string) => void;
   onRehearse?: (env: string) => void;
+  /** The change's sessions from the registry (3.8): one line each with the harness and its unmet guarantees. */
+  sessions?: SessionLine[];
+}
+
+export interface SessionLine {
+  id: string;
+  kind: string;
+  mode: string;
+  status: string;
+  startedAt: string;
+  harness: { id: string; degraded: { guarantee: string; reason: string }[] } | null;
+  standIn: { guarantee: string; allowed: boolean; reason: string; rounds: number } | null;
 }
 
 export interface ReproDraftView {
@@ -341,6 +354,20 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <ul className="activity">{view.autoEligible.terms.map((t) => <li key={t.name}><span className={`glyph ${t.ok ? "human" : "system"}`}>{t.ok ? "✓" : "✗"}</span><span>{t.name}</span><span className="when">{t.detail}</span></li>)}</ul>
               {view.visual.warning ? <div className="warn">{view.visual.warning}</div> : null}
               {view.visual.mock ? <div className="card-status">mock {view.visual.mock.path.split("/").pop()}{view.visual.tool ? ` · visual tool ${view.visual.tool}` : " · no visual tool in CLAUDE.md"}</div> : null}
+            </div>
+          ) : null}
+          {p.sessions && p.sessions.length > 0 ? (
+            <div className="panel">
+              <div className="eyebrow">Sessions</div>
+              <ul className="activity">
+                {p.sessions.map((s) => (
+                  <li key={s.id}>
+                    <span className="glyph agent">⌁</span>
+                    <span><span className="mono">{s.id}</span> · {s.kind} · {s.mode} · {s.status}{s.standIn && !s.standIn.allowed ? ` — ${s.standIn.reason}` : ""} <HarnessChips harness={s.harness} /></span>
+                    <span className="when">{relativeTime(s.startedAt, p.now)}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
           <div className="panel">

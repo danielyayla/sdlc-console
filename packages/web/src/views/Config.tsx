@@ -122,6 +122,25 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
       </section>
 
       <section className="panel">
+        <div className="eyebrow">Harness · what runs the sessions and which guarantees it cannot honour</div>
+        <table className="bands">
+          <thead><tr><th>Harness</th><th>Session kinds</th><th>Process</th><th>Not honoured — stand-in</th></tr></thead>
+          <tbody>
+            {snapshot.config.harnesses.length === 0 ? <tr><td className="mono">claude-code</td><td>all</td><td className="mono">claude -p … --mcp-config … --allowedTools …</td><td><span className="chip green">every managed guarantee honoured</span></td></tr> : null}
+            {snapshot.config.harnesses.map((h) => (
+              <tr key={h.id}>
+                <td className="mono">{h.id}</td>
+                <td>{h.jobs.length === 0 ? "all" : h.jobs.join(", ")}</td>
+                <td className="mono">{h.kind === "claude-code" ? `${h.bin ?? "claude"} -p … --mcp-config … --allowedTools …` : [h.command ?? "", ...h.args].join(" ")}</td>
+                <td>{h.degraded.length === 0 ? <span className="chip green">every managed guarantee honoured</span> : h.degraded.map((d) => <div className="warn" key={d.guarantee} title={d.reason}>⚠ {d.guarantee} — {d.reason}</div>)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="footer">Hooks not run by the harness are checked by the console where a real check exists (done at exit, plan-sync and test-freeze on the per-change run); production-gate has no in-process stand-in.</div>
+      </section>
+
+      <section className="panel">
         <div className="eyebrow">Records · source of truth per artifact</div>
         <div className="card-status">{(["intent", "spec", "plan", "evals", "pr", "incident"] as const).map((k) => <span className={`chip${records[k] === "repo" ? "" : " amber"}`} key={k}>{k}: {records[k]}</span>)}<span className="chip gray">connector: {snapshot.config.recordsConnector ?? "none"}</span></div>
       </section>

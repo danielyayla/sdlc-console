@@ -31,6 +31,23 @@ interface SessionCard {
   command?: string;
   error?: string | null;
   traceId?: string | null;
+  /** The harness the session runs through (3.8) and the guarantees it cannot honour, verbatim from the record. */
+  harness?: { id: string; degraded: { guarantee: string; reason: string }[] } | null;
+  /** The server-side stand-in for a hook the harness lacks (3.8): its verdict, verbatim. */
+  standIn?: { guarantee: string; allowed: boolean; reason: string; rounds: number } | null;
+}
+
+/** One chip per unmet guarantee: the name, then the first clause of the reason; the full reason is the title. */
+export function HarnessChips({ harness }: { harness: SessionCard["harness"] }) {
+  if (!harness) return null;
+  return (
+    <>
+      {harness.id !== "claude-code" ? <span className="chip gray" title={`harness ${harness.id}`}>harness {harness.id}</span> : null}
+      {harness.degraded.map((d) => (
+        <span className="chip amber" key={d.guarantee} title={`${d.guarantee}: ${d.reason}`}>{d.guarantee} — {d.reason.split(";")[0]}</span>
+      ))}
+    </>
+  );
 }
 
 export interface SessionsProps {
@@ -124,6 +141,8 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) =
                 {trace ? <a className="chip" href={trace} target="_blank" rel="noreferrer" title={`OTel trace ${s.traceId ?? ""}`}>trace</a> : null}
               </div>
               <div className="card-status">{s.status}{s.loop ? ` · loop ${s.loop.state}` : ""}{lastRound ? ` · round ${lastRound.n}: ${lastRound.results.map((r) => `${r.name} ${r.pass ? "✓" : "✗"}`).join(" ")}` : ""}</div>
+              {s.harness && (s.harness.id !== "claude-code" || s.harness.degraded.length > 0) ? <div className="card-status"><HarnessChips harness={s.harness} /></div> : null}
+              {s.standIn ? <div className={`chip ${s.standIn.allowed ? "green" : "red"}`} title="checked by the console at exit, in place of the Stop hook the harness lacks">{s.standIn.guarantee} stand-in: {s.standIn.reason}</div> : null}
               {s.target ? <div className="card-status">target: {s.target}</div> : null}
               {s.waitingOnYou ? <div className="chip amber">waiting on you: {s.waitingOnYou.reason}</div> : null}
               {lostEligibility ? <div className="chip amber">no longer AUTO-eligible: {lostEligibility} — downgrade to SUPERVISED?</div> : null}

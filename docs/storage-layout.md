@@ -39,6 +39,7 @@ sdlc/
 .sdlc-state/                    # gitignored cache
   snapshots/<metric>.jsonl      # detection snapshots (last N), written by sdlc-detect
   sessions/<id>/deploys.jsonl   # a session's deploy_<env> / rehearse_rollback outcomes until the engine records them on deploy.yaml (3.6)
+  sessions/<id>/output.log      # a non-Claude (`command`) harness's stdout/stderr verbatim, in place of stream.jsonl (3.8)
   sessions.db                   # sessions, job queue, metric facts, webhook deliveries (GitHub and the 3.5 intake, by `<kind>:<deliveryId>`)
 ```
 

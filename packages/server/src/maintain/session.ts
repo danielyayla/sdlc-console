@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import type { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,10 +7,9 @@ import { breachEvidence, routesOf, type BandStatus } from "@sdlc/core";
 import type { ControlBand, MetricSnapshot } from "@sdlc/schemas";
 import { noopTracer, type Tracer } from "../otel.js";
 import { observe } from "../sessions/observer.js";
-import { worktreePathFor } from "../sessions/launcher.js";
+import { claudeCodeHarness, type Harness, type HarnessJob } from "../sessions/harness.js";
+import { standInForStop, worktreePathFor } from "../sessions/launcher.js";
 import type { SessionRegistry, StoredSession } from "../sessions/registry.js";
-
-const AGENT: GitIdentity = { id: "claude-code@sdlc.local", name: "claude-code" };
 
 export interface BandLaunchInput {
   band: ControlBand;
@@ -37,6 +36,8 @@ export interface BandLaunchDeps {
   tracer?: Tracer;
   /** The repository's default branch (the worktree is cut from it). */
   defaultBranch: string;
+  /** The harness for the session's kind (3.8); Claude Code when not given. */
+  harness?: Harness;
 }
 
 /** Branch a band session works on: the propose route's pull request comes from here; a diagnose session reads here. */
@@ -117,9 +118,11 @@ export async function launchBandSession(input: BandLaunchInput, deps: BandLaunch
   const allowedTools = bandTools(input.band, input.tier);
   writeFileSync(join(stateDir, "context.json"), `${JSON.stringify({ job: kind, band: input.band.metric, tier: input.tier, triage: input.triageId, snapshot: input.snapshot, allowedTools, promptRef: `prompts/band-${kind}@1` }, null, 2)}\n`);
   const claudeBin = deps.claudeBin ?? env["SDLC_CLAUDE_BIN"] ?? "claude";
-  const args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", input.tier === 3 && routesOf(input.band).pr ? "acceptEdits" : "default", "--mcp-config", mcpConfig, "--allowedTools", ...allowedTools, "--session-id", harnessSessionId];
+  const harness = deps.harness ?? claudeCodeHarness(claudeBin);
+  const job: HarnessJob = { sessionId: id, harnessSessionId, kind, mode: "HEADLESS", changeId: "", prompt, promptFile: join(stateDir, "prompt.md"), mcpConfig, allowedTools, permissionMode: input.tier === 3 && routesOf(input.band).pr ? "acceptEdits" : "default", resume: false, worktree };
+  const transcriptPath = join(stateDir, harness.capabilities.transcript ? "stream.jsonl" : "output.log");
   const tracer = deps.tracer ?? noopTracer;
-  const span = tracer.startSpan("sdlc.session", { attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": "HEADLESS", "sdlc.band": input.band.metric, "sdlc.band.tier": input.tier, "sdlc.triage": input.triageId, "sdlc.job.key": input.job, "sdlc.branch": branch, "sdlc.session.harness_id": harnessSessionId }, parent: null });
+  const span = tracer.startSpan("sdlc.session", { attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": "HEADLESS", "sdlc.band": input.band.metric, "sdlc.band.tier": input.tier, "sdlc.triage": input.triageId, "sdlc.job.key": input.job, "sdlc.branch": branch, "sdlc.session.harness_id": harnessSessionId, "sdlc.session.harness": harness.id, "sdlc.session.degraded": harness.degraded.map((d) => d.guarantee).join(",") }, parent: null });
   const record: StoredSession = {
     id,
     kind,
@@ -145,8 +148,10 @@ export async function launchBandSession(input: BandLaunchInput, deps: BandLaunch
     autoRationale: { terms: [] },
     modelPin: null,
     contextManifestRef: join(stateDir, "context.json"),
-    transcriptRef: join(stateDir, "stream.jsonl"),
+    transcriptRef: transcriptPath,
     harnessSessionId,
+    harness: { id: harness.id, degraded: harness.degraded },
+    standIn: null,
     pid: null,
     exitCode: null,
     command: "",
@@ -161,16 +166,15 @@ export async function launchBandSession(input: BandLaunchInput, deps: BandLaunch
     band: { metric: input.band.metric, tier: input.tier, snapshotTs: input.snapshot.ts, triageId: input.triageId, job: input.job },
   };
   deps.registry.upsert(record);
-  const child = (deps.spawnImpl ?? spawn)(claudeBin, args, {
-    cwd: worktree,
-    // no production credentials reach the session: only what the console itself runs with, plus the band identifiers
-    env: { ...env, SDLC_SESSION: id, SDLC_ACTOR_TYPE: "agent", SDLC_AGENT_ID: AGENT.id, GIT_AUTHOR_NAME: AGENT.name, GIT_AUTHOR_EMAIL: AGENT.id, GIT_COMMITTER_NAME: AGENT.name, GIT_COMMITTER_EMAIL: AGENT.id, ...bandEnv, ...homeEnv },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // no production credentials reach the session: only what the console itself runs with, plus the band identifiers (the agent identity comes from the harness adapter)
+  const { child, output } = harness.launch(job, { cwd: worktree, env: { ...env, ...bandEnv, ...homeEnv }, spawnImpl: deps.spawnImpl });
   deps.registry.patch(id, { pid: child.pid ?? null });
   const finished = observe(child, deps.registry, id, {
-    transcriptPath: join(stateDir, "stream.jsonl"),
+    transcriptPath,
+    output,
     ...(deps.now ? { now: deps.now } : {}),
+    // a band session reports a diagnosis, not rounds: without a Stop hook its "done" is the same stand-in verdict, recorded but not blocking the record job
+    finalStatus: (status) => (status === "done" && !harness.capabilities.hooks.Stop ? { status, patch: standInForStop(worktree, id).patch } : { status }),
     onExit: (_code, { status }) => {
       const final = deps.registry.get(id);
       span.setAttributes({ "sdlc.session.status": status, "sdlc.session.exit_code": _code, "sdlc.session.cost_usd": final?.costUsd ?? null, "sdlc.session.turns": final?.numTurns ?? null, "sdlc.session.model": final?.modelPin ?? null });

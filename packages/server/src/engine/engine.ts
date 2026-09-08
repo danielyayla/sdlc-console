@@ -1,11 +1,11 @@
-import { DEFAULT_DETECT_EVERY, deriveChange, loadRepo, openBreachItem, parseInterval, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, raiseBandBreaches, reasonKey, validateWritePlan, writebacksInState, type BandBreach, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
+import { DEFAULT_DETECT_EVERY, deriveChange, harnessFor, loadRepo, openBreachItem, parseInterval, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, raiseBandBreaches, reasonKey, validateWritePlan, writebacksInState, type BandBreach, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
 import { readSnapshots, runDetection, type DetectionPass } from "@sdlc/detect";
 import { launchBandSession, recordBandSession } from "../maintain/index.js";
 import { recordDeploysForSession } from "../deploy/index.js";
 import { SYSTEM_IDENTITY, hostedCodeHostFrom } from "./codehost.js";
 import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, hostName, listWorktrees, newUlid, prLabel, prNoun, readTree, type GitIdentity } from "@sdlc/adapter-git";
 import { readReproDraft, readSessionDeploys } from "@sdlc/mcp";
-import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
+import { capacityOf, harnessFromConfig, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
@@ -207,7 +207,7 @@ export class Engine {
         const status = this.opts.store.current?.bandStatus.find((x) => x.metric === b.band.metric);
         const r = await launchBandSession(
           { band: b.band, snapshot: b.snapshot, tier, triageId: item.id, job: b.job, status: status ?? { metric: b.band.metric, baseline: b.band.baseline, unit: b.band.unit ?? null, source: b.band.source ?? null, current: b.snapshot.current, sigma: b.snapshot.sigma, tier: b.snapshot.tier, breached: true, action: tier === 3 ? "propose" : "diagnose", ts: b.snapshot.ts, samples: 0, status: "", triage: [item.id], job: b.job }, history: history[b.band.metric] ?? [] },
-          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
+          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, harness: harnessFromConfig(harnessFor(repo.config.harnesses, tier === 3 ? "propose" : "diagnose"), this.opts.claudeBin ?? this.opts.env?.["SDLC_CLAUDE_BIN"] ?? "claude"), ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
         );
         this.opts.jobs.update(b.job, { sessionId: r.session.id, state: "running", note: `${item.id} raised · ${r.session.kind} session on ${r.session.branch}` }, this.now());
         this.log(`[detect] ${b.band.metric} ${tier}σ → ${item.id}, ${r.session.kind} session ${r.session.id}`);
@@ -661,7 +661,9 @@ export class Engine {
     for (const job of this.opts.jobs.list()) {
       if (job.sessionId === session.id && job.state === "running") {
         const downgraded = session.status === "awaiting_engineer";
-        this.opts.jobs.update(job.key, { state: session.status === "done" || downgraded ? "done" : "failed", ...(downgraded ? { note: "downgraded to SUPERVISED — the engineer continues" } : {}), ...(session.error ? { error: session.error } : {}) }, this.now());
+        // done-unverified (3.8): the harness said done, the console's stand-in for the Stop hook did not agree — the job failed with that verdict
+        const unverified = session.status === "done-unverified" ? `done-unverified: ${session.standIn?.reason ?? "last round not green"}` : null;
+        this.opts.jobs.update(job.key, { state: session.status === "done" || downgraded ? "done" : "failed", ...(downgraded ? { note: "downgraded to SUPERVISED — the engineer continues" } : {}), ...(unverified ? { error: unverified } : session.error ? { error: session.error } : {}) }, this.now());
       }
     }
     if (session.band) {
@@ -773,7 +775,9 @@ export class Engine {
     const job = this.opts.jobs.claim({ key, kind: "per-change-run", changeId: session.changeId, cycle: view.cycle, stage: 4 }, this.now());
     if (!job) return null;
     try {
-      const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), parent: this.opts.jobs.spanOf(key) }, repo);
+      // a harness without a PreToolUse hook (3.8) could not have been blocked by plan-sync or test-freeze: the run applies both rules to the diff instead
+      const hooksInSession = session.harness ? !session.harness.degraded.some((d) => d.guarantee === "plan-sync" || d.guarantee === "test-freeze") : true;
+      const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, hooksInSession, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), parent: this.opts.jobs.spanOf(key) }, repo);
       this.opts.jobs.update(key, { state: "done", note: `run ${outcome.run.n} ${outcome.run.verdict}${outcome.prAction === "opened" ? " · PR opened" : outcome.prAction === "synchronized" ? ` · PR head → ${outcome.run.headSha.slice(0, 7)}` : ""}` }, this.now());
       this.log(`${view.id}: run ${outcome.run.n} ${outcome.run.verdict}`);
       this.opts.registry.patch(session.id, { reviewed: outcome.run.verdict === "green" });

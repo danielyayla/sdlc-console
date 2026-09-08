@@ -21,7 +21,8 @@ const ARTIFACT_STAGE: Record<string, number> = { intent: 1, design: 2, plan: 3 }
  * session until its change merges. Runtime records only — nothing is stored.
  */
 export function awaitingReview(s: SessionRecord, view: ChangeView | null): boolean {
-  if (s.status !== "done") return false;
+  // a done-unverified session (3.8) is done as far as the harness is concerned and needs a human even more
+  if (s.status !== "done" && s.status !== "done-unverified") return false;
   if (!view || view.closed || view.stage >= 6) return false;
   if (s["reviewed"] === true) return false;
   const kind = typeof s["kind"] === "string" ? s["kind"] : "build";

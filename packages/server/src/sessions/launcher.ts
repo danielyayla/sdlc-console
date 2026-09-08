@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
+import type { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { addWorktree, branchExists, commitWritePlan, currentBranch, gitRaw, newUlid, readTree, showPrefix, type GitIdentity } from "@sdlc/adapter-git";
-import { deriveChange, loadRepo, logPath, normalizeReason, repeatSignals, stageDef, type ChangeView, type Repo, type RepeatSignal, type WritePlan } from "@sdlc/core";
+import { check, deriveChange, harnessFor, loadRepo, logPath, normalizeReason, repeatSignals, stageDef, type ChangeView, type Repo, type RepeatSignal, type WritePlan } from "@sdlc/core";
+import { claudeCodeHarness, harnessFromConfig, type Harness, type HarnessJob } from "./harness.js";
 import { PROPOSAL_JOB, buildContext, readRounds, type ContextBundle, type StoredRound } from "@sdlc/mcp";
 import { noopTracer, type Tracer } from "../otel.js";
 import type { Event } from "@sdlc/schemas";
@@ -11,7 +12,7 @@ import { ActionError } from "../store.js";
 import { capacityOf } from "./capacity.js";
 import { observe } from "./observer.js";
 import { promptFor } from "./prompts.js";
-import type { SessionKind, SessionRegistry, StoredSession } from "./registry.js";
+import type { SessionKind, SessionRegistry, SessionStatus, StoredSession } from "./registry.js";
 
 export type Mode = "AUTO" | "PLAN" | "SUPERVISED" | "HEADLESS";
 
@@ -43,6 +44,8 @@ export interface LaunchDeps {
   spawnImpl?: typeof spawn;
   /** OTel tracer (3.3): one `sdlc.session` span per launch, rounds as span events; the no-op tracer without an exporter. */
   tracer?: Tracer;
+  /** Harness override (tests); otherwise `config.harness` per session kind, Claude Code by default (3.8). */
+  harness?: Harness;
 }
 
 export interface LaunchResult {
@@ -51,7 +54,6 @@ export interface LaunchResult {
   finished: Promise<number | null>;
 }
 
-const AGENT: GitIdentity = { id: "claude-code@sdlc.local", name: "claude-code" };
 const SYSTEM: GitIdentity = { id: "sdlc-bot@sdlc.local", name: "sdlc-bot" };
 
 function kindForStage(view: ChangeView): SessionKind {
@@ -78,7 +80,7 @@ export function worktreePathFor(root: string, branch: string): string {
  * submit_plan_revision were refused), so plan sessions run in `default` mode and the
  * bundle's read-only allowedTools list is what keeps them from editing files.
  */
-function permissionMode(mode: Mode, kind: SessionKind): string {
+function permissionMode(mode: Mode, kind: SessionKind): "default" | "acceptEdits" {
   if (kind === "plan" || kind === "review" || kind === "propose" || mode === "PLAN") return "default";
   return "acceptEdits";
 }
@@ -182,26 +184,16 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   writeFileSync(join(stateDir, "context.json"), `${JSON.stringify(bundle, null, 2)}\n`);
 
   const claudeBin = deps.claudeBin ?? env["SDLC_CLAUDE_BIN"] ?? "claude";
-  const args = [
-    "-p",
-    prompt,
-    "--output-format",
-    "stream-json",
-    "--verbose",
-    "--permission-mode",
-    permissionMode(mode, kind),
-    "--mcp-config",
-    mcpConfig,
-    "--allowedTools",
-    ...bundle.allowedTools,
-    ...(resuming ? ["--resume", harnessSessionId] : ["--session-id", harnessSessionId]),
-  ];
-  const command = engineerCommand({ worktreePath: worktree, id, changeId: view.id, harnessSessionId, kind, mode }, claudeBin, resuming !== null);
+  // the harness (3.8): from config per session kind; Claude Code with every guarantee when none is declared
+  const harness = deps.harness ?? harnessFromConfig(harnessFor(repo.config.harnesses, kind), claudeBin);
+  const job: HarnessJob = { sessionId: id, harnessSessionId, kind, mode, changeId: view.id, prompt, promptFile: join(stateDir, "prompt.md"), mcpConfig, allowedTools: bundle.allowedTools, permissionMode: permissionMode(mode, kind), resume: resuming !== null, worktree };
+  const command = harness.engineerCommand({ worktree, sessionId: id, changeId: view.id, harnessSessionId, permissionMode: job.permissionMode, mcpConfig, resume: resuming !== null });
+  const transcriptPath = join(stateDir, harness.capabilities.transcript ? "stream.jsonl" : "output.log");
   // the session's span: a resume is a child in the same trace as the launch it continues
   const tracer = deps.tracer ?? noopTracer;
   const parent = existing?.traceId && existing.spanId ? { traceId: existing.traceId, spanId: existing.spanId } : null;
   const span = tracer.startSpan(resuming ? "sdlc.session.resume" : "sdlc.session", {
-    attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": mode, "sdlc.change": view.id, "sdlc.cycle": view.cycle, "sdlc.stage": view.stage, "sdlc.task": taskId, "sdlc.branch": branch, "sdlc.session.engineer": input.engineer ?? deps.identity.id, "sdlc.session.resume_count": resuming ? (existing?.resumeCount ?? 0) + 1 : 0, "sdlc.session.harness_id": harnessSessionId },
+    attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": mode, "sdlc.change": view.id, "sdlc.cycle": view.cycle, "sdlc.stage": view.stage, "sdlc.task": taskId, "sdlc.branch": branch, "sdlc.session.engineer": input.engineer ?? deps.identity.id, "sdlc.session.resume_count": resuming ? (existing?.resumeCount ?? 0) + 1 : 0, "sdlc.session.harness_id": harnessSessionId, "sdlc.session.harness": harness.id, "sdlc.session.degraded": harness.degraded.map((d) => d.guarantee).join(",") },
     parent,
   });
 
@@ -231,8 +223,10 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     autoRationale: { terms: view.autoEligible.terms.map((t) => `${t.ok ? "✓" : "✗"} ${t.name} — ${t.detail}`) },
     modelPin: existing?.modelPin ?? null,
     contextManifestRef: bundle.manifest,
-    transcriptRef: join(stateDir, "stream.jsonl") as string,
+    transcriptRef: transcriptPath,
     harnessSessionId,
+    harness: { id: harness.id, degraded: harness.degraded },
+    standIn: null,
     pid: null,
     exitCode: null,
     command,
@@ -248,7 +242,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   deps.registry.upsert(record);
 
   if (!resuming) {
-    const started: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(repo, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.started", data: { session: id, mode, ...(taskId ? { task: taskId } : {}), worktree: branch, ...(target ? { target } : {}) } } as Event;
+    const started: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(repo, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.started", data: { session: id, mode, ...(taskId ? { task: taskId } : {}), worktree: branch, ...(target ? { target } : {}), harness: { id: harness.id, degraded: harness.degraded } } } as Event;
     const sha = await systemEventCommit(ledgerDir, view.id, started, `sdlc(${view.id}): session ${id} started (${mode})`, SYSTEM);
     span.addEvent("sdlc.ledger.session.started", { "sdlc.event.id": started.id, "sdlc.commit": sha });
   }
@@ -260,23 +254,21 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     return { session: record, finished: Promise.resolve(null) };
   }
 
-  const child = (deps.spawnImpl ?? spawn)(claudeBin, args, {
-    cwd: worktree,
-    // the harness's own git commits are attributed to the agent identity (§12.4), not to the engineer who launched it
-    env: { ...env, SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent", SDLC_AGENT_ID: AGENT.id, GIT_AUTHOR_NAME: AGENT.name, GIT_AUTHOR_EMAIL: AGENT.id, GIT_COMMITTER_NAME: AGENT.name, GIT_COMMITTER_EMAIL: AGENT.id, ...homeEnv },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  // the harness's own git commits are attributed to the agent identity (§12.4), not to the engineer who launched it (sessionEnv in the adapter)
+  const { child, output } = harness.launch(job, { cwd: worktree, env: { ...env, ...homeEnv }, spawnImpl: deps.spawnImpl });
   deps.registry.patch(id, { pid: child.pid ?? null });
-  const transcriptPath = join(stateDir, "stream.jsonl");
   const finished = observe(child, deps.registry, id, {
     transcriptPath,
+    output,
     ...(deps.now ? { now: deps.now } : {}),
+    // no Stop hook: the console applies the hook's rule itself to the rounds the session recorded (3.8)
+    finalStatus: (status) => (status === "done" && !harness.capabilities.hooks.Stop ? standInForStop(worktree, id) : { status }),
     onExit: async (_code, { status }) => {
       const after = loadRepo(await readTree(ledgerDir, "HEAD").catch(() => repo.tree));
       const files2 = after.changes.get(view.id);
       const alreadyStopped = files2?.events.some((e) => e.event === "session.stopped" && e.data.session === id) ?? false;
       if (!alreadyStopped) {
-        const reason = status === "done" ? "done" : status === "taken_over" || status === "awaiting_engineer" ? "taken_over" : status === "stopped" ? "stopped" : "error";
+        const reason = status === "done" ? "done" : status === "done-unverified" ? "unverified" : status === "taken_over" || status === "awaiting_engineer" ? "taken_over" : status === "stopped" ? "stopped" : "error";
         const stopped: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(after, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.stopped", data: { session: id, reason } } as Event;
         // the ledger line is the record of the exit; another commit on the same branch (an index lock) is retried, never lost silently
         for (let attempt = 0; attempt < 5; attempt++) {
@@ -319,8 +311,21 @@ export function stopSession(registry: SessionRegistry, id: string, status: "stop
 
 export { stageDef };
 
+/**
+ * verify-before-done without a Stop hook (3.8): the same rule the hook applies
+ * (`check.verifyBeforeDone`) over the rounds the session recorded through
+ * `report_round`. Green → done; anything else → `done-unverified`, and the
+ * verdict is kept on the record verbatim.
+ */
+export function standInForStop(worktree: string, sessionId: string): { status: SessionStatus; patch: Partial<StoredSession> } {
+  const rounds = existsSync(worktree) ? (readRounds(worktree, sessionId) as StoredRound[]) : [];
+  const verdict = check.verifyBeforeDone(rounds);
+  const standIn = { guarantee: "verify-before-done", allowed: verdict.allowed, reason: verdict.reason, rounds: rounds.length };
+  return { status: verdict.allowed ? "done" : "done-unverified", patch: { standIn } };
+}
+
 /** The interactive command handed to the engineer for a SUPERVISED session (or one downgraded to it): same worktree, same MCP config, same harness session. */
-export function engineerCommand(s: Pick<StoredSession, "worktreePath" | "id" | "changeId" | "harnessSessionId" | "kind" | "mode">, claudeBin = "claude", resume = false): string {
+export function engineerCommand(s: Pick<StoredSession, "worktreePath" | "id" | "changeId" | "harnessSessionId" | "kind" | "mode">, claudeBin = "claude", resume = false, harness: Harness = claudeCodeHarness(claudeBin)): string {
   const mcpConfig = join(s.worktreePath, ".sdlc-state", "sessions", s.id, "mcp.json");
-  return `cd ${s.worktreePath} && SDLC_SESSION=${s.id} SDLC_CHANGE=${s.changeId} GIT_AUTHOR_NAME=${AGENT.name} GIT_AUTHOR_EMAIL=${AGENT.id} GIT_COMMITTER_NAME=${AGENT.name} GIT_COMMITTER_EMAIL=${AGENT.id} ${claudeBin} ${resume ? `--resume ${s.harnessSessionId}` : `--session-id ${s.harnessSessionId}`} --mcp-config ${mcpConfig} --permission-mode ${permissionMode(s.mode, s.kind)}`;
+  return harness.engineerCommand({ worktree: s.worktreePath, sessionId: s.id, changeId: s.changeId, harnessSessionId: s.harnessSessionId, permissionMode: permissionMode(s.mode, s.kind), mcpConfig, resume });
 }
