@@ -343,7 +343,7 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     expect((await viewOf(dir, id)).stage).toBe(2);
   }, 60_000);
 
-  it("a human who merges the intent PR seconds after it opens, before the console pushed its pr.opened line, leaves a ledger-only branch — the next pass records the merge and opens no second PR", async () => {
+  it("a human who merges the intent PR seconds after it opens, before the console pushed its pr.opened line, leaves a ledger-only branch — the next pass records the merge, opens no second PR and drops the branch", async () => {
     const { dir, gh, env } = await githubSeed();
     mapLogin(dir, PO, "priya-gh");
     await git(dir, ["commit", "-q", "-am", "sdlc(config): map priya-gh"]);
@@ -360,6 +360,10 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     const opened = (await git(dir, ["rev-parse", branch])).trim();
     await git(gh.bare, ["update-ref", `refs/heads/${branch}`, `${opened}~1`]);
     await mergeOnGitHub(gh, 1, "priya-gh");
+    // main moves on with unrelated work; the branch is judged by what it adds, not by what main gained since
+    writeFileSync(join(dir, "README.md"), "# widgets\n\nunrelated\n");
+    await git(dir, ["add", "README.md"]);
+    await git(dir, ["commit", "-q", "-m", "docs: readme"]);
     const sync2 = await engine.sync();
     expect(sync2?.merges).toMatchObject([{ changeId: id, gate: 1, mergedBy: "priya-gh", recorded: true }]);
     expect(sync2?.opened).toEqual([]);
@@ -370,8 +374,9 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     const v = await viewOf(dir, id);
     expect(v.stage).toBe(2);
     expect(v.acceptedGates).toEqual([1]);
-    // the local branch is still one ledger commit past main; a further pass leaves it alone too
-    expect((await git(dir, ["diff", "--name-only", "main", branch])).trim()).toBe(`sdlc/changes/${id}/log.jsonl`);
+    // the local branch (one ledger commit past main) is dropped so it stops overlaying the change; a further pass has nothing to do
+    expect((await gitRawShow(dir, `${branch}:sdlc/changes/${id}/log.jsonl`))).toBeNull();
+    expect((await po.refresh(true)).branches.map((x) => x.branch)).not.toContain(branch);
     const sync3 = await engine.sync();
     expect(sync3?.opened).toEqual([]);
     expect(intentPulls()).toHaveLength(1);

@@ -99,7 +99,7 @@ export interface PushedArtifactBranch {
  * and opens nothing. Idempotent: a branch whose PR is already recorded is
  * pushed again only when its head moved past origin's — the agent's revisions
  * reach the PR the reviewer reads — and never reopened. A branch that differs
- * from the base by ledger lines only is left alone: nothing to review.
+ * from the base by ledger lines only is dropped: nothing to review.
  */
 export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Promise<{ opened: OpenedArtifactPr[]; pushed: PushedArtifactBranch[]; errors: string[] }> {
   const snap = await store.refresh();
@@ -120,6 +120,15 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
     }
     const doc = view.docs[index];
     const recorded = view.artifactPrs[index];
+    // a branch whose only commits past the base are ledger lines carries nothing to review: its PR merged before the
+    // console's own `pr.opened` line was pushed (a human merging within seconds of the open), so the artifact is already
+    // on main. The branch is dropped so it stops overlaying the change; only the console's own lines go with it.
+    const touched = await diffFiles(store.root, `${base}...${b.branch}`).catch(() => null); // what the branch adds since it forked, not what main gained since
+    if (touched && touched.every((path) => path === logPath(view.id))) {
+      await gitRaw(store.root, ["branch", "-D", b.branch]);
+      mode.log?.(`${b.branch}: only ledger lines past ${base}; nothing to review — branch dropped`);
+      continue;
+    }
     if (recorded && !recorded.merged && recorded.branch === b.branch) {
       const origin = await gitRaw(store.root, ["rev-parse", "--verify", "-q", `refs/remotes/origin/${b.branch}`]);
       if (origin.code === 0 && origin.stdout.trim() === b.head) continue;
@@ -134,13 +143,6 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
       continue;
     }
     if (doc.state === "absent") continue;
-    // a branch whose only commits past the base are ledger lines carries nothing to review: its PR merged before the
-    // console's own `pr.opened` line was pushed (a human merging within seconds of the open), so the artifact is already on main
-    const touched = await diffFiles(store.root, base, b.branch);
-    if (touched.every((path) => path === logPath(view.id))) {
-      mode.log?.(`${b.branch}: only ledger lines past ${base}; nothing to review`);
-      continue;
-    }
     try {
       await assertProtected(mode.host.client, repoGh, base);
       await pushBranch(store.root, b.branch);
