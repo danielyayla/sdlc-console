@@ -1,4 +1,4 @@
-import { CONFIG_DEFAULTS, type Config, type Identity, type RecordsMode } from "@sdlc/schemas";
+import { CONFIG_DEFAULTS, type Config, type EnvironmentKind, type Identity, type RecordsMode } from "@sdlc/schemas";
 import type { GateRole } from "./stages.js";
 
 export interface ResolvedThresholds {
@@ -34,7 +34,24 @@ export interface ResolvedConfig {
   recordsConnector: string | null;
   /** Hosted mode (3.1): the OIDC provider `sdlc serve` signs people in with; null = local mode. */
   auth: ResolvedAuth | null;
+  /** Deployment environments (3.6) in config order; empty when none are declared. */
+  environments: ResolvedEnvironment[];
 }
+
+/** A deployment environment as the console runs it (3.6): declared commands only, and the production gate's roles. */
+export interface ResolvedEnvironment {
+  name: string;
+  kind: EnvironmentKind;
+  description: string | null;
+  deployCommand: string;
+  rollbackCommand: string;
+  healthcheckCommand: string | null;
+  /** Production: roles that own the production gate (`gate.roles`, default the gate 5 owner `eng`). Empty for other kinds. */
+  gateRoles: string[];
+}
+
+/** The production gate's default owner: the engineer who owns gate 5 (decisions Q3). */
+export const PRODUCTION_GATE_DEFAULT_ROLES: readonly string[] = ["eng"];
 
 export interface ResolvedAuth {
   provider: "oidc";
@@ -85,6 +102,15 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
     eligibility: { coverage: config?.eligibility?.coverage ?? CONFIG_DEFAULTS.eligibility.coverage },
     extraRoles: (config?.roles ?? []).map((x) => x.name),
     recordsConnector: config?.records?.connector ?? null,
+    environments: (config?.environments ?? []).map((e) => ({
+      name: e.name,
+      kind: e.kind,
+      description: e.description ?? null,
+      deployCommand: e.deploy.command,
+      rollbackCommand: e.rollback.command,
+      healthcheckCommand: e.healthcheck?.command ?? null,
+      gateRoles: e.kind === "production" ? (e.gate?.roles ?? [...PRODUCTION_GATE_DEFAULT_ROLES]) : [],
+    })),
     auth: config?.auth
       ? {
           provider: "oidc",
@@ -123,4 +149,24 @@ export function holdsRole(config: ResolvedConfig, identityId: string, role: Gate
 /** Identities holding a role; used for "no tech lead configured" style messages. */
 export function identitiesWithRole(config: ResolvedConfig, role: string): Identity[] {
   return config.identities.filter((i) => i.roles.includes(role));
+}
+
+/** An environment by name; null when `sdlc/config.yaml` does not declare it. */
+export function environmentByName(config: ResolvedConfig, name: string): ResolvedEnvironment | null {
+  return config.environments.find((e) => e.name === name) ?? null;
+}
+
+/** Environments an agent may deploy to (3.6): every kind but production. */
+export function agentDeployableEnvironments(config: ResolvedConfig): ResolvedEnvironment[] {
+  return config.environments.filter((e) => e.kind !== "production");
+}
+
+/** The environment behind the production gate: the first `production` entry; null when none is declared. */
+export function productionEnvironment(config: ResolvedConfig): ResolvedEnvironment | null {
+  return config.environments.find((e) => e.kind === "production") ?? null;
+}
+
+/** Whether an identity holds one of the roles that own the production gate. */
+export function holdsProductionGate(config: ResolvedConfig, identityId: string, env: ResolvedEnvironment): boolean {
+  return env.gateRoles.some((r) => holdsRole(config, identityId, r));
 }

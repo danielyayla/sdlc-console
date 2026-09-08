@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToString } from "react-dom/server";
-import { loadRepo, withFiles } from "@sdlc/core";
+import { accept, applyWritePlan, deriveChange, loadRepo, recordSessionDeploys, withFiles } from "@sdlc/core";
 import { PO, seedSessions, seedTree } from "@sdlc/fixtures";
 import { buildSnapshot } from "@sdlc/server";
 import { App } from "../src/app";
@@ -316,5 +316,70 @@ describe("maintain intake in the views (3.5)", () => {
     expect(html).toContain("Mara Lindqvist · ");
     expect(html).toContain(">billing</span>");
     expect((html.match(/Accept → Plan/g) ?? []).length).toBe(3);
+  });
+});
+
+describe("Deployment (3.6): environments, the production gate and the board", () => {
+  const ENG_ID = "eng@veri.example";
+  const ctx = (id: string, extra: Record<string, unknown> = {}) => ({ now: "2026-09-03T11:00:00Z", newId: (() => { let n = 0; return () => `01J8Z6Q7Y2K3M4N5P6Q7R8T${(++n).toString(36).toUpperCase().padStart(3, "0")}`.replace(/[ILOU]/g, "X"); })(), actor: { id }, ...extra });
+  const MERGE = "c2e4d0b3e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b4";
+  /** The seed with CHG-0017 merged (gate 5, local mode): the production gate is open. */
+  function mergedTree() {
+    const tree = seedTree();
+    const r0 = loadRepo(tree);
+    const f = r0.changes.get("CHG-0017");
+    if (!f) throw new Error("CHG-0017");
+    const r = accept(r0, deriveChange(r0, f), 5, ctx(ENG_ID, { mergeSha: MERGE }) as never);
+    if (!r.ok) throw new Error(JSON.stringify(r.diagnostics));
+    return applyWritePlan(tree, r.plan);
+  }
+  function rehearsedTree() {
+    const tree = mergedTree();
+    const r0 = loadRepo(tree);
+    const f = r0.changes.get("CHG-0017");
+    if (!f) throw new Error("CHG-0017");
+    const r = recordSessionDeploys(r0, deriveChange(r0, f), [{ kind: "deploy", env: "staging", sha: MERGE, startedAt: "2026-09-03T11:10:00Z", finishedAt: "2026-09-03T11:12:00Z", exitCode: 0, output: "deploy staging c2e4d0b\nrelease 2 live\n" }, { kind: "rehearsal", env: "staging", sha: MERGE, rehearsedAt: "2026-09-03T11:15:00Z", exitCode: 0, output: "rollback staging to previous release\nrelease 1 live\n" }], { type: "agent", id: "claude-code@sdlc.local", session: "sess-0017-deploy" }, ctx("sdlc-bot@sdlc.local") as never);
+    if (!r.ok) throw new Error(JSON.stringify(r.diagnostics));
+    return applyWritePlan(tree, r.plan);
+  }
+  const renderTree = (tree: ReturnType<typeof seedTree>, state = initialState("eng")) => {
+    const snap = buildSnapshot(loadRepo(tree), { id: ENG_ID, name: "Eli Ng", roles: ["eng"] }, seedSessions() as never, 1, now);
+    return { snap, html: renderToString(<App snapshot={snap} initial={state} now={now} live={false} />).replace(/<!-- -->/g, "") };
+  };
+
+  it("the detail lists the seed's environments; a stage-6 change with a pre-3.6 production record reads deployed", () => {
+    const html = render({ ...initialState("po"), view: "detail", sel: "CHG-0012" });
+    expect(html).toContain("Environments");
+    expect(html).toContain("preview");
+    expect(html).toContain("not deployed");
+    expect(html).toContain("production");
+    expect(html).toContain("succeeded");
+    // the board: Deploy-stage cards carry the environment strip
+    const board = render();
+    expect(board).toContain('class="env-strip"');
+    expect(board).toContain("· staging");
+  });
+
+  it("after the merge the production gate panel waits on the rehearsal with Deploy disabled, and queues for the engineer; after a rehearsed rollback the evidence shows verbatim and Deploy is live", () => {
+    const merged = renderTree(mergedTree(), { ...initialState("eng"), view: "detail", sel: "CHG-0017" });
+    expect(merged.html).toContain("Production gate · production");
+    expect(merged.html).toContain("sdlc/rollback-rehearsed");
+    expect(merged.html).toContain("no rollback rehearsal recorded");
+    expect(merged.html).toMatch(/<button class="btn primary" disabled="" title="sdlc\/rollback-rehearsed is pending[^"]*">Deploy to production<\/button>/);
+    expect(merged.html).toContain("Merged · production gate needs a rollback rehearsal");
+    const gates = renderTree(mergedTree(), { ...initialState("eng"), view: "gates" });
+    expect(gates.snap.queues.eng.yours).toContain("CHG-0017");
+    expect(gates.html).toContain("Deploy to production");
+    expect(gates.html).toContain("rollback rehearsal pending");
+    const po = renderTree(mergedTree(), { ...initialState("po"), view: "detail", sel: "CHG-0017" });
+    expect(po.html).toContain("Waiting on the engineer — switch role in the top bar to act.");
+
+    const ready = renderTree(rehearsedTree(), { ...initialState("eng"), view: "detail", sel: "CHG-0017" });
+    expect(ready.html).toContain("rollback staging to previous release\nrelease 1 live");
+    expect(ready.html).toContain("deploy staging c2e4d0b\nrelease 2 live");
+    expect(ready.html).toContain("rollback rehearsed on staging at c2e4d0b by claude-code@sdlc.local");
+    expect(ready.html).toMatch(/<button class="btn primary" title="runs the declared deploy command for production[^"]*">Deploy to production<\/button>/);
+    expect(ready.html).toContain("Rehearse rollback");
+    expect(ready.snap.changes.find((c) => c.id === "CHG-0017")?.status).toBe("Merged · production gate — waiting on the engineer");
   });
 });

@@ -6,7 +6,7 @@ import { installHooks } from "@sdlc/hooks";
 import { stringifyYaml } from "@sdlc/schemas";
 import { CliError, type Io } from "../io.js";
 import { TEMPLATES } from "../templates.js";
-import { WORKFLOW_FILES, detectWorkflow, evalsWorkflow, validateWorkflow, type InstallStep } from "../workflows.js";
+import { WORKFLOW_FILES, detectWorkflow, evalsWorkflow, productionGateWorkflow, validateWorkflow, type InstallStep } from "../workflows.js";
 
 export interface InitOptions {
   product?: string;
@@ -78,6 +78,7 @@ export async function init(io: Io, opts: InitOptions): Promise<InitResult> {
   put(WORKFLOW_FILES.evals, evalsWorkflow(workflow));
   put(WORKFLOW_FILES.validate, validateWorkflow(workflow));
   put(WORKFLOW_FILES.detect, detectWorkflow(workflow));
+  put(WORKFLOW_FILES.productionGate, productionGateWorkflow(workflow));
 
   if (installMergeUnion(root)) created.push(".gitattributes");
   else skipped.push(".gitattributes");

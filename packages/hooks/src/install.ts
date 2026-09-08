@@ -15,7 +15,7 @@ export function settingsSnippet(): Record<string, unknown> {
     hooks: {
       PreToolUse: [
         { matcher: "Edit|Write|MultiEdit|NotebookEdit", hooks: [{ type: "command", command: ".claude/hooks/test-freeze.sh" }] },
-        { matcher: "Bash", hooks: [{ type: "command", command: ".claude/hooks/plan-sync.sh" }] },
+        { matcher: "Bash", hooks: [{ type: "command", command: ".claude/hooks/plan-sync.sh" }, { type: "command", command: ".claude/hooks/production-gate.sh" }] },
       ],
       Stop: [{ hooks: [{ type: "command", command: ".claude/hooks/verify-before-done.sh" }] }],
     },

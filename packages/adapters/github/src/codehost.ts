@@ -160,6 +160,20 @@ export class GitHubCodeHost implements CodeHost {
     }
   }
 
+  /** One check on a commit (3.6): a status under a token, a check run with the evidence verbatim under the App. */
+  async publishCheck(root: string, sha: string, check: PrCheck, detailsUrl?: string): Promise<void> {
+    try {
+      const repo = await this.repoFor(root);
+      if (this.auth === "token") {
+        await publishStatus(this.client, repo, sha, { context: `sdlc/${check.name}`, state: verdictState(check.verdict), description: check.summary, ...(detailsUrl !== undefined ? { targetUrl: detailsUrl } : {}) });
+        return;
+      }
+      await publishCheckRun(this.client, repo, { name: `sdlc/${check.name}`, headSha: sha, ...checkConclusion(check.verdict), title: check.summary, summary: check.summary, ...(check.evidence !== undefined ? { text: check.evidence } : {}), ...(detailsUrl !== undefined ? { detailsUrl } : {}) });
+    } catch (e) {
+      throw hostError(e);
+    }
+  }
+
   async merge(root: string, pr: Pr, message: string, who: GitIdentity): Promise<string> {
     if (pr.number === undefined) throw new CodeHostError("pr.yaml has no pull request number; nothing to merge on GitHub", false);
     const current = (await git(root, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();

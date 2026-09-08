@@ -69,12 +69,12 @@ async function sdlc(dir: string, args: string[], identity = PO): Promise<{ code:
 const INTENT = "# Intent: Dunning reminders schedule\n\n## Problem\nOverdue invoices get no reminders.\n\n## Proposed outcome\nThree reminders at 7, 14 and 30 days.\n\n## Affected users and systems\nFinance; email service.\n\n## Constraints\nBrand voice; no reminders on disputed invoices.\n\n## Open questions\nEscalate after 30 days?\n";
 
 describe("sdlc-mcp tools", () => {
-  it("lists the fourteen tools and no accept/merge/approve/freeze-lift/repro-confirm", async () => {
+  it("lists the fourteen tools plus one deploy tool per non-production environment and rehearse_rollback (3.6); no accept/merge/approve/freeze-lift/repro-confirm and nothing for production", async () => {
     const dir = await seeded();
     const c = await client(dir);
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "propose_claude_md_line", "report_diagnosis", "report_done", "report_finding", "report_repro", "report_round", "request_input", "run_runbook", "submit_plan_revision"]);
-    expect(names.some((n) => /accept|merge|approve|lift|confirm/.test(n))).toBe(false);
+    expect(names).toEqual(["deploy_preview", "deploy_staging", "get_change", "get_context", "list_work", "log_note", "propose_artifact", "propose_claude_md_line", "rehearse_rollback", "report_diagnosis", "report_done", "report_finding", "report_repro", "report_round", "request_input", "run_runbook", "submit_plan_revision"]);
+    expect(names.some((n) => /accept|merge|approve|lift|confirm|production/.test(n))).toBe(false);
   });
 
   it("propose_claude_md_line (2.8): keeps a one-line draft beside the session; a reason already answered by a proposal is refused", async () => {
@@ -372,5 +372,55 @@ runbooks:
     expect(String(twice.value["error"])).toContain("already ran in this session");
     // nothing was committed: the engine records the run when the session ends
     expect((await git(dir, ["status", "--porcelain", "--", "sdlc"])).trim()).toBe("");
+  });
+});
+
+describe("deployment tools per environment (3.6)", () => {
+  it("deploy_<env> runs the declared command with the deploy variables, returns the output verbatim, keeps the outcome beside the session and commits nothing; rehearse_rollback needs a deployment and records the rehearsal at that commit", async () => {
+    const dir = await seeded();
+    const head = (await git(dir, ["rev-parse", "HEAD"])).trim();
+    const c = await client(dir, { SDLC_SESSION: "sess-dep", SDLC_CHANGE: "CHG-0017" });
+    const tools = (await c.listTools()).tools;
+    expect(tools.find((t) => t.name === "deploy_staging")?.description).toContain("never a caller's command");
+    expect(tools.some((t) => t.name === "deploy_production")).toBe(false);
+
+    const early = await call(c, "rehearse_rollback", { env: "staging" });
+    expect(early.isError).toBe(true);
+    expect(String(early.value["error"])).toContain("nothing is deployed to staging");
+
+    const deployed = await call(c, "deploy_staging", {});
+    expect(deployed.isError).toBe(false);
+    expect(deployed.value).toMatchObject({ env: "staging", kind: "staging", sha: head, command: "echo deploy staging $SDLC_SHA", exitCode: 0, status: "succeeded", output: `deploy staging ${head}\n`, healthcheck: { command: "echo staging healthy", exitCode: 0, output: "staging healthy\n" } });
+    expect(String(deployed.value["note"])).toContain("recorded on sdlc/changes/CHG-0017/deploy.yaml when the session ends");
+
+    const rehearsed = await call(c, "rehearse_rollback", { env: "staging" });
+    expect(rehearsed.isError).toBe(false);
+    expect(rehearsed.value).toMatchObject({ env: "staging", sha: head, command: "echo rollback staging to previous release", exitCode: 0, status: "succeeded", output: "rollback staging to previous release\n" });
+
+    const drafts = readFileSync(join(dir, ".sdlc-state/sessions/sess-dep/deploys.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as { kind: string; env: string; sha: string; exitCode: number });
+    expect(drafts.map((d) => [d.kind, d.env, d.sha, d.exitCode])).toEqual([["deploy", "staging", head, 0], ["rehearsal", "staging", head, 0]]);
+    // the record is the engine's to commit when the session ends: the tree is untouched
+    expect((await git(dir, ["status", "--porcelain", "--", "sdlc"])).trim()).toBe("");
+    expect((await git(dir, ["rev-parse", "HEAD"])).trim()).toBe(head);
+
+    // production is not an argument the tool accepts
+    const production = await c.callTool({ name: "rehearse_rollback", arguments: { env: "production" } }).then((r) => r as { isError?: boolean }, (e: Error) => ({ isError: true, message: e.message }));
+    expect(production.isError).toBe(true);
+  });
+
+  it("a config without environments yields the fourteen tools alone; an environment dropped from the config after the server started is refused at call time", async () => {
+    const dir = await seeded();
+    const cfg = join(dir, "sdlc/config.yaml");
+    const withEnvs = readFileSync(cfg, "utf8");
+    const c = await client(dir, { SDLC_SESSION: "sess-late", SDLC_CHANGE: "CHG-0017" });
+    expect((await c.listTools()).tools.map((t) => t.name)).toContain("deploy_preview");
+    const { writeFileSync: write } = await import("node:fs");
+    write(cfg, withEnvs.replace(/environments:[\s\S]*$/, ""));
+    await git(dir, ["commit", "-q", "-am", "config: no environments"]);
+    const dropped = await call(c, "deploy_preview", {});
+    expect(dropped.isError).toBe(true);
+    expect(String(dropped.value["error"])).toContain("no longer an environment");
+    const bare = await client(dir);
+    expect((await bare.listTools()).tools).toHaveLength(14);
   });
 });

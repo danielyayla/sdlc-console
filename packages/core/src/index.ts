@@ -32,3 +32,4 @@ export * from "./sha256.js";
 export * from "./export.js";
 export * from "./bands.js";
 export * from "./intake.js";
+export * from "./deploy.js";

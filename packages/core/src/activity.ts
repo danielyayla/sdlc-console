@@ -76,13 +76,15 @@ export function describeEvent(e: Event): string {
     case "review.finding":
       return `review finding (${e.data.severity}): ${e.data.title}`;
     case "deploy.authorized":
-      return `authorized deploy to ${e.data.env}`;
+      return `accepted the production gate: authorized ${e.data.sha ? `${e.data.sha.slice(0, 7)} ` : ""}to ${e.data.env}${e.data.note ? ` — ${e.data.note}` : ""}`;
     case "deploy.started":
-      return `deploy to ${e.data.env} started`;
+      return `deploy to ${e.data.env} started${e.data.sha ? ` (${e.data.sha.slice(0, 7)})` : ""}`;
     case "deploy.finished":
-      return `deploy to ${e.data.env} finished`;
+      return `deploy to ${e.data.env} finished${e.data.sha ? ` (${e.data.sha.slice(0, 7)})` : ""}`;
     case "deploy.failed":
       return `deploy to ${e.data.env} failed${e.data.reason ? `: ${e.data.reason}` : ""}`;
+    case "rollback.rehearsed":
+      return `rollback rehearsed on ${e.data.env} at ${e.data.sha.slice(0, 7)} — ${e.data.status}`;
     case "record.linked":
       return `linked to ${e.data.system} ${e.data.id}`;
     case "record.writeback.ok":

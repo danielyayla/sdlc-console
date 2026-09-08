@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { PATHS, filesUnder, readFile, type ChangeView, type Repo } from "@sdlc/core";
+import { PATHS, agentDeployableEnvironments, filesUnder, readFile, type ChangeView, type Repo } from "@sdlc/core";
+import { REHEARSE_TOOL, deployToolName } from "./deploy-tools.js";
 
 export type JobKind = "intent-session" | "design-pass" | "plan-session" | "build-session" | "review" | "diagnose" | "claude-md-proposal";
 
@@ -55,7 +56,10 @@ export function buildContext(repo: Repo, view: ChangeView, job?: typeof PROPOSAL
   const spec = job ?? JOBS[view.stage] ?? JOBS[1];
   if (!spec) throw new Error("no job spec");
   const fp = repo.fingerprint;
-  const payload = { changeId: view.id, cycle: view.cycle, stage: view.stage, job: spec.job, files, promptRef: spec.promptRef, allowedTools: spec.allowedTools, skills: fp.skills, claudeMdSha: fp.claudeMdSha, hooksSha: fp.hooksSha, model: fp.model };
+  // 3.6: build and review sessions may deploy to the non-production environments and rehearse the rollback there; production never
+  const envs = !job && (view.stage === 4 || view.stage === 5) ? agentDeployableEnvironments(repo.config) : [];
+  const allowedTools = envs.length > 0 ? [...spec.allowedTools, ...envs.map((e) => `mcp__sdlc__${deployToolName(e.name)}`), `mcp__sdlc__${REHEARSE_TOOL}`] : spec.allowedTools;
+  const payload = { changeId: view.id, cycle: view.cycle, stage: view.stage, job: spec.job, files, promptRef: spec.promptRef, allowedTools, skills: fp.skills, claudeMdSha: fp.claudeMdSha, hooksSha: fp.hooksSha, model: fp.model };
   const manifest = `sha256:${createHash("sha256").update(JSON.stringify(payload)).digest("hex")}`;
   return { ...payload, manifest, output: spec.output };
 }

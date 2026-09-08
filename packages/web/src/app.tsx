@@ -132,6 +132,8 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onLiftFreeze={(path, reason) => void run(`/changes/${selected.id}/freeze/lift`, { path, reason })}
         onDismissAutoFinding={(path, reason) => void run(`/changes/${selected.id}/auto-findings/dismiss`, { path, reason })}
         exportHref={exportHref(selected.id, state.product)}
+        onDeploy={(env) => void run(`/changes/${selected.id}/deploy`, { env })}
+        onRehearse={(env) => void run(`/changes/${selected.id}/rehearse-rollback`, { env })}
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );

@@ -134,17 +134,52 @@ describe("installHooks", () => {
     const root = mkdtempSync(join(tmpdir(), "sdlc-install-"));
     cleanups.push(() => rmSync(root, { recursive: true, force: true }));
     const first = installHooks(root, "/opt/sdlc/bin.js");
-    expect(first.created).toEqual([".claude/hooks/plan-sync.sh", ".claude/hooks/test-freeze.sh", ".claude/hooks/verify-before-done.sh", ".claude/settings.json"]);
+    expect(first.created).toEqual([".claude/hooks/plan-sync.sh", ".claude/hooks/test-freeze.sh", ".claude/hooks/verify-before-done.sh", ".claude/hooks/production-gate.sh", ".claude/settings.json"]);
     expect(first.snippet).toBeNull();
     const wrapper = readFileSync(join(root, ".claude/hooks/plan-sync.sh"), "utf8");
     expect(wrapper).toContain("exec sdlc hook plan-sync");
     expect(wrapper).toContain("/opt/sdlc/bin.js");
-    const settings = JSON.parse(readFileSync(join(root, ".claude/settings.json"), "utf8")) as { hooks: { Stop: unknown[] } };
+    const settings = JSON.parse(readFileSync(join(root, ".claude/settings.json"), "utf8")) as { hooks: { Stop: unknown[]; PreToolUse: { matcher: string; hooks: { command: string }[] }[] } };
     expect(settings.hooks.Stop).toHaveLength(1);
+    // 3.6: the production-gate hook sits beside plan-sync on shell commands
+    expect(settings.hooks.PreToolUse.find((h) => h.matcher === "Bash")?.hooks.map((h) => h.command)).toEqual([".claude/hooks/plan-sync.sh", ".claude/hooks/production-gate.sh"]);
     const second = installHooks(root, null);
     expect(second.created).toEqual([]);
-    expect(second.skipped).toHaveLength(4);
+    expect(second.skipped).toHaveLength(5);
     expect(second.snippet).toContain("verify-before-done");
     expect(existsSync(dirname(join(root, ".claude/hooks/x")))).toBe(true);
+  });
+});
+
+describe("production-gate (FR-40, 3.6)", () => {
+  it("blocks an agent's shell command that would deploy or roll back production, logs the block on the change, and lets every other command through", async () => {
+    const { root, wt } = await seededWorktree("CHG-0017", "export");
+    const before = ledger(wt, "CHG-0017").length;
+    const deploy = await runHook("production-gate", bash(wt, "echo deploy production $SDLC_SHA"));
+    expect(deploy.exitCode).toBe(2);
+    expect(deploy.reason).toContain("production is deployed only through the production gate");
+    expect(deploy.reason).toContain("sdlc deploy production <CHG>");
+    expect((await runHook("production-gate", bash(wt, "echo rollback production to previous release"))).exitCode).toBe(2);
+    expect((await runHook("production-gate", bash(wt, "sdlc deploy production CHG-0017"))).exitCode).toBe(2);
+    expect((await runHook("production-gate", bash(wt, "sdlc rehearse-rollback production CHG-0017"))).exitCode).toBe(2);
+    const lines = ledger(wt, "CHG-0017");
+    expect(lines).toHaveLength(before + 4);
+    expect(JSON.parse(lines.at(-1) ?? "{}")).toMatchObject({ event: "hook.blocked", actor: { type: "agent", session: "sess-t" }, data: { hook: "production-gate" } });
+    // staging is the agent's to deploy; git and tests are not deploys
+    expect((await runHook("production-gate", bash(wt, "echo deploy staging $SDLC_SHA"))).exitCode).toBe(0);
+    expect((await runHook("production-gate", bash(wt, "sdlc deploy staging CHG-0017"))).exitCode).toBe(0);
+    expect((await runHook("production-gate", bash(wt, "pnpm test"))).exitCode).toBe(0);
+    expect((await runHook("production-gate", edit(wt, "src/x.ts"))).exitCode).toBe(0);
+    expect(ledger(wt, "CHG-0017")).toHaveLength(before + 4);
+    // outside a change context the command is still blocked (the config is the repository's), with nothing to log it on
+    const onMain = await runHook("production-gate", bash(root, "echo deploy production $SDLC_SHA && echo done"));
+    expect(onMain).toMatchObject({ exitCode: 2, logged: false });
+  });
+  it("is a no-op where no production environment is declared", async () => {
+    const { wt } = await seededWorktree("CHG-0017", "export");
+    writeFileSync(join(wt, "sdlc/config.yaml"), readFileSync(join(wt, "sdlc/config.yaml"), "utf8").replace(/environments:[\s\S]*$/, ""));
+    await git(wt, ["commit", "-q", "-am", "no environments"]);
+    const r = await runHook("production-gate", bash(wt, "echo deploy production"));
+    expect(r).toMatchObject({ exitCode: 0, reason: "no production environment declared in sdlc/config.yaml" });
   });
 });

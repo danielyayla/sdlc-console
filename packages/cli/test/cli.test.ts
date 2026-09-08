@@ -91,6 +91,32 @@ describe("sdlc init", () => {
   });
 });
 
+/** Hand-build CHG-0001 at stage 6 (merged) on main. */
+async function stage6Fixture(dir: string): Promise<void> {
+  await initAndCommit(dir);
+  const sha = "0123456789abcdef0123456789abcdef01234567";
+  // hand-build a change at stage 6 (merged) on main
+  const chg = "sdlc/changes/CHG-0001";
+  put(dir, `${chg}/change.yaml`, `schema: 1\nid: CHG-0001\ntitle: Export\nkind: feature\nrisk: routine\ncreated: { by: po@example.com, at: "2026-09-01T09:00:00Z" }\norigin: { type: idea }\nrecord: null\ncycle: 1\nrepro: null\nclosed: null\n`);
+  put(dir, `${chg}/intent.md`, `---\nid: CHG-0001\nartifact: intent\ncycle: 1\nauthor: po@example.com\ncreated: 2026-09-01T09:00:00Z\nschema: 1\n---\n${FULL_INTENT}`);
+  put(dir, `${chg}/spec.md`, `---\nid: CHG-0001\nartifact: spec\ncycle: 1\nintent_sha: ${sha}\nskills: []\nconcerns: []\ncreated: 2026-09-01T10:00:00Z\nschema: 1\n---\n# Spec: Export\n\n## Requirements\nr\n\n## Design\nd\n\n## Areas of concern\nnone\n\n## Open questions carried forward\nnone\n`);
+  put(dir, `${chg}/plan.md`, `---\nid: CHG-0001\nartifact: plan\ncycle: 1\nspec_sha: ${sha}\nrev: 1\naccepted_by: eng@example.com\naccepted_at: 2026-09-01T11:00:00Z\nacceptance_line: "tests pass"\nschema: 1\n---\n# Plan: Export\n\n## Files that change\nsrc/export.ts (new)\n\n## Order of work\n1. do\n\n## Risks\nnone\n\n## Proof\ntests\n`);
+  const fp = { claudeMdSha: (await git(dir, ["rev-parse", "HEAD:CLAUDE.md"])).trim(), skills: [], hooksSha: (await git(dir, ["rev-parse", "HEAD:.claude/settings.json"])).trim(), model: "claude-opus-5" };
+  put(dir, `${chg}/evals/run-1.json`, JSON.stringify({ schema: 1, n: 1, changeId: "CHG-0001", cycle: 1, worktree: "CHG-0001/src", headSha: sha, fileSet: ["src/export.ts"], configRef: fp, results: [], commandResults: [{ name: "test", cmd: "pnpm test", exitCode: 0, pass: true, output: "ok" }], verdict: "green", startedAt: "2026-09-01T12:00:00Z" }));
+  put(dir, `${chg}/pr.yaml`, `schema: 1\nprovider: local\nbranch: CHG-0001/src\nbaseBranch: main\nheadSha: ${sha}\nopenedAt: 2026-09-01T12:30:00Z\nmergedAt: 2026-09-01T13:00:00Z\nmergeSha: ${sha}\nreviewers: []\nchecks: []\nplanMatches: true\n`);
+  const ev = (seq: number, actor: object, event: string, data: object) => JSON.stringify({ schema: 1, id: `01J8Z6Q7Y2K3M4N5P6Q7R8S9${seq.toString(36).toUpperCase().padStart(2, "0")}`.replace(/[ILOU]/g, "X"), ts: `2026-09-01T09:${String(seq).padStart(2, "0")}:00Z`, seq, cycle: 1, actor, event, data });
+  const po = { type: "human", id: "po@example.com", role: "po" };
+  const eng = { type: "human", id: "eng@example.com", role: "eng" };
+  put(dir, `${chg}/log.jsonl`, [
+    ev(1, po, "gate.accepted", { gate: 1, artifactSha: sha, source: "cli" }),
+    ev(2, po, "gate.accepted", { gate: 2, artifactSha: sha, source: "cli" }),
+    ev(3, eng, "gate.accepted", { gate: 3, artifactSha: sha, source: "cli" }),
+    ev(4, { type: "system", id: "sdlc-bot" }, "pr.merged", { mergeSha: sha }),
+  ].join("\n") + "\n");
+  await git(dir, ["add", "-A"]);
+  await git(dir, ["commit", "-q", "-m", "fixture at stage 6"]);
+}
+
 describe("change new / list / show / validate / accept / send-back / audit", () => {
   it("runs a change through gate 1 with a clean audit chain", async () => {
     const dir = await freshRepo();
@@ -179,31 +205,6 @@ describe("change new / list / show / validate / accept / send-back / audit", () 
     expect(audit.out).toContain("chain: BROKEN");
   });
 
-/** Hand-build CHG-0001 at stage 6 (merged) on main. */
-async function stage6Fixture(dir: string): Promise<void> {
-  await initAndCommit(dir);
-  const sha = "0123456789abcdef0123456789abcdef01234567";
-  // hand-build a change at stage 6 (merged) on main
-  const chg = "sdlc/changes/CHG-0001";
-  put(dir, `${chg}/change.yaml`, `schema: 1\nid: CHG-0001\ntitle: Export\nkind: feature\nrisk: routine\ncreated: { by: po@example.com, at: "2026-09-01T09:00:00Z" }\norigin: { type: idea }\nrecord: null\ncycle: 1\nrepro: null\nclosed: null\n`);
-  put(dir, `${chg}/intent.md`, `---\nid: CHG-0001\nartifact: intent\ncycle: 1\nauthor: po@example.com\ncreated: 2026-09-01T09:00:00Z\nschema: 1\n---\n${FULL_INTENT}`);
-  put(dir, `${chg}/spec.md`, `---\nid: CHG-0001\nartifact: spec\ncycle: 1\nintent_sha: ${sha}\nskills: []\nconcerns: []\ncreated: 2026-09-01T10:00:00Z\nschema: 1\n---\n# Spec: Export\n\n## Requirements\nr\n\n## Design\nd\n\n## Areas of concern\nnone\n\n## Open questions carried forward\nnone\n`);
-  put(dir, `${chg}/plan.md`, `---\nid: CHG-0001\nartifact: plan\ncycle: 1\nspec_sha: ${sha}\nrev: 1\naccepted_by: eng@example.com\naccepted_at: 2026-09-01T11:00:00Z\nacceptance_line: "tests pass"\nschema: 1\n---\n# Plan: Export\n\n## Files that change\nsrc/export.ts (new)\n\n## Order of work\n1. do\n\n## Risks\nnone\n\n## Proof\ntests\n`);
-  const fp = { claudeMdSha: (await git(dir, ["rev-parse", "HEAD:CLAUDE.md"])).trim(), skills: [], hooksSha: (await git(dir, ["rev-parse", "HEAD:.claude/settings.json"])).trim(), model: "claude-opus-5" };
-  put(dir, `${chg}/evals/run-1.json`, JSON.stringify({ schema: 1, n: 1, changeId: "CHG-0001", cycle: 1, worktree: "CHG-0001/src", headSha: sha, fileSet: ["src/export.ts"], configRef: fp, results: [], commandResults: [{ name: "test", cmd: "pnpm test", exitCode: 0, pass: true, output: "ok" }], verdict: "green", startedAt: "2026-09-01T12:00:00Z" }));
-  put(dir, `${chg}/pr.yaml`, `schema: 1\nprovider: local\nbranch: CHG-0001/src\nbaseBranch: main\nheadSha: ${sha}\nopenedAt: 2026-09-01T12:30:00Z\nmergedAt: 2026-09-01T13:00:00Z\nmergeSha: ${sha}\nreviewers: []\nchecks: []\nplanMatches: true\n`);
-  const ev = (seq: number, actor: object, event: string, data: object) => JSON.stringify({ schema: 1, id: `01J8Z6Q7Y2K3M4N5P6Q7R8S9${seq.toString(36).toUpperCase().padStart(2, "0")}`.replace(/[ILOU]/g, "X"), ts: `2026-09-01T09:${String(seq).padStart(2, "0")}:00Z`, seq, cycle: 1, actor, event, data });
-  const po = { type: "human", id: "po@example.com", role: "po" };
-  const eng = { type: "human", id: "eng@example.com", role: "eng" };
-  put(dir, `${chg}/log.jsonl`, [
-    ev(1, po, "gate.accepted", { gate: 1, artifactSha: sha, source: "cli" }),
-    ev(2, po, "gate.accepted", { gate: 2, artifactSha: sha, source: "cli" }),
-    ev(3, eng, "gate.accepted", { gate: 3, artifactSha: sha, source: "cli" }),
-    ev(4, { type: "system", id: "sdlc-bot" }, "pr.merged", { mergeSha: sha }),
-  ].join("\n") + "\n");
-  await git(dir, ["add", "-A"]);
-  await git(dir, ["commit", "-q", "-m", "fixture at stage 6"]);
-}
 
   it("loop --incident commits the incident then re-enters cycle 2", async () => {
     const dir = await freshRepo();
@@ -668,5 +669,83 @@ describe("sdlc ingest (3.5): the webhook envelopes from a file, committed by sdl
     expect(acc.json<{ changeId: string }>().changeId).toBe("CHG-0001");
     const list = await sdlc(dir, ["change", "list", "--json"]);
     expect(list.json<{ id: string; origin: { type: string; ref?: string } }[]>()[0]?.origin).toEqual({ type: "triage", ref: "TRI-0001" });
+  });
+});
+
+describe("deployment (3.6): sdlc deploy, sdlc rehearse-rollback, sdlc production-gate", () => {
+  const ENVIRONMENTS = `environments:
+  - { name: staging, kind: staging, deploy: { command: "echo deploy staging $SDLC_SHA" }, rollback: { command: "echo rollback staging" } }
+  - { name: production, kind: production, deploy: { command: "echo deploy production $SDLC_SHA" }, rollback: { command: "echo rollback production" }, healthcheck: { command: "echo healthy" } }
+`;
+  async function stage6WithEnvironments(): Promise<string> {
+    const dir = await freshRepo();
+    await stage6Fixture(dir);
+    put(dir, "sdlc/config.yaml", `${readFileSync(join(dir, "sdlc/config.yaml"), "utf8")}${ENVIRONMENTS}`);
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "sdlc(config): environments"]);
+    return dir;
+  }
+
+  it("golden path: production is refused for an agent, a non-owner and without a rehearsal; staging deploys, the rollback is rehearsed, the gate's check is green, and the engineer deploys production", async () => {
+    const dir = await stage6WithEnvironments();
+    const eng = { SDLC_IDENTITY: "eng@example.com" };
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+    const before = await sdlc(dir, ["change", "show", "CHG-0001", "--json"]);
+    expect(before.json<{ stage: number; status: string }>()).toMatchObject({ stage: 6, status: "Merged · production gate needs a rollback rehearsal" });
+
+    const asAgent = await sdlc(dir, ["deploy", "production", "CHG-0001"], { SDLC_ACTOR_TYPE: "agent" });
+    expect(asAgent.code).toBe(2);
+    expect(asAgent.err).toContain("human-only");
+    const unrehearsed = await sdlc(dir, ["deploy", "production", "CHG-0001"], eng);
+    expect(unrehearsed.code).toBe(2);
+    expect(unrehearsed.err).toContain("production.rollback-not-rehearsed");
+    const pending = await sdlc(dir, ["production-gate", "CHG-0001"]);
+    expect(pending.code).toBe(1);
+    expect(pending.out).toContain("sdlc/rollback-rehearsed: pending");
+
+    const staging = await sdlc(dir, ["deploy", "staging", "CHG-0001"], eng);
+    expect(staging.code).toBe(0);
+    expect(staging.out).toContain(`CHG-0001: deploy staging ← ${sha.slice(0, 7)} succeeded (exit 0)`);
+    expect(staging.out).toContain(`deploy staging ${sha}`);
+    expect((await sdlc(dir, ["rehearse-rollback", "production", "CHG-0001"], eng)).code).toBe(2);
+    const rehearsed = await sdlc(dir, ["rehearse-rollback", "staging", "CHG-0001"], eng);
+    expect(rehearsed.code).toBe(0);
+    expect(rehearsed.out).toContain(`rollback rehearsed on staging at ${sha.slice(0, 7)} succeeded (exit 0)`);
+    expect(rehearsed.out).toContain("rollback staging");
+    const green = await sdlc(dir, ["production-gate", "CHG-0001", "--json"]);
+    expect(green.code).toBe(0);
+    expect(green.json<{ verdict: string; open: boolean; evidence: string }>()).toMatchObject({ verdict: "pass", open: true, evidence: "rollback staging\n" });
+    // by sha, as the CI workflow calls it: the merged commit finds the change; a stranger commit is nothing to gate
+    expect((await sdlc(dir, ["production-gate", "--sha", sha])).code).toBe(0);
+    const stranger = await sdlc(dir, ["production-gate", "--sha", "f".repeat(40)]);
+    expect(stranger.code).toBe(0);
+    expect(stranger.out).toContain("nothing to gate");
+
+    const notOwner = await sdlc(dir, ["deploy", "production", "CHG-0001"]);
+    expect(notOwner.code).toBe(2);
+    expect(notOwner.err).toContain("does not hold the eng role");
+    const production = await sdlc(dir, ["deploy", "production", "CHG-0001", "--json"], eng);
+    expect(production.code).toBe(0);
+    expect(production.json<{ status: string; view: { status: string } }>()).toMatchObject({ status: "succeeded", view: { status: "Deployed · monitoring" } });
+    const log = await git(dir, ["log", "--format=%ae %s", "-5"]);
+    expect(log).toContain(`eng@example.com sdlc(CHG-0001): production gate accepted → deploy production ← ${sha.slice(0, 7)}`);
+    expect(log).toContain(`eng@example.com sdlc(CHG-0001): deploy production ← ${sha.slice(0, 7)} succeeded`);
+    expect(readFileSync(join(dir, "sdlc/changes/CHG-0001/deploy.yaml"), "utf8")).toContain("authorizedBy: eng@example.com");
+    expect((await sdlc(dir, ["validate", "--json"])).json<{ blocking: boolean }>().blocking).toBe(false);
+    const closed = await sdlc(dir, ["deploy", "production", "CHG-0001"], eng);
+    expect(closed.code).toBe(2);
+    expect(closed.err).toContain("already deployed");
+  }, 30_000);
+
+  it("init writes the production-gate hook wrapper and workflow alongside the others", async () => {
+    const dir = await freshRepo();
+    const r = await sdlc(dir, ["init", "--json"]);
+    expect(r.json<{ created: string[] }>().created).toEqual(expect.arrayContaining([".claude/hooks/production-gate.sh", ".github/workflows/sdlc-production-gate.yml"]));
+    const workflow = readFileSync(join(dir, ".github/workflows/sdlc-production-gate.yml"), "utf8");
+    expect(workflow).toContain("npx sdlc production-gate ${{ inputs.change }} --sha ${{ github.sha }} --publish");
+    expect(workflow).toContain("statuses: write");
+    expect(readFileSync(join(dir, ".claude/hooks/production-gate.sh"), "utf8")).toContain("exec sdlc hook production-gate");
+    const hook = await sdlc(dir, ["hook", "production-gate"], {}, JSON.stringify({ session_id: "s", cwd: dir, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "echo deploy" } }));
+    expect(hook.code).toBe(0);
   });
 });

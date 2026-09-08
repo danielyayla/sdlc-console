@@ -313,6 +313,92 @@
     "intentHome": {
       "type": "string"
     },
+    "environments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "preview",
+              "staging",
+              "production"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "deploy": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "additionalProperties": false
+          },
+          "rollback": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "additionalProperties": false
+          },
+          "healthcheck": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "command"
+            ],
+            "additionalProperties": false
+          },
+          "gate": {
+            "type": "object",
+            "properties": {
+              "roles": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                }
+              }
+            },
+            "required": [
+              "roles"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "deploy",
+          "rollback"
+        ],
+        "additionalProperties": false
+      }
+    },
     "artifacts": {
       "type": "array",
       "items": {

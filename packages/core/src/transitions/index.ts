@@ -13,3 +13,4 @@ export * from "./review.js";
 export * from "./evals.js";
 export * from "./override.js";
 export * from "./record.js";
+export * from "./deploy.js";

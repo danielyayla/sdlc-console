@@ -1,9 +1,10 @@
 import { DEFAULT_DETECT_EVERY, deriveChange, loadRepo, openBreachItem, parseInterval, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, raiseBandBreaches, reasonKey, validateWritePlan, writebacksInState, type BandBreach, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
 import { readSnapshots, runDetection, type DetectionPass } from "@sdlc/detect";
 import { launchBandSession, recordBandSession } from "../maintain/index.js";
+import { recordDeploysForSession } from "../deploy/index.js";
 import { SYSTEM_IDENTITY } from "./codehost.js";
 import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
-import { readReproDraft } from "@sdlc/mcp";
+import { readReproDraft, readSessionDeploys } from "@sdlc/mcp";
 import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
@@ -663,6 +664,8 @@ export class Engine {
       await this.recordBandForSession(session);
       return;
     }
+    // 3.6: what the session deployed and rehearsed goes onto deploy.yaml before anything else reads the change
+    if (session.changeId && readSessionDeploys(session.worktreePath, session.id).length > 0) await this.recordDeploysForSession(session);
     if (session.kind === "review" && session.status === "done") {
       await this.mirrorForSession(session);
       return;
@@ -677,6 +680,27 @@ export class Engine {
       return;
     }
     await this.runForSession(session);
+  }
+
+  /** A session finished (3.6): its `deploy_<env>` and `rehearse_rollback` outcomes become the change's deploy.yaml record, once per session, committed by sdlc-bot with the job trailer. */
+  async recordDeploysForSession(session: StoredSession): Promise<Job | null> {
+    await this.opts.store.refresh(true);
+    const repo = this.opts.store.currentRepo;
+    if (!repo || !session.changeId) return null;
+    const key = `deploy-record:${session.id}`;
+    const job = this.opts.jobs.claim({ key, kind: "deploy-record", changeId: session.changeId, cycle: session.cycle, stage: 5 }, this.now());
+    if (!job) return null;
+    try {
+      const outcome = await recordDeploysForSession({ root: this.opts.store.root, session, jobKey: key, ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), log: (l) => this.log(l) }, repo);
+      this.opts.jobs.update(key, { state: outcome.commit ? "done" : "skipped", note: outcome.note }, this.now());
+      this.log(`${session.changeId}: ${outcome.note}`);
+      await this.opts.store.refresh(true);
+    } catch (e) {
+      this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+      this.log(`${session.changeId}: deployments not recorded: ${(e as Error).message}`);
+      this.opts.store.rebuild();
+    }
+    return this.opts.jobs.get(key);
   }
 
   /** A review session finished: mirror its findings into the change and onto the PR (once per session) — also when the PR merged while it ran. */

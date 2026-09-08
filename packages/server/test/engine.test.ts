@@ -121,7 +121,9 @@ describe("per-change run → PR → stage 5 → merge → stage 6 → loop (acce
     await commitWritePlan(dir, r.plan, { identity: ENG });
     const v6 = (await viewOf(dir, "CHG-0018")).view;
     expect(v6.stage).toBe(6);
-    expect(v6.status).toBe("Deployed · monitoring");
+    // 3.6: the seed declares a production environment, so the merge opens the production gate — it waits on a rollback rehearsal
+    expect(v6.status).toBe("Merged · production gate needs a rollback rehearsal");
+    expect(v6.deploy.productionGate).toMatchObject({ env: "production", open: true, sha: v6.pr?.mergeSha, checks: [expect.objectContaining({ name: "sdlc/rollback-rehearsed", verdict: "pending" })] });
   }, 30_000);
 
   it("red run keeps stage 4 and resumes the session once; a second red waits on you", async () => {

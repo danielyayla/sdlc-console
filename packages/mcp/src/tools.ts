@@ -1,15 +1,16 @@
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { blobSha, commitWritePlan, currentBranch, defaultBranch, git, homeFor, isRepo, newUlid, readTree, readTreeWithBase } from "@sdlc/adapter-git";
-import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, normalizeReason, proposalForReason, routesOf, runbookById, runbookListed, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
+import { STAGES, agentDeployableEnvironments, awaitingArtifact, check, deriveAll, deriveChange, environmentByName, eventsNamed, lastEvent, loadRepo, logPath, normalizeReason, proposalForReason, resolveConfig, routesOf, runbookById, runbookListed, type ChangeFiles, type ChangeView, type Repo, type ResolvedConfig, type ResolvedEnvironment, type WritePlan } from "@sdlc/core";
 import { appendHookEvent } from "@sdlc/hooks";
-import { changeId as changeIdSchema, compileGlobs, parseArtifact, parsePlan, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
+import { changeId as changeIdSchema, compileGlobs, parseArtifact, parsePlan, parseYaml, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
 import { z } from "zod";
 import { buildContext } from "./context-bundle.js";
+import { REHEARSE_TOOL, deployToolName } from "./deploy-tools.js";
 import { agentIdentity, sessionIdFrom } from "./identity.js";
-import { appendFinding, appendRound, appendRunbookRun, clearWaiting, dirtyHash, loopState, readFindings, readReproDraft, readRounds, readRunbookRuns, setWaiting, writeDiagnosisDraft, writeProposalDraft, writeReproDraft, type StoredFinding, type StoredRound } from "./sessions.js";
+import { appendFinding, appendRound, appendRunbookRun, appendSessionDeploy, clearWaiting, dirtyHash, loopState, readFindings, readReproDraft, readRounds, readRunbookRuns, readSessionDeploys, setWaiting, writeDiagnosisDraft, writeProposalDraft, writeReproDraft, type StoredFinding, type StoredRound } from "./sessions.js";
 
 export interface ServerOptions {
   cwd: string;
@@ -44,10 +45,41 @@ class Refusal extends Error {
   }
 }
 
-/** Runbook commands run with this budget; the output is kept verbatim whatever the exit. */
+/** Runbook and deploy commands run with this budget; the output is kept verbatim whatever the exit. */
 const RUNBOOK_TIMEOUT_MS = 10 * 60_000;
 
+/**
+ * The environments at server start, read synchronously from the home's
+ * `sdlc/config.yaml` (`SDLC_HOME` relative to the repository root, else the
+ * nearest config walking up from cwd) so the tool list is generated before
+ * the transport connects. Every call re-reads the committed config: an
+ * environment dropped since is refused.
+ */
+export function configAt(cwd: string, env: Record<string, string | undefined>): ResolvedConfig | null {
+  let dir = resolve(cwd);
+  let root: string | null = null;
+  let nearest: string | null = null;
+  for (;;) {
+    if (nearest === null && existsSync(join(dir, "sdlc", "config.yaml"))) nearest = dir;
+    if (existsSync(join(dir, ".git"))) {
+      root = dir;
+      break;
+    }
+    const up = dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  const explicit = env["SDLC_HOME"];
+  const home = explicit && explicit.trim() !== "" && root ? resolve(root, explicit.trim()) : (nearest ?? root);
+  if (!home) return null;
+  const file = join(home, "sdlc", "config.yaml");
+  if (!existsSync(file)) return null;
+  const parsed = parseYaml("config", readFileSync(file, "utf8"), "sdlc/config.yaml");
+  return parsed.value ? resolveConfig(parsed.value) : null;
+}
+
 function shell(cmd: string, cwd: string, env: Record<string, string | undefined>): Promise<{ exitCode: number; output: string }> {
+  // never through a login shell profile: the command is the allowlist's, the environment the session's
   return new Promise((resolve) => {
     execFile("sh", ["-c", cmd], { cwd, timeout: RUNBOOK_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: { ...env, CI: "1", FORCE_COLOR: "0" } }, (error, stdout, stderr) => {
       const code = error && typeof (error as { code?: unknown }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
@@ -56,7 +88,7 @@ function shell(cmd: string, cwd: string, env: Record<string, string | undefined>
   });
 }
 
-/** The fourteen agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
+/** The fourteen agent-facing tools (blueprint §9.3) plus, per configured non-production environment, `deploy_<env>` and `rehearse_rollback` (3.6). No accept, merge, approve, freeze-lift, repro-confirm or production deploy exists here. */
 export function createSdlcServer(opts: ServerOptions): McpServer {
   const env = opts.env ?? process.env;
   const now = () => (opts.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -432,6 +464,79 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
         return ok({ ...run, note: "recorded as sdlc/loop/runbooks/RBK-NNNN.json on the triage item when the session ends" });
       }),
   );
+
+  // ---- deployment tools per environment (3.6): generated from sdlc/config.yaml, none for production ----
+  const startConfig = configAt(opts.cwd, env);
+  const deployable = startConfig ? agentDeployableEnvironments(startConfig) : [];
+
+  function changeIdFor(l: Loaded, explicit: string | undefined): string {
+    const id = explicit ?? env["SDLC_CHANGE"] ?? /^(CHG-\d{4})/.exec(l.branch)?.[1] ?? null;
+    if (!id) throw new Refusal("no change context: pass changeId, or work in a session launched for a change (SDLC_CHANGE) on a CHG-NNNN/<task> branch");
+    return id;
+  }
+
+  function environmentNow(l: Loaded, name: string): ResolvedEnvironment {
+    const e = environmentByName(l.repo.config, name);
+    if (!e) throw new Refusal(`${name} is no longer an environment in sdlc/config.yaml (${l.repo.config.environments.map((x) => x.name).join(", ") || "none declared"})`);
+    if (e.kind === "production") throw new Refusal(`${name} is a production environment: it is deployed only through the production gate by a person holding ${e.gateRoles.join(" or ")}; no tool deploys it`);
+    return e;
+  }
+
+  for (const declared of deployable) {
+    server.registerTool(
+      deployToolName(declared.name),
+      {
+        description: `Deploy the current worktree HEAD to ${declared.name} (${declared.kind}${declared.description ? `: ${declared.description}` : ""}) by running the command sdlc/config.yaml declares for it — never a caller's command. The output is returned verbatim and recorded on the change's deploy.yaml (default branch, sdlc-bot) when the session ends. Production has no such tool: it is a person's gate decision after a rollback rehearsal.`,
+        inputSchema: { changeId: changeIdSchema.optional(), sessionId: z.string().optional() },
+      },
+      (args) =>
+        guard(async () => {
+          const l = await load();
+          const id = changeIdFor(l, args.changeId);
+          const { view } = viewOf(l.repo, id);
+          if (view.closed) throw new Refusal(`${id} is closed`);
+          const target = environmentNow(l, declared.name);
+          const sha = (await git(l.root, ["rev-parse", "HEAD"])).trim();
+          const session = sessionIdFrom(env, args.sessionId);
+          const startedAt = now();
+          const vars = { ...env, SDLC_CHANGE: id, SDLC_ENV: target.name, SDLC_ENV_KIND: target.kind, SDLC_SHA: sha };
+          const r = await shell(target.deployCommand, l.root, vars);
+          const healthcheck = r.exitCode === 0 && target.healthcheckCommand ? { command: target.healthcheckCommand, ...(await shell(target.healthcheckCommand, l.root, vars)) } : null;
+          const draft = { kind: "deploy" as const, env: target.name, sha, startedAt, finishedAt: now(), exitCode: r.exitCode, output: r.output, ...(healthcheck ? { healthcheck } : {}) };
+          appendSessionDeploy(l.root, session, draft);
+          const status = r.exitCode === 0 && (!healthcheck || healthcheck.exitCode === 0) ? "succeeded" : "failed";
+          return ok({ env: target.name, kind: target.kind, sha, command: target.deployCommand, exitCode: r.exitCode, status, output: r.output, healthcheck, note: `recorded on sdlc/changes/${id}/deploy.yaml when the session ends${status === "succeeded" ? `; rehearse the rollback there with ${REHEARSE_TOOL} so the production gate can open` : ""}` });
+        }),
+    );
+  }
+
+  if (deployable.length > 0) {
+    const names = deployable.map((e) => e.name);
+    server.registerTool(
+      REHEARSE_TOOL,
+      {
+        description: `Rehearse the rollback on a non-production environment (${names.join(", ")}): runs the rollback command sdlc/config.yaml declares for it against the commit that environment is running (deployed in this session or on record). The output is returned verbatim and recorded as a rehearsal on deploy.yaml when the session ends; a succeeded rehearsal at the merged commit is the production gate's required check (sdlc/rollback-rehearsed). Production is refused.`,
+        inputSchema: { env: z.enum(names as [string, ...string[]]), changeId: changeIdSchema.optional(), sessionId: z.string().optional() },
+      },
+      (args) =>
+        guard(async () => {
+          const l = await load();
+          const id = changeIdFor(l, args.changeId);
+          const { files, view } = viewOf(l.repo, id);
+          if (view.closed) throw new Refusal(`${id} is closed`);
+          const target = environmentNow(l, args.env);
+          const session = sessionIdFrom(env, args.sessionId);
+          const inSession = [...readSessionDeploys(l.root, session)].reverse().find((d) => d.kind === "deploy" && d.env === target.name && d.exitCode === 0 && (!d.healthcheck || d.healthcheck.exitCode === 0));
+          const onRecord = [...(files.deploy?.environments ?? [])].reverse().find((d) => d.env === target.name && d.status === "succeeded");
+          const sha = inSession?.sha ?? onRecord?.sha ?? null;
+          if (!sha) throw new Refusal(`nothing is deployed to ${target.name} for ${id} — deploy there first (${deployToolName(target.name)}), then rehearse the rollback`);
+          const rehearsedAt = now();
+          const r = await shell(target.rollbackCommand, l.root, { ...env, SDLC_CHANGE: id, SDLC_ENV: target.name, SDLC_ENV_KIND: target.kind, SDLC_SHA: sha });
+          appendSessionDeploy(l.root, session, { kind: "rehearsal", env: target.name, sha, rehearsedAt, finishedAt: now(), exitCode: r.exitCode, output: r.output });
+          return ok({ env: target.name, sha, command: target.rollbackCommand, exitCode: r.exitCode, status: r.exitCode === 0 ? "succeeded" : "failed", output: r.output, note: `recorded as a rollback rehearsal on sdlc/changes/${id}/deploy.yaml when the session ends; the production gate's ${"sdlc/rollback-rehearsed"} check reads it` });
+        }),
+    );
+  }
 
   void eventsNamed;
   return server;

@@ -28,6 +28,9 @@ export interface ChangeDetailProps {
   prompt?: (text: string) => string | null;
   /** Compliance export (3.3): the API URL the Export link downloads; absent when there is no server. */
   exportHref?: string;
+  /** Deployment (3.6): deploy an environment / rehearse its rollback as the viewer; production is the gate's Deploy. */
+  onDeploy?: (env: string) => void;
+  onRehearse?: (env: string) => void;
 }
 
 export interface ReproDraftView {
@@ -68,6 +71,10 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const selectedPr = view.artifactPrs[selected as 0 | 1 | 2 | 3 | 4 | 5] ?? null;
   const reviewPr = gate ? view.artifactPrs[({ 1: 0, 2: 1, 3: 2, 5: 4, 6: 5 } as const)[gate.s]] ?? null : null;
   const external = STAGE_INDEX.map((i) => view.docs[i as 0 | 1 | 2 | 3 | 4 | 5]).filter((d) => d.record.mode !== "repo");
+  const production = view.deploy.productionGate;
+  const ownsProduction = production !== null && production.ownerRoles.includes(role);
+  const environments = view.deploy.environments;
+  const shortSha = (sha: string) => sha.slice(0, 7);
 
   return (
     <div className="detail">
@@ -251,6 +258,62 @@ export function ChangeDetail(p: ChangeDetailProps) {
                   ))}
                 </ul>
               ) : null}
+            </div>
+          ) : null}
+          {production && (production.open || production.deployment || production.authorized) ? (
+            <div className={`panel${production.open ? " gate" : ""}`} aria-label="production gate">
+              <div className="eyebrow">Production gate · {production.env}{production.open && production.since ? ` · ${waitingFor(production.since, p.now)}` : ""}</div>
+              <h3>{production.deployment?.status === "running" ? `Deploying ${shortSha(production.deployment.sha)} to ${production.env}` : production.deployment?.status === "succeeded" ? `Deployed ${shortSha(production.deployment.sha)} to ${production.env}` : production.deployment?.status === "failed" && !production.open ? `${production.env} deploy failed` : `Deploy ${production.sha ? shortSha(production.sha) : ""} to ${production.env}`}</h3>
+              <div className="who">owner: {production.ownerLabel}{production.authorized ? ` · authorized by ${production.authorized.by} ${relativeTime(production.authorized.at, p.now)}` : ""}</div>
+              <ul className="activity">
+                {production.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.verdict}</span></li>)}
+              </ul>
+              {production.checks.map((c) => <div key={`${c.name}-summary`} className="who">{c.summary}</div>)}
+              {production.open ? (
+                ownsProduction ? (
+                  <>
+                    {production.blocked ? <div className="waiting" role="note">{production.blocked}</div> : null}
+                    <div className="actions">
+                      <button className="btn primary" disabled={busy || !view.valid || production.blocked !== null || !p.onDeploy} title={production.blocked ?? `runs the declared deploy command for ${production.env} after the decision is committed`} onClick={() => { setBusy(true); p.onDeploy?.(production.env); }}>Deploy to {production.env}</button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="waiting">Waiting on the {production.ownerLabel} — switch role in the top bar to act.</div>
+                )
+              ) : null}
+              {production.deployment && production.deployment.status !== "running" ? <pre className="viewer-body cmd">{production.deployment.output || "(no output)"}</pre> : null}
+            </div>
+          ) : null}
+          {environments.length > 0 ? (
+            <div className="panel environments" aria-label="environments">
+              <div className="eyebrow">Environments</div>
+              <ul className="activity">
+                {environments.map((e) => (
+                  <li key={e.name}>
+                    <span className={`glyph ${e.status === "succeeded" ? "human" : e.status === "failed" ? "system" : "system"}`}>{e.status === "succeeded" ? "✓" : e.status === "failed" ? "✗" : e.status === "running" ? "…" : "·"}</span>
+                    <span>{e.name} <span className="chip gray">{e.kind}</span></span>
+                    <span className="when">{e.status === "not-deployed" ? "not deployed" : `${e.status}${e.latest ? ` · ${shortSha(e.latest.sha)} · ${relativeTime(e.latest.finishedAt ?? e.latest.startedAt, p.now)}` : ""}`}{e.rehearsals.length > 0 ? ` · rollback rehearsed ${e.rehearsals.at(-1)?.status}` : ""}</span>
+                  </li>
+                ))}
+              </ul>
+              {environments.filter((e) => e.agentDeployable).map((e) => (
+                <div key={`${e.name}-detail`} className="env-detail">
+                  {e.latest ? <div className="who">{e.name}: {e.latest.command} → exit {e.latest.exitCode ?? "?"} · by {e.latest.actor.type === "agent" ? `⌁ ${e.latest.actor.session ?? e.latest.actor.id}` : e.latest.actor.id}</div> : null}
+                  {e.latest && e.latest.status !== "running" ? <pre className="viewer-body cmd">{e.latest.output || "(no output)"}</pre> : null}
+                  {e.rehearsals.length > 0 ? (
+                    <>
+                      <div className="who">rollback rehearsal on {e.name} at {shortSha(e.rehearsals.at(-1)?.sha ?? "")}: {e.rehearsals.at(-1)?.command} → exit {e.rehearsals.at(-1)?.exitCode} · {e.rehearsals.at(-1)?.status}</div>
+                      <pre className="viewer-body cmd">{e.rehearsals.at(-1)?.output || "(no output)"}</pre>
+                    </>
+                  ) : null}
+                  {(role === "eng" || role === "po") && (p.onDeploy || p.onRehearse) && view.pr ? (
+                    <div className="actions">
+                      {p.onDeploy ? <button className="btn" disabled={busy || e.status === "running"} title={`runs the declared deploy command for ${e.name} at ${view.pr.mergeSha ? "the merged commit" : "the PR head"}`} onClick={() => { setBusy(true); p.onDeploy?.(e.name); }}>Deploy to {e.name}</button> : null}
+                      {p.onRehearse && e.status === "succeeded" ? <button className="btn" disabled={busy} title={`runs the declared rollback command for ${e.name} at what it has deployed; the record is the production gate's evidence`} onClick={() => { setBusy(true); p.onRehearse?.(e.name); }}>Rehearse rollback</button> : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
             </div>
           ) : null}
           {view.stage === 6 || view.pr?.mergedAt ? (

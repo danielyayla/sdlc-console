@@ -65,6 +65,13 @@ export interface CodeHost {
   merge(root: string, pr: Pr, message: string, who: GitIdentity): Promise<string>;
   /** Publish a review job's outcome on the PR (tally check + findings). Findings inform; nothing here approves. */
   reportReview(root: string, pr: Pr, report: ReviewReport): Promise<void>;
+  /**
+   * Publish one check on a commit outside a run (3.6: `sdlc/rollback-rehearsed`
+   * on the commit the production gate is about): a commit status under a
+   * token, a check run carrying the evidence under the App. Local mode has
+   * no surface and records nothing — the committed record is the check.
+   */
+  publishCheck(root: string, sha: string, check: PrCheck, detailsUrl?: string): Promise<void>;
 }
 
 /** Error from the code host; `retryable` maps to HTTP 502 with retry in the console. */
@@ -146,6 +153,11 @@ export class LocalCodeHost implements CodeHost {
 
   /** Local mode has no PR surface: the write-plan (`pr.yaml`, ledger) is the whole record. */
   reportReview(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  /** Local mode: deploy.yaml is the check. */
+  publishCheck(): Promise<void> {
     return Promise.resolve();
   }
 

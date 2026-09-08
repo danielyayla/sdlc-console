@@ -6,6 +6,7 @@ import type { ChangeFiles, Repo } from "../repo.js";
 import { isDowngrade } from "../modes.js";
 import { normalizeReason } from "../proposals.js";
 import { gateOwner, STAGES } from "../stages.js";
+import { environmentByName, holdsProductionGate, productionEnvironment } from "../config.js";
 
 /** A diagnostic with the engine's blocking verdict (blueprint §11.1). */
 export interface RuleDiagnostic extends Diagnostic {
@@ -79,6 +80,32 @@ export function changeRules(repo: Repo, files: ChangeFiles, view: ChangeView): R
       if (!ok) {
         out.push(block(id, `${dir}/log.jsonl`, "gate.actor-not-owner", `${e.actor.id} recorded ${e.event} on gate ${e.data.gate} but does not hold the ${owner.role} role`));
       }
+    }
+  }
+
+  // the production gate (3.6): its decision is a human holding the gate's role, and a production deployment rests on that decision and a rehearsed rollback
+  if (repo.config.present && repo.config.environments.length > 0) {
+    for (const e of eventsNamed(files.events, "deploy.authorized")) {
+      const env = environmentByName(repo.config, e.data.env);
+      if (!env || env.kind !== "production") {
+        out.push(block(id, `${dir}/log.jsonl`, "deploy.authorized.env", `${e.actor.id} authorized a deploy to ${e.data.env}, which is not a production environment in sdlc/config.yaml`));
+        continue;
+      }
+      if (!holdsProductionGate(repo.config, e.actor.id, env)) out.push(block(id, `${dir}/log.jsonl`, "deploy.actor-not-owner", `${e.actor.id} authorized a deploy to ${e.data.env} but does not hold ${env.gateRoles.join(" or ")}, the role that owns the production gate`));
+    }
+    const production = productionEnvironment(repo.config);
+    for (const d of files.deploy?.environments ?? []) {
+      const env = environmentByName(repo.config, d.env);
+      if (!env || env.kind !== "production") continue;
+      if (d.status !== "succeeded" && d.status !== "running") continue;
+      if (d.actor.type !== "human") out.push(block(id, `${dir}/deploy.yaml`, "deploy.production-not-human", `${d.env} was deployed at ${d.sha.slice(0, 7)} by ${d.actor.type}:${d.actor.id}; production deploys are a person's gate decision`));
+      const authorized = eventsNamed(files.events, "deploy.authorized").some((e) => e.data.env === d.env && (e.data.sha === undefined || e.data.sha === d.sha) && e.actor.id === (d.authorizedBy ?? e.actor.id));
+      if (!authorized) out.push(block(id, `${dir}/deploy.yaml`, "deploy.production-unauthorized", `${d.env} was deployed at ${d.sha.slice(0, 7)} with no deploy.authorized decision for it on the ledger`));
+      const rehearsed = (files.deploy?.rehearsals ?? []).some((r) => r.status === "succeeded" && (environmentByName(repo.config, r.env)?.kind ?? r.kind) !== "production" && (r.sha === d.sha || (files.pr?.headSha !== undefined && r.sha === files.pr.headSha)));
+      if (production && !rehearsed) out.push(block(id, `${dir}/deploy.yaml`, "deploy.production-unrehearsed", `${d.env} was deployed at ${d.sha.slice(0, 7)} with no succeeded rollback rehearsal at that commit in a non-production environment`));
+    }
+    for (const r of files.deploy?.rehearsals ?? []) {
+      if ((environmentByName(repo.config, r.env)?.kind ?? r.kind) === "production") out.push(block(id, `${dir}/deploy.yaml`, "rehearsal.production", `a rollback rehearsal is recorded against ${r.env}, a production environment; rehearsals belong to non-production environments`));
     }
   }
 
@@ -188,6 +215,15 @@ export function repoRules(repo: Repo): RuleDiagnostic[] {
     if (s.backedBy && repo.settings && !hookNames.has(s.backedBy)) out.push(warn(undefined, `.claude/skills/${s.name}/SKILL.md`, "skill.backed-by.unknown", `skill ${s.name} says it is backed by hook ${s.backedBy}, which is not in .claude/settings.json — advisory until the hook is installed`));
   }
   if (repo.config.present) {
+    // 3.6: environment names are unique; a production gate nobody can open is a configuration gap, not a blocked deploy
+    const seenEnv = new Set<string>();
+    for (const env of repo.config.environments) {
+      if (seenEnv.has(env.name)) out.push(block(undefined, "sdlc/config.yaml", "config.environment-duplicate", `environment ${env.name} is declared twice`));
+      seenEnv.add(env.name);
+      if (env.kind === "production" && !env.gateRoles.some((r) => repo.config.identities.some((i) => i.roles.includes(r)))) {
+        out.push(warn(undefined, "sdlc/config.yaml", "config.production-gate-unowned", `environment ${env.name} is behind the production gate (${env.gateRoles.join(", ")}) but no identity holds that role`));
+      }
+    }
     const highRisk = [...repo.changes.values()].some((c) => c.change?.risk === "high");
     if (highRisk && !repo.config.identities.some((i) => i.roles.includes("tech_lead"))) {
       out.push(warn(undefined, "sdlc/config.yaml", "config.no-tech-lead", "a high-risk change exists but no identity holds tech_lead"));
