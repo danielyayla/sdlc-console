@@ -7,6 +7,7 @@ import { evalCase, evalRun, perChangeRun, reproProof, round } from "./evals.js";
 import { event } from "./event.js";
 import { changeExport } from "./export.js";
 import { finding } from "./finding.js";
+import { claudeSecurityDelivery, claudeTagDelivery } from "./intake.js";
 import {
   incidentFrontMatter,
   intentFrontMatter,
@@ -42,6 +43,8 @@ export const registry = {
   "metric-snapshot": metricSnapshot,
   "runbook-run": runbookRun,
   "change-export": changeExport,
+  "claude-security-delivery": claudeSecurityDelivery,
+  "claude-tag-delivery": claudeTagDelivery,
 } as const;
 
 export type SchemaName = keyof typeof registry;

@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "source": "claude-security",
+  "deliveryId": "cs-delivery-0002",
+  "run": {
+    "id": "scan-2026-09-09-01",
+    "url": "https://security.example/runs/scan-2026-09-09-01",
+    "startedAt": "2026-09-09T06:00:00Z",
+    "finishedAt": "2026-09-09T06:03:40Z"
+  },
+  "repo": {
+    "name": "invoicing",
+    "commit": "1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9d0c"
+  },
+  "findings": [
+    {
+      "id": "7f3a91",
+      "status": "open",
+      "title": "SQL injection in invoice filter",
+      "severity": "high",
+      "confidence": 0.99,
+      "validated": true,
+      "description": "User-supplied `sort` reaches the query builder unescaped in src/invoice/list.ts; also reachable through the export endpoint.",
+      "evidence": "src/invoice/list.ts:41\n  const order = req.query.sort;\n  db.raw(`SELECT * FROM invoices ORDER BY ${order}`)\nsrc/export/csv.ts:12 forwards req.query.sort unchanged",
+      "location": { "path": "src/invoice/list.ts", "startLine": 41, "endLine": 43 },
+      "rule": "sql-injection/raw-query",
+      "cwe": "CWE-89",
+      "url": "https://security.example/findings/7f3a91"
+    },
+    {
+      "id": "9be442",
+      "status": "open",
+      "title": "Verbose error page in staging",
+      "severity": "low",
+      "confidence": 0.7,
+      "validated": true,
+      "description": "Stack traces returned on 500 in the staging environment.",
+      "location": { "path": "src/http/errors.ts", "startLine": 7 },
+      "rule": "info-leak/stack-trace",
+      "cwe": "CWE-209"
+    }
+  ]
+}

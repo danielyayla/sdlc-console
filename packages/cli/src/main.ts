@@ -17,6 +17,7 @@ import { sessionCommand } from "./commands/session.js";
 import { syncCommand } from "./commands/sync.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
 import { loopCommand } from "./commands/loop.js";
+import { ingestCommand } from "./commands/ingest.js";
 import { mcpCommand } from "./commands/mcp.js";
 import { runCommand } from "./commands/run.js";
 import { formatDiagnostic, validateCommand } from "./commands/validate.js";
@@ -41,6 +42,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc triage accept|dismiss <TRI> [--reason <text>] [--tune <note>]
   sdlc security patch|escalate|dismiss <SEC> [--reason <text>]
   sdlc security import <file|->
+  sdlc ingest security|channel <file.json|->             (3.5: a claude-security-delivery / claude-tag-delivery envelope → findings / a channel triage item, committed by sdlc-bot; the webhooks below do the same)
   sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
   sdlc mcp                                              (agent tools over stdio)
   sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose propose)
@@ -62,6 +64,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc record retry <CHG> <artifact>                     (run the outstanding write-back now — "write-back failed · retry")
   sdlc record status <CHG>                               (mode, synced time and write-back per artifact)
   POST /api/webhooks/github                             (GitHub mode: signed deliveries under GITHUB_WEBHOOK_SECRET; polling stays on as the fallback)
+  POST /api/webhooks/claude-security | claude-tag       (maintain intake: X-Hub-Signature-256 over the raw body under SDLC_CLAUDE_SECURITY_WEBHOOK_SECRET / SDLC_CLAUDE_TAG_WEBHOOK_SECRET; idempotent per deliveryId)
 
 Every command accepts --json and, in a monorepo, --product <name> (or SDLC_PRODUCT / SDLC_HOME) to address one product. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
 Exit codes: 0 ok · 1 error / blocking validation · 2 refused (role, gate, agent).`;
@@ -229,6 +232,14 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (!id || (sub !== "patch" && sub !== "escalate" && sub !== "dismiss")) throw new CliError("usage: sdlc security patch|escalate|dismiss <SEC>");
         const r = await securityCommand(ctx, sub, id, values.reason);
         emit(io, json, r, () => (r.changeId ? `${r.id} escalated → ${r.changeId} at the Plan gate · ${r.commit.slice(0, 7)}` : `${r.id} ${sub === "patch" ? "patch in PR gate" : "dismissed"} · ${r.commit.slice(0, 7)}`));
+        return 0;
+      }
+      case "ingest": {
+        const ctx = await repoContext(io, json, values.product);
+        const file = rest[0];
+        if (!file || (sub !== "security" && sub !== "channel")) throw new CliError("usage: sdlc ingest security|channel <file.json|->");
+        const r = await ingestCommand(ctx, sub, file);
+        emit(io, json, r, () => (r.commit ? `${r.kind}: ${r.outcome} · ${r.commit.slice(0, 7)}` : `${r.kind}: no-op — ${r.outcome}`));
         return 0;
       }
       case "run": {

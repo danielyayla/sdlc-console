@@ -30,13 +30,14 @@ sdlc/
       incident.md
       log.jsonl                 # append-only ledger; .gitattributes merge=union
       cycles/1/ …
-  loop/triage/TRI-0042.md
+  loop/triage/TRI-0042.md       # `channel` items carry `channel{name, messageId, permalink, author, tags?}` (3.5, one per message id)
   loop/runbooks/RBK-0001.json   # runbook invocation record (allowlisted command, output verbatim)
-  security/findings/SEC-0118.yaml
+  security/findings/SEC-0118.yaml   # scanner-owned fields incl. source/run/location/rule/cwe/evidence/resolved (3.5); routing status console-owned
   proposals/PRP-0007.yaml
 .gitattributes                  # sdlc/**/log.jsonl merge=union
 .sdlc-state/                    # gitignored cache
   snapshots/<metric>.jsonl      # detection snapshots (last N), written by sdlc-detect
+  sessions.db                   # sessions, job queue, metric facts, webhook deliveries (GitHub and the 3.5 intake, by `<kind>:<deliveryId>`)
 ```
 
 ## IDs

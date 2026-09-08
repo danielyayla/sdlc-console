@@ -284,3 +284,37 @@ describe("product switcher (3.2)", () => {
     expect(renderWith(2, switched)).not.toContain('<option value="invoicing" title="/r" selected="">');
   });
 });
+
+describe("maintain intake in the views (3.5)", () => {
+  it("Security shows the source, confidence, location, run link and evidence of an ingested finding, and hides the actions once the scanner resolved it", () => {
+    const ingested = "schema: 1\nid: SEC-0121\nscannerId: claude-security:a41c07\nsev: medium\nconf: 0.88\nvalidated: true\nrepo: invoicing\ntitle: Webhook secret compared with ==\ndesc: Non-constant-time compare.\nstatus: new\nsource: claude-security\nrun:\n  id: scan-2026-09-08-01\n  url: https://security.example/runs/scan-2026-09-08-01\n  at: 2026-09-08T06:04:12Z\nlocation:\n  path: src/webhooks/verify.ts\n  startLine: 18\nrule: crypto/timing-unsafe-compare\ncwe: CWE-208\nevidence: |-\n  src/webhooks/verify.ts:18\n    if (given == expected) return true;\nurl: https://security.example/findings/a41c07\n";
+    const resolved = ingested.replace("SEC-0121", "SEC-0122").replace("a41c07", "b52d18").replace("Webhook secret compared with ==", "Stale PDF cache key") + "resolved:\n  at: 2026-09-10T06:02:55Z\n  run: scan-2026-09-10-01\n";
+    const repo = loadRepo(withFiles(seedTree(), { "sdlc/security/findings/SEC-0121.yaml": ingested, "sdlc/security/findings/SEC-0122.yaml": resolved }));
+    const snap = buildSnapshot(repo, { id: PO, name: "Priya Owens", roles: ["po", "eng"] }, seedSessions() as never, 1, now);
+    const html = renderToString(<App snapshot={snap} initial={{ ...initialState("eng"), view: "security" }} now={now} live={false} />).replace(/<!-- -->/g, "");
+    expect(html).toContain("SEC-0121");
+    expect(html).toContain(">claude-security</span>");
+    expect(html).toContain("validated · 0.88");
+    expect(html).toContain("src/webhooks/verify.ts:18");
+    expect(html).toContain("crypto/timing-unsafe-compare");
+    expect(html).toContain("CWE-208");
+    expect(html).toContain('href="https://security.example/runs/scan-2026-09-08-01"');
+    expect(html).toContain("if (given == expected) return true;");
+    expect(html).toContain("last run 2026-09-08T06:04:12Z");
+    expect(html).toContain("resolved by scanner · 2026-09-10T06:02:55Z");
+    // actions: the three seed findings have one `new` (SEC-0118) plus SEC-0121; SEC-0122 is resolved and shows none
+    expect((html.match(/Wider than one patch/g) ?? []).length).toBe(3);
+  });
+  it("Loop shows a channel item with its author, permalink and tags beside the evidence", () => {
+    const item = "---\nschema: 1\nid: TRI-0044\ntier: channel\nsrc: channel:slack:#support\ntitle: Wrong invoice PDF from email links\nevidence: |\n  Mara Lindqvist in #support\n  https://veri.slack.com/archives/C0SUPPORT1/p1757318400000100\ncreatedAt: 2026-09-08T08:05:00Z\nstatus: open\nchannel:\n  name: '#support'\n  workspace: slack\n  messageId: '1757318400.000100'\n  permalink: https://veri.slack.com/archives/C0SUPPORT1/p1757318400000100\n  author: Mara Lindqvist\n  tags:\n    - billing\n---\n# Intent: Wrong invoice PDF\n\n## Problem\nStale PDF.\n";
+    const repo = loadRepo(withFiles(seedTree(), { "sdlc/loop/triage/TRI-0044.md": item }));
+    const snap = buildSnapshot(repo, { id: PO, name: "Priya Owens", roles: ["po"] }, seedSessions() as never, 1, now);
+    const html = renderToString(<App snapshot={snap} initial={{ ...initialState("po"), view: "loop" }} now={now} live={false} />).replace(/<!-- -->/g, "");
+    expect(html).toContain("TRI-0044");
+    expect(html).toContain(">channel</span>");
+    expect(html).toContain('href="https://veri.slack.com/archives/C0SUPPORT1/p1757318400000100"');
+    expect(html).toContain("Mara Lindqvist · ");
+    expect(html).toContain(">billing</span>");
+    expect((html.match(/Accept → Plan/g) ?? []).length).toBe(3);
+  });
+});

@@ -35,6 +35,17 @@ export function seedDir(): string {
   return fileURLToPath(new URL("../seed/", import.meta.url));
 }
 
+/** Maintain intake envelopes (3.5) under `fixtures/payloads/`: what a Claude Security run and a Claude Tag message deliver. */
+export type IntakePayloadName = "claude-security" | "claude-security-update" | "claude-security-resolved" | "claude-tag";
+
+export function payloadPath(name: IntakePayloadName): string {
+  return fileURLToPath(new URL(`../payloads/${name}.json`, import.meta.url));
+}
+
+export function intakePayload<T = Record<string, unknown>>(name: IntakePayloadName): T {
+  return JSON.parse(readFileSync(payloadPath(name), "utf8")) as T;
+}
+
 export interface SeedSession {
   id: string;
   worktree: string;

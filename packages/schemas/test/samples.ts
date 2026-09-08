@@ -282,4 +282,25 @@ export const samples: { [K in SchemaName]: EntityOf<K> } = {
     evalCases: [],
     contentHash: { algorithm: "sha256", over: "canonical-json", value: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" },
   },
+  "claude-security-delivery": {
+    schema: 1,
+    source: "claude-security",
+    deliveryId: "cs-delivery-0001",
+    run: { id: "scan-2026-09-08-01", url: "https://security.example/runs/scan-2026-09-08-01", startedAt: TS, finishedAt: TS },
+    repo: { name: "invoicing", commit: SHA },
+    findings: [
+      { id: "7f3a91", status: "open", title: "SQL injection in invoice filter", severity: "high", confidence: 0.97, validated: true, description: "User-supplied `sort` reaches the query builder unescaped.", evidence: "src/invoice/list.ts:41", location: { path: "src/invoice/list.ts", startLine: 41, endLine: 43 }, rule: "sql-injection/raw-query", cwe: "CWE-89", url: "https://security.example/findings/7f3a91" },
+      { id: "a41c07", status: "resolved", title: "Webhook secret compared with ==", severity: "medium", confidence: 0.88 },
+    ],
+  },
+  "claude-tag-delivery": {
+    schema: 1,
+    source: "claude-tag",
+    deliveryId: "ct-delivery-0001",
+    channel: { workspace: "slack", name: "#support", id: "C0SUPPORT1" },
+    message: { id: "1757318400.000100", permalink: "https://veri.slack.com/archives/C0SUPPORT1/p1757318400000100", author: "Mara Lindqvist", text: "Customers see last month's invoice PDF.", postedAt: TS },
+    thread: [{ id: "1757318460.000200", author: "Eli Ng", text: "The PDF cache key is the customer id only.", postedAt: TS }],
+    tags: ["billing"],
+    title: "Wrong invoice PDF from email links",
+  },
 };

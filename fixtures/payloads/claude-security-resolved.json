@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "source": "claude-security",
+  "deliveryId": "cs-delivery-0003",
+  "run": {
+    "id": "scan-2026-09-10-01",
+    "url": "https://security.example/runs/scan-2026-09-10-01",
+    "startedAt": "2026-09-10T06:00:00Z",
+    "finishedAt": "2026-09-10T06:02:55Z"
+  },
+  "repo": {
+    "name": "invoicing",
+    "commit": "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f"
+  },
+  "findings": [
+    {
+      "id": "a41c07",
+      "status": "resolved",
+      "title": "Webhook secret compared with ==",
+      "severity": "medium",
+      "confidence": 0.88,
+      "validated": true,
+      "description": "The webhook receiver compares the signature with a non-constant-time equality in src/webhooks/verify.ts.",
+      "evidence": "src/webhooks/verify.ts:18 now uses timingSafeEqual; no longer reachable",
+      "location": { "path": "src/webhooks/verify.ts", "startLine": 18 },
+      "rule": "crypto/timing-unsafe-compare",
+      "cwe": "CWE-208",
+      "url": "https://security.example/findings/a41c07"
+    },
+    {
+      "id": "000000",
+      "status": "resolved",
+      "title": "Never reported to the console",
+      "severity": "low",
+      "confidence": 0.5,
+      "description": "A finding the scanner closed before the console ever saw it."
+    }
+  ]
+}

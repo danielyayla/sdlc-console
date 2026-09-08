@@ -31,6 +31,7 @@ import {
 } from "./actions.js";
 import type { Engine, JobStore } from "./engine/index.js";
 import { receiveWebhook, type DeliveryLog } from "./github/webhooks.js";
+import { intakeStatus, receiveIntake } from "./intake/index.js";
 import { clearRepro, downgradeSession, launchSession, markReproRejected, reproDraftFor, resumeAfterRepro, stopSession, verifyReproCommit, type LaunchDeps, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { acceptProposalAction } from "./proposals.js";
 import { linkRecordAction, retryWritebackAction, type WritebackDeps } from "./records.js";
@@ -178,9 +179,9 @@ export interface AppOptions {
   jobs?: JobStore;
   /** Metrics facts cache (FR-70); `GET /api/metrics` reads the git mirror alone without it. */
   facts?: FactsCache;
-  /** Processed webhook deliveries (replay guard); the receiver is off without it. */
+  /** Processed webhook deliveries (replay guard); the receivers are off without it. */
   deliveries?: DeliveryLog;
-  /** Environment for the code host (`GITHUB_TOKEN`) and the webhook receiver (`GITHUB_WEBHOOK_SECRET`). */
+  /** Environment for the code host (`GITHUB_TOKEN`), the webhook receiver (`GITHUB_WEBHOOK_SECRET`) and the intake receivers (`SDLC_CLAUDE_SECURITY_WEBHOOK_SECRET`, `SDLC_CLAUDE_TAG_WEBHOOK_SECRET`). */
   env?: Record<string, string | undefined>;
   /** Hosted mode (3.1): sign-in through the identity provider; every request and socket acts as the signed-in identity. */
   auth?: Authenticator;
@@ -512,7 +513,15 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           lastPollAt: (o.engine?.lastSyncAt ?? 0) > 0 ? new Date(o.engine?.lastSyncAt ?? 0).toISOString() : null,
           pollIntervalMs: o.engine?.pollInterval() ?? null,
           deliveries: o.deliveries?.recent(20) ?? [],
+          // maintain intake (3.5): each receiver is on when its secret is set
+          intake: { "claude-security": intakeStatus("claude-security", { deliveries: o.deliveries ?? null, env }), "claude-tag": intakeStatus("claude-tag", { deliveries: o.deliveries ?? null, env }) },
         });
+        return;
+      }
+      if (method === "POST" && (parts[2] === "claude-security" || parts[2] === "claude-tag") && parts.length === 3) {
+        const body = await readRaw(req, 1024 * 1024);
+        const r = await receiveIntake(parts[2], { store: product.store, deliveries: o.deliveries ?? null, env, ...(options.now ? { now: options.now } : {}) }, { headers: { signature: header(req, "x-hub-signature-256") }, body });
+        json(res, r.status, r.body);
         return;
       }
       if (method === "POST" && parts[2] === "github" && parts.length === 3) {

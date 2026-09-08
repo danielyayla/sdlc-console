@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { git, initRepo } from "@sdlc/adapter-git";
+import { commitTrailers, git, initRepo } from "@sdlc/adapter-git";
+import { intakePayload } from "@sdlc/fixtures";
 import { main, type Io } from "../src/index.js";
 
 const cleanups: (() => void)[] = [];
@@ -610,5 +611,62 @@ describe("detection script (3.4)", () => {
     expect((await sdlc(dir, ["detect"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
     expect(await git(dir, ["rev-parse", "HEAD"])).toBe(head);
     expect((await git(dir, ["status", "--porcelain", "--", ".sdlc-state"])).trim()).toBe("");
+  });
+});
+
+describe("sdlc ingest (3.5): the webhook envelopes from a file, committed by sdlc-bot, human CLI only", () => {
+  it("security: creates and updates findings, is a no-op on the same envelope, refuses an agent process and a foreign envelope", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    put(dir, "scan.json", JSON.stringify(intakePayload("claude-security")));
+    put(dir, "resolved.json", JSON.stringify(intakePayload("claude-security-resolved")));
+    put(dir, "foreign.json", JSON.stringify({ ...intakePayload("claude-security"), source: "snyk" }));
+    expect((await sdlc(dir, ["ingest", "security", "scan.json"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
+    expect((await sdlc(dir, ["ingest", "security", "foreign.json"])).code).toBe(1);
+    expect((await sdlc(dir, ["ingest", "findings", "scan.json"])).code).toBe(1);
+    const first = await sdlc(dir, ["ingest", "security", "scan.json", "--json"], { SDLC_IDENTITY: "eng@example.com" });
+    expect(first.code).toBe(0);
+    const r = first.json<{ commit: string | null; created: string[]; updated: string[]; outcome: string }>();
+    expect(r.created).toEqual(["SEC-0001", "SEC-0002"]);
+    expect(r.updated).toEqual([]);
+    expect(r.outcome).toBe("2 new, 0 updated, 0 resolved");
+    expect(await commitTrailers(dir, r.commit ?? "")).toEqual({ "SDLC-Actor": "system:sdlc-bot", "SDLC-Delivery": "claude-security:cs-delivery-0001", "SDLC-Scan": "scan-2026-09-08-01", "SDLC-Relay": "human:eng@example.com" });
+    expect((await git(dir, ["log", "-1", "--format=%an"])).trim()).toBe("sdlc-bot");
+    expect(readFileSync(join(dir, "sdlc/security/findings/SEC-0001.yaml"), "utf8")).toContain("scannerId: claude-security:7f3a91");
+    const again = await sdlc(dir, ["ingest", "security", "scan.json", "--json"]);
+    expect(again.code).toBe(0);
+    expect(again.json<{ commit: string | null }>().commit).toBeNull();
+    // the existing routing actions apply to an ingested finding; a later resolution keeps the routing status
+    expect((await sdlc(dir, ["security", "patch", "SEC-0002"], { SDLC_IDENTITY: "eng@example.com" })).code).toBe(0);
+    const res = await sdlc(dir, ["ingest", "security", "resolved.json", "--json"]);
+    expect(res.json<{ resolved: string[] }>().resolved).toEqual(["SEC-0002"]);
+    const file = readFileSync(join(dir, "sdlc/security/findings/SEC-0002.yaml"), "utf8");
+    expect(file).toContain("status: patch_pr");
+    expect(file).toContain("resolved:\n  at: 2026-09-10T06:02:55Z\n  run: scan-2026-09-10-01");
+    // from stdin
+    const viaStdin = await sdlc(dir, ["ingest", "security", "-", "--json"], {}, JSON.stringify({ ...intakePayload("claude-security-update"), deliveryId: "cs-stdin" }));
+    expect(viaStdin.code).toBe(0);
+    expect(viaStdin.json<{ created: string[] }>().created).toEqual(["SEC-0003"]);
+  });
+
+  it("channel: one triage item per message, then `sdlc triage accept` takes it to the Plan gate", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    put(dir, "tag.json", JSON.stringify(intakePayload("claude-tag")));
+    const r = await sdlc(dir, ["ingest", "channel", "tag.json", "--json"]);
+    expect(r.code).toBe(0);
+    expect(r.json<{ id: string; created: string[] }>()).toMatchObject({ id: "TRI-0001", created: ["TRI-0001"] });
+    const file = readFileSync(join(dir, "sdlc/loop/triage/TRI-0001.md"), "utf8");
+    expect(file).toContain("tier: channel");
+    expect(file).toContain("permalink: https://veri.slack.com/archives/C0SUPPORT1/p1757318400000100");
+    const dup = await sdlc(dir, ["ingest", "channel", "tag.json", "--json"]);
+    expect(dup.code).toBe(0);
+    expect(dup.json<{ commit: string | null; id: string }>()).toMatchObject({ commit: null, id: "TRI-0001" });
+    expect((await sdlc(dir, ["ingest", "channel", "tag.json"])).out).toContain("no-op");
+    const acc = await sdlc(dir, ["triage", "accept", "TRI-0001", "--json"]);
+    expect(acc.code).toBe(0);
+    expect(acc.json<{ changeId: string }>().changeId).toBe("CHG-0001");
+    const list = await sdlc(dir, ["change", "list", "--json"]);
+    expect(list.json<{ id: string; origin: { type: string; ref?: string } }[]>()[0]?.origin).toEqual({ type: "triage", ref: "TRI-0001" });
   });
 });

@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "source": "claude-tag",
+  "deliveryId": "ct-delivery-0001",
+  "channel": {
+    "workspace": "slack",
+    "name": "#support",
+    "id": "C0SUPPORT1"
+  },
+  "message": {
+    "id": "1757318400.000100",
+    "permalink": "https://veri.slack.com/archives/C0SUPPORT1/p1757318400000100",
+    "author": "Mara Lindqvist",
+    "text": "Customers on the annual plan see last month's invoice PDF when they open this month's from the email link. Three reports today, all annual plan, all opened from the mail.",
+    "postedAt": "2026-09-08T08:00:00Z"
+  },
+  "thread": [
+    {
+      "id": "1757318460.000200",
+      "author": "Eli Ng",
+      "text": "The email link carries the invoice id; the PDF cache key is the customer id only. Annual plan customers are the ones with two invoices in the window.",
+      "postedAt": "2026-09-08T08:01:00Z"
+    },
+    {
+      "id": "1757318520.000300",
+      "author": "Mara Lindqvist",
+      "text": "@Claude tag this for triage — wrong invoice shown is a billing-trust issue.",
+      "postedAt": "2026-09-08T08:02:00Z"
+    }
+  ],
+  "tags": ["billing", "customer-facing"]
+}
