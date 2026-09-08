@@ -60,8 +60,8 @@ export async function refreshFacts(host: GitHubCodeHost, root: string, repo: Rep
   const summary: RefreshSummary = { prs: 0, statuses: 0, cached: 0, errors: [] };
   const gh = await host.repoFor(root);
   const stamp = now().toISOString();
-  for (const files of repo.changes.values()) {
-    const pr = files.pr;
+  const recorded = [...repo.changes.values()].flatMap((files) => [...files.archived.map((a) => a.pr), files.pr].map((pr) => ({ files, pr })));
+  for (const { files, pr } of recorded) {
     if (!pr || pr.provider !== "github" || pr.number === undefined) continue;
     const merged = pr.mergedAt !== undefined;
     if (merged && cache.pr(pr.number, pr.headSha) && cache.status(pr.headSha)) {

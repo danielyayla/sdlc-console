@@ -345,6 +345,34 @@ describe("eval suite in CI (2.5)", () => {
     expect(second.json<{ skipped: string[] }>().skipped).toContain(".github/workflows/sdlc-evals.yml");
   });
 
+  it("init --sdlc-bin points the workflows at the team's own install, and the Install step follows the lockfile (3.0)", async () => {
+    // no lockfile: no install step, a note instead; the command is the team's
+    const bare = await freshRepo();
+    await sdlc(bare, ["init", "--sdlc-bin", "node tools/sdlc/bin.js", "--json"]);
+    const evals = readFileSync(join(bare, ".github/workflows/sdlc-evals.yml"), "utf8");
+    const validate = readFileSync(join(bare, ".github/workflows/sdlc-validate.yml"), "utf8");
+    for (const wf of [evals, validate]) {
+      expect(wf).not.toContain("npx sdlc");
+      expect(wf).not.toContain("pnpm install");
+      expect(wf).not.toContain("name: Install");
+      expect(wf).toContain("No lockfile when sdlc init ran");
+    }
+    expect(evals).toContain("run: node tools/sdlc/bin.js evals run --trigger");
+    expect(evals).toContain("run: node tools/sdlc/bin.js evals gate");
+    expect(validate).toContain("run: node tools/sdlc/bin.js validate");
+    // npm lockfile → npm ci; pnpm lockfile → corepack + frozen install; the default command stays npx sdlc
+    const npm = await freshRepo();
+    put(npm, "package-lock.json", "{}\n");
+    await sdlc(npm, ["init", "--json"]);
+    const npmWf = readFileSync(join(npm, ".github/workflows/sdlc-validate.yml"), "utf8");
+    expect(npmWf).toContain("- name: Install\n        run: npm ci\n");
+    expect(npmWf).toContain("run: npx sdlc validate");
+    const pnpm = await freshRepo();
+    put(pnpm, "pnpm-lock.yaml", "lockfileVersion: 9\n");
+    await sdlc(pnpm, ["init", "--json"]);
+    expect(readFileSync(join(pnpm, ".github/workflows/sdlc-evals.yml"), "utf8")).toContain("corepack enable\n          pnpm install --frozen-lockfile");
+  });
+
   it("config-change gate (acceptance m): a CLAUDE.md change whose run regresses a case is blocked with before/after output; scheduled mode is not gated; harvest refuses an unmerged change", async () => {
     const dir = await freshRepo();
     await initAndCommit(dir);

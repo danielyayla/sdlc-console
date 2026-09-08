@@ -6,11 +6,21 @@ import { installHooks } from "@sdlc/hooks";
 import { stringifyYaml } from "@sdlc/schemas";
 import { CliError, type Io } from "../io.js";
 import { TEMPLATES } from "../templates.js";
-import { WORKFLOW_FILES, evalsWorkflow, validateWorkflow } from "../workflows.js";
+import { WORKFLOW_FILES, evalsWorkflow, validateWorkflow, type InstallStep } from "../workflows.js";
 
 export interface InitOptions {
   product?: string;
   intentHome?: string;
+  /** Command the generated workflows run instead of `npx sdlc` (a team's own install, e.g. `node tools/sdlc/bin.js`). */
+  sdlcBin?: string;
+}
+
+/** The Install step follows the lockfile present when init runs; none means no step (the team adds one if `bin` needs it). */
+export function installFromLockfile(root: string): InstallStep {
+  if (existsSync(join(root, "pnpm-lock.yaml"))) return "pnpm";
+  if (existsSync(join(root, "package-lock.json")) || existsSync(join(root, "npm-shrinkwrap.json"))) return "npm";
+  if (existsSync(join(root, "yarn.lock"))) return "yarn";
+  return null;
 }
 
 export interface InitResult {
@@ -62,9 +72,11 @@ export async function init(io: Io, opts: InitOptions): Promise<InitResult> {
   for (const [name, body] of Object.entries(TEMPLATES)) put(`sdlc/templates/${name}.md`, body);
   for (const dir of ["sdlc/changes", "sdlc/loop/triage", "sdlc/security/findings", "sdlc/proposals", "evals/cases", "evals/runs"]) put(`${dir}/.gitkeep`, "");
 
-  // CI: the eval suite as the config-change gate, and validation on every PR (create-only)
-  put(WORKFLOW_FILES.evals, evalsWorkflow());
-  put(WORKFLOW_FILES.validate, validateWorkflow());
+  // CI: the eval suite as the config-change gate, and validation on every PR (create-only). The command and the
+  // install step are the team's: `--sdlc-bin` names their install, the lockfile picks the package manager (3.0).
+  const workflow = { install: installFromLockfile(root), ...(opts.sdlcBin ? { bin: opts.sdlcBin } : {}) };
+  put(WORKFLOW_FILES.evals, evalsWorkflow(workflow));
+  put(WORKFLOW_FILES.validate, validateWorkflow(workflow));
 
   if (installMergeUnion(root)) created.push(".gitattributes");
   else skipped.push(".gitattributes");
