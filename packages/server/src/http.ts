@@ -2,8 +2,9 @@ import { collectSources, type FactsCache } from "./metrics/index.js";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
-import { gitRaw } from "@sdlc/adapter-git";
-import { computeMetrics, deriveAll, parseWindow, readFile, type ArtifactIndex, type Tree } from "@sdlc/core";
+import { gitRaw, ledgerCommits } from "@sdlc/adapter-git";
+import { computeMetrics, deriveAll, deriveChange, exportChange, parseWindow, readFile, renderChangeExportMarkdown, type ArtifactIndex, type Tree } from "@sdlc/core";
+import type { Tracer } from "./otel.js";
 import type { Snapshot } from "./snapshot.js";
 import { readRounds } from "@sdlc/mcp";
 import { parseFrontMatter, type GateNumber } from "@sdlc/schemas";
@@ -42,7 +43,7 @@ type Body = Record<string, unknown>;
 /** Launcher dependencies from the app options; null when sessions cannot be launched here. */
 function launchDeps(options: AppOptions, store: StateStore, registry: SessionRegistry | null): LaunchDeps | null {
   if (!registry || !options.sdlcBin) return null;
-  return { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) };
+  return { root: store.root, registry, sdlcBin: options.sdlcBin, identity: store.who, ...(options.claudeBin ? { claudeBin: options.claudeBin } : {}), ...(options.tracer ? { tracer: options.tracer } : {}), onExit: (s) => (options.engine ? void options.engine.onSessionExit(s) : store.rebuild()) };
 }
 
 function json(res: ServerResponse, status: number, value: unknown): void {
@@ -183,6 +184,11 @@ export interface AppOptions {
   env?: Record<string, string | undefined>;
   /** Hosted mode (3.1): sign-in through the identity provider; every request and socket acts as the signed-in identity. */
   auth?: Authenticator;
+  /** OTel tracer (3.3) for sessions launched through the API. */
+  tracer?: Tracer;
+  /** `OTEL_TRACE_URL_TEMPLATE`: where a trace id links to (`{traceId}` substituted); the UI shows trace links only with it. */
+  traceUrlTemplate?: string;
+  now?: () => Date;
 }
 
 export interface HttpApp {
@@ -282,7 +288,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
     }
 
     if (method === "GET" && parts[1] === "products" && parts.length === 2) {
-      json(res, 200, { current: product.name, products: products.map(productJson) });
+      json(res, 200, { current: product.name, products: products.map(productJson), traceUrlTemplate: options.traceUrlTemplate ?? null });
       return;
     }
     if (method === "GET" && parts[1] === "me" && parts.length === 2) {
@@ -343,6 +349,25 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         const c = snap.changes.find((x) => x.id === id);
         if (!c) throw new ActionError(404, `${id} not found`);
         json(res, 200, c);
+        return;
+      }
+      if (method === "GET" && parts[3] === "export" && parts.length === 4) {
+        // compliance export (3.3): derived in core from the tree; the commit per decision comes from the ledger's history. Read-only.
+        await store.refresh();
+        const repo = store.currentRepo;
+        if (!repo) throw new ActionError(502, "repository not loaded", [], true);
+        const files = repo.changes.get(id);
+        if (!files) throw new ActionError(404, `${id} not found`);
+        const format = url.searchParams.get("format") ?? "json";
+        if (format !== "json" && format !== "md") throw new ActionError(400, "format must be json or md");
+        const who = store.identity();
+        const commits = await ledgerCommits(store.root, id, "HEAD").catch(() => ({}));
+        const doc = exportChange(repo, deriveChange(repo, files), { exportedAt: (options.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z"), exportedBy: { id: who.id, name: who.name }, commits });
+        if (!doc) throw new ActionError(404, `${id} not found`);
+        const download = url.searchParams.get("download") !== "0";
+        const body = format === "md" ? renderChangeExportMarkdown(doc) : `${JSON.stringify(doc, null, 2)}\n`;
+        res.writeHead(200, { "content-type": format === "md" ? "text/markdown; charset=utf-8" : "application/json; charset=utf-8", "content-length": Buffer.byteLength(body), "x-sdlc-content-hash": doc.contentHash.value, ...(download ? { "content-disposition": `attachment; filename="${id}-export.${format}"` } : {}) });
+        res.end(body);
         return;
       }
       if (method === "GET" && parts[3] === "artifacts" && parts[4] !== undefined) {
@@ -518,7 +543,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
       const id = parts[2];
       if (!id) {
         const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}), ...(typeof body["reason"] === "string" && body["reason"].trim() !== "" ? { reason: body["reason"] } : {}) };
-        const r = await launchSession(input, { root: store.root, registry, sdlcBin: o.sdlcBin, identity: store.who, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}), onExit: (s) => (o.engine ? void o.engine.onSessionExit(s) : store.rebuild()) });
+        const r = await launchSession(input, { root: store.root, registry, sdlcBin: o.sdlcBin, identity: store.who, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}), ...(o.tracer ? { tracer: o.tracer } : {}), onExit: (s) => (o.engine ? void o.engine.onSessionExit(s) : store.rebuild()) });
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: r.session.mode === "SUPERVISED" ? `${r.session.id} prepared — run the command from the card` : `${r.session.id} started (${r.session.mode}) on ${r.session.branch}`, revision: store.current?.revision ?? 0 });
         return;
@@ -549,7 +574,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         const s = registry.get(id);
         if (!s) throw new ActionError(404, `${id} not found`);
         if (s.status === "running") throw new ActionError(409, "the session is still running; guidance is delivered by resuming a finished or stalled session");
-        const r = await launchSession({ changeId: s.changeId, kind: s.kind, ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: id, guidance: str(body, "text") } }, { root: store.root, registry, sdlcBin: o.sdlcBin, identity: store.who, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}), onExit: (s) => (o.engine ? void o.engine.onSessionExit(s) : store.rebuild()) });
+        const r = await launchSession({ changeId: s.changeId, kind: s.kind, ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: id, guidance: str(body, "text") } }, { root: store.root, registry, sdlcBin: o.sdlcBin, identity: store.who, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}), ...(o.tracer ? { tracer: o.tracer } : {}), onExit: (s) => (o.engine ? void o.engine.onSessionExit(s) : store.rebuild()) });
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: `guidance sent — ${id} resumed`, revision: store.current?.revision ?? 0 });
         return;

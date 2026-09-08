@@ -19,3 +19,4 @@ export * from "./serve.js";
 export * from "./sessions/index.js";
 export * from "./engine/index.js";
 export * from "./github/index.js";
+export * from "./otel.js";

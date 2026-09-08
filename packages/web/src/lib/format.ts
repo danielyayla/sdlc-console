@@ -5,6 +5,12 @@ export const ARTIFACT_NAMES = ["intent.md", "spec.md", "plan.md", "evals", "PR +
 export const ARTIFACT_FILES = ["intent.md", "spec.md", "plan.md", "evals", "pr.yaml", "incident.md"] as const;
 
 export type Role = "po" | "eng";
+
+/** A trace link when the server has `OTEL_TRACE_URL_TEMPLATE` and the row carries a trace id (3.3); null otherwise. */
+export function traceUrl(template: string | null | undefined, traceId: string | null | undefined): string | null {
+  if (!template || !traceId) return null;
+  return template.includes("{traceId}") ? template.split("{traceId}").join(traceId) : `${template}${traceId}`;
+}
 export const ROLE_LABEL: Record<Role, string> = { po: "product owner", eng: "engineer" };
 
 /** "2h ago", "3d ago", "just now" — relative to `now` for testability. */

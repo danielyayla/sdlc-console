@@ -4,6 +4,7 @@ import { check, configFingerprint, intersectingCases, loadRepo, type ChangeView,
 import { compileGlobs, stringifyJson, type AutoFinding, type CommandResult, type Event, type EvalResult, type PerChangeRun, type Pr } from "@sdlc/schemas";
 import type { Env } from "@sdlc/adapter-github";
 import { SYSTEM_IDENTITY, codeHostFor, type CodeHost } from "./codehost.js";
+import { noopTracer, type Span, type SpanContext, type Tracer } from "../otel.js";
 
 export interface Exec {
   (cmd: string, cwd: string): Promise<{ exitCode: number; output: string }>;
@@ -30,6 +31,9 @@ export interface RunInput {
   /** Code host override (tests); otherwise `config.codeHost` + `env`. */
   codeHost?: CodeHost;
   env?: Env;
+  /** OTel (3.3): the run's `sdlc.run.per-change` span, a child of `parent` (the job's span) when given. */
+  tracer?: Tracer;
+  parent?: SpanContext | Span | null;
 }
 
 export interface RunOutcome {
@@ -55,6 +59,22 @@ function systemEvent<N extends Event["event"]>(name: N, cycle: number, seq: numb
  * branch by sdlc-bot; green opens the PR (local mode: pr.yaml) → stage 5.
  */
 export async function runPerChange(input: RunInput, repo: Repo): Promise<RunOutcome> {
+  const span = (input.tracer ?? noopTracer).startSpan("sdlc.run.per-change", { attributes: { "sdlc.change": input.view.id, "sdlc.cycle": input.view.cycle, "sdlc.stage": input.view.stage, "sdlc.branch": input.branch }, parent: input.parent ?? null });
+  try {
+    const outcome = await runPerChangeSpanned(input, repo);
+    const run = outcome.run;
+    for (const r of run.commandResults) span.addEvent("sdlc.run.command", { "sdlc.command.name": r.name, "sdlc.command.exit_code": r.exitCode, "sdlc.command.pass": r.pass });
+    for (const r of run.results) span.addEvent("sdlc.run.case", { "sdlc.case.id": r.caseId, "sdlc.case.pass": r.pass });
+    span.setAttributes({ "sdlc.run.n": run.n, "sdlc.run.verdict": run.verdict, "sdlc.run.head": run.headSha, "sdlc.run.commit": outcome.runCommit, "sdlc.run.commands.passed": run.commandResults.filter((r) => r.pass).length, "sdlc.run.commands.total": run.commandResults.length, "sdlc.run.cases.passed": run.results.filter((r) => r.pass).length, "sdlc.run.cases.total": run.results.length, "sdlc.run.pr_action": outcome.prAction, "sdlc.run.consecutive_reds": outcome.consecutiveReds });
+    span.end({ ok: true });
+    return outcome;
+  } catch (e) {
+    span.end({ ok: false, message: (e as Error).message });
+    throw e;
+  }
+}
+
+async function runPerChangeSpanned(input: RunInput, repo: Repo): Promise<RunOutcome> {
   const now = () => (input.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
   const exec = input.exec ?? ((c, d) => shell(c, d, input.timeoutMs ?? 15 * 60_000));
   const view = input.view;

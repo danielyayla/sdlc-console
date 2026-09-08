@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { addWorktree, branchExists, commitWritePlan, currentBranch, gitRaw, newUlid, readTree, showPrefix, type GitIdentity } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo, logPath, normalizeReason, repeatSignals, stageDef, type ChangeView, type Repo, type RepeatSignal, type WritePlan } from "@sdlc/core";
-import { PROPOSAL_JOB, buildContext, type ContextBundle } from "@sdlc/mcp";
+import { PROPOSAL_JOB, buildContext, readRounds, type ContextBundle, type StoredRound } from "@sdlc/mcp";
+import { noopTracer, type Tracer } from "../otel.js";
 import type { Event } from "@sdlc/schemas";
 import { ActionError } from "../store.js";
 import { capacityOf } from "./capacity.js";
@@ -40,6 +41,8 @@ export interface LaunchDeps {
   /** Called when a spawned session exits (snapshot rebuild). */
   onExit?: (session: StoredSession) => void;
   spawnImpl?: typeof spawn;
+  /** OTel tracer (3.3): one `sdlc.session` span per launch, rounds as span events; the no-op tracer without an exporter. */
+  tracer?: Tracer;
 }
 
 export interface LaunchResult {
@@ -194,6 +197,13 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     ...(resuming ? ["--resume", harnessSessionId] : ["--session-id", harnessSessionId]),
   ];
   const command = engineerCommand({ worktreePath: worktree, id, changeId: view.id, harnessSessionId, kind, mode }, claudeBin, resuming !== null);
+  // the session's span: a resume is a child in the same trace as the launch it continues
+  const tracer = deps.tracer ?? noopTracer;
+  const parent = existing?.traceId && existing.spanId ? { traceId: existing.traceId, spanId: existing.spanId } : null;
+  const span = tracer.startSpan(resuming ? "sdlc.session.resume" : "sdlc.session", {
+    attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": mode, "sdlc.change": view.id, "sdlc.cycle": view.cycle, "sdlc.stage": view.stage, "sdlc.task": taskId, "sdlc.branch": branch, "sdlc.session.engineer": input.engineer ?? deps.identity.id, "sdlc.session.resume_count": resuming ? (existing?.resumeCount ?? 0) + 1 : 0, "sdlc.session.harness_id": harnessSessionId },
+    parent,
+  });
 
   const record: StoredSession = {
     ...(existing ?? {}),
@@ -232,15 +242,21 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     numTurns: existing?.numTurns ?? null,
     lastLine: null,
     error: null,
+    traceId: span.traceId ?? existing?.traceId ?? null,
+    spanId: span.spanId ?? existing?.spanId ?? null,
   };
   deps.registry.upsert(record);
 
   if (!resuming) {
     const started: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(repo, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.started", data: { session: id, mode, ...(taskId ? { task: taskId } : {}), worktree: branch, ...(target ? { target } : {}) } } as Event;
-    await systemEventCommit(ledgerDir, view.id, started, `sdlc(${view.id}): session ${id} started (${mode})`, SYSTEM);
+    const sha = await systemEventCommit(ledgerDir, view.id, started, `sdlc(${view.id}): session ${id} started (${mode})`, SYSTEM);
+    span.addEvent("sdlc.ledger.session.started", { "sdlc.event.id": started.id, "sdlc.commit": sha });
   }
 
   if (mode === "SUPERVISED") {
+    // the console's part ends here: the engineer runs the command in their terminal
+    span.setAttributes({ "sdlc.session.status": "awaiting_engineer" });
+    span.end({ ok: true });
     return { session: record, finished: Promise.resolve(null) };
   }
 
@@ -265,7 +281,8 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
         // the ledger line is the record of the exit; another commit on the same branch (an index lock) is retried, never lost silently
         for (let attempt = 0; attempt < 5; attempt++) {
           try {
-            await systemEventCommit(ledgerDir, view.id, stopped, `sdlc(${view.id}): session ${id} ${reason}`, SYSTEM);
+            const sha = await systemEventCommit(ledgerDir, view.id, stopped, `sdlc(${view.id}): session ${id} ${reason}`, SYSTEM);
+            span.addEvent("sdlc.ledger.session.stopped", { "sdlc.event.id": stopped.id, "sdlc.commit": sha, "sdlc.session.stop_reason": reason });
             break;
           } catch (e) {
             if (attempt === 4) deps.registry.patch(id, { error: `session.stopped not recorded: ${(e as Error).message}` });
@@ -274,6 +291,11 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
         }
       }
       const final = deps.registry.get(id);
+      // rounds the session recorded (its verification loop) become events on the span; the span ends with the harness
+      const rounds = existsSync(worktree) ? (readRounds(worktree, id) as StoredRound[]) : [];
+      for (const r of rounds) span.addEvent("sdlc.round", { "sdlc.round.n": r.n, "sdlc.round.pass": r.results.every((x) => x.pass), "sdlc.round.results": r.results.map((x) => `${x.name}:${x.pass ? "pass" : "fail"}`).join(","), ...(r.diffPct !== undefined ? { "sdlc.round.diff_pct": r.diffPct } : {}) }, Date.parse(r.ts) || undefined);
+      span.setAttributes({ "sdlc.session.status": status, "sdlc.session.exit_code": _code, "sdlc.session.rounds": rounds.length, "sdlc.session.cost_usd": final?.costUsd ?? null, "sdlc.session.turns": final?.numTurns ?? null, "sdlc.session.model": final?.modelPin ?? null });
+      span.end(status === "error" ? { ok: false, ...(final?.error ? { message: final.error } : {}) } : { ok: true });
       if (final) deps.onExit?.(final);
     },
   });

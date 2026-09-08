@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { auditCommand, renderAudit } from "./commands/audit.js";
+import { exportCommand } from "./commands/export.js";
 import { metricsReport, renderMetrics } from "./commands/metrics.js";
 import { changeList, changeNew, changeShow, summarize } from "./commands/change.js";
 import { acceptCommand, parseGate, sendBackCommand } from "./commands/gate.js";
@@ -32,6 +33,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc send-back <CHG> --gate n --feedback <text>
   sdlc loop <CHG> [--incident <file>]
   sdlc audit <CHG>
+  sdlc export <CHG> [--format json|md] [--out <file>] [--ref r]   (compliance export: change, cycles, ledger verbatim, gate decisions with commits, PRs, runs, findings; sha256 content hash)
   sdlc metrics [--stage n] [--window 30d] [--refresh]   (per-stage leading/lagging over git, ledger, PR metadata, CI, incident records; --refresh fetches GitHub facts)
   sdlc serve [--port n] [--host addr] [--role po|eng] [--repo <path>]…   (--repo: serve more repositories; config.products lists monorepo products)
   sdlc triage accept|dismiss <TRI> [--reason <text>] [--tune <note>]
@@ -102,6 +104,8 @@ const OPTIONS = {
   refresh: { type: "boolean" },
   "sdlc-bin": { type: "string" },
   repo: { type: "string", multiple: true },
+  format: { type: "string" },
+  out: { type: "string" },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -320,6 +324,17 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const r = await auditCommand(ctx, sub, values.ref ?? "HEAD");
         emit(io, json, r, () => renderAudit(r));
         return r.clean ? 0 : 1;
+      }
+      case "export": {
+        // read-only: grants nothing, so it runs for anyone (an agent included) — the document is what git already says
+        const ctx = await repoContext(io, json, values.product);
+        if (!sub) throw new CliError("usage: sdlc export <CHG> [--format json|md] [--out <file>]");
+        const format = values.format ?? "json";
+        if (format !== "json" && format !== "md") throw new CliError("--format must be json or md");
+        const r = await exportCommand(ctx, sub, { format, ...(values.ref ? { ref: values.ref } : {}), ...(values.out ? { out: values.out } : {}) });
+        if (r.out) emit(io, json, { file: r.out, contentHash: r.doc.contentHash.value, events: r.doc.events.length, cycles: r.doc.cycles.length }, () => `wrote ${r.out} · ${r.doc.cycles.length} cycle(s) · ${r.doc.events.length} events · sha256 ${r.doc.contentHash.value}`);
+        else io.stdout(json && format === "md" ? `${JSON.stringify(r.doc, null, 2)}\n` : r.text);
+        return 0;
       }
       default:
         throw new CliError(`unknown command: ${cmd}\n${USAGE}`);

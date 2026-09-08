@@ -1,6 +1,6 @@
 import type { Snapshot } from "@sdlc/server";
 import { useEffect, useReducer, useRef, useState } from "react";
-import { act, fetchProducts, subscribe, type Artifact, type ProductInfo } from "./api";
+import { act, exportHref, fetchJobs, fetchProducts, subscribe, type Artifact, type JobRow, type ProductInfo } from "./api";
 import type { Role } from "./lib/format";
 import { initialState, reduce, type UIState } from "./state";
 import { ChangeDetail, type ReproDraftView } from "./views/ChangeDetail";
@@ -25,6 +25,9 @@ export interface AppProps {
   promptImpl?: (text: string) => string | null;
   /** Injected product list for server-side rendering; the browser fetches `/api/products`. */
   products?: ProductInfo[];
+  /** Injected for server-side rendering (3.3): the job queue and the trace URL template the browser fetches. */
+  jobs?: JobRow[];
+  traceUrlTemplate?: string | null;
 }
 
 /** The repro test a build session reported for the change and the engineer has not judged (from the session registry, never stored). */
@@ -37,11 +40,13 @@ function reproDraftOf(snapshot: Snapshot, changeId: string): ReproDraftView | nu
   return null;
 }
 
-export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true, promptImpl, products: injectedProducts = [] }: AppProps) {
+export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true, promptImpl, products: injectedProducts = [], jobs: injectedJobs = [], traceUrlTemplate: injectedTemplate = null }: AppProps) {
   const [state, dispatch] = useReducer(reduce, initial ?? initialState());
   const [snapshot, setSnapshot] = useState<Snapshot | null>(injected);
   const [connected, setConnected] = useState(injected !== null);
   const [products, setProducts] = useState<ProductInfo[]>(injectedProducts);
+  const [jobs, setJobs] = useState<JobRow[]>(injectedJobs);
+  const [traceUrlTemplate, setTraceUrlTemplate] = useState<string | null>(injectedTemplate);
   const seeded = useRef(initial !== undefined);
 
   useEffect(() => {
@@ -54,9 +59,21 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
   useEffect(() => {
     if (!live) return;
     fetchProducts()
-      .then((r) => setProducts(r.products))
+      .then((r) => {
+        setProducts(r.products);
+        setTraceUrlTemplate(r.traceUrlTemplate);
+      })
       .catch(() => setProducts([]));
   }, [live]);
+
+  // the job queue (jobs, runs) is cache state, not part of the snapshot: refetched when the snapshot moves, on the Sessions tab
+  const revision = snapshot?.revision ?? 0;
+  useEffect(() => {
+    if (!live || state.view !== "sessions") return;
+    fetchJobs(state.product)
+      .then(setJobs)
+      .catch(() => setJobs([]));
+  }, [live, state.view, state.product, revision]);
 
   useEffect(() => {
     if (snapshot && !seeded.current) {
@@ -114,6 +131,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onReproReject={(reason) => void run(`/changes/${selected.id}/repro/reject`, { reason })}
         onLiftFreeze={(path, reason) => void run(`/changes/${selected.id}/freeze/lift`, { path, reason })}
         onDismissAutoFinding={(path, reason) => void run(`/changes/${selected.id}/auto-findings/dismiss`, { path, reason })}
+        exportHref={exportHref(selected.id, state.product)}
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );
@@ -125,6 +143,9 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onStart={(input) => void run("/sessions", input)}
         onAction={(id, action, body) => void run(`/sessions/${id}/${action}`, body ?? {})}
         onSelect={(id) => dispatch({ type: "select", id })}
+        jobs={jobs}
+        traceUrlTemplate={traceUrlTemplate}
+        now={now}
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );

@@ -6,6 +6,7 @@ import { activeCases, budgetStatus, buildEvalRun, configFingerprint, loadRepo, n
 import { stringifyJson, type EvalResult, type EvalRun } from "@sdlc/schemas";
 import { SYSTEM_IDENTITY } from "./codehost.js";
 import type { Exec } from "./runner.js";
+import { noopTracer, type Span, type SpanContext, type Tracer } from "../otel.js";
 
 export interface SuiteInput {
   root: string;
@@ -20,6 +21,9 @@ export interface SuiteInput {
   clock?: () => number;
   env?: Record<string, string | undefined>;
   log?: (line: string) => void;
+  /** OTel (3.3): the run's `sdlc.run.suite` span, a child of `parent` (the job's span) when given. */
+  tracer?: Tracer;
+  parent?: SpanContext | Span | null;
 }
 
 export interface SuiteOutcome {
@@ -51,6 +55,21 @@ const EXCERPT = 8_000;
  * signals are raised as triage items. Draft and retired cases never run.
  */
 export async function runSuite(input: SuiteInput): Promise<SuiteOutcome> {
+  const span = (input.tracer ?? noopTracer).startSpan("sdlc.run.suite", { attributes: { "sdlc.run.trigger": input.trigger, "sdlc.run.ref": input.ref ?? "HEAD" }, parent: input.parent ?? null });
+  try {
+    const outcome = await runSuiteSpanned(input);
+    const run = outcome.run;
+    for (const r of run?.results ?? []) span.addEvent("sdlc.run.case", { "sdlc.case.id": r.caseId, "sdlc.case.pass": r.pass });
+    span.setAttributes({ "sdlc.run.id": run?.id ?? null, "sdlc.run.verdict": run?.verdict ?? null, "sdlc.run.pass_rate": run?.passRate ?? null, "sdlc.run.threshold": run?.threshold ?? null, "sdlc.run.cases.passed": run?.results.filter((r) => r.pass).length ?? 0, "sdlc.run.cases.total": run?.results.length ?? 0, "sdlc.run.commit": outcome.commit, "sdlc.run.skipped": outcome.skipped, "sdlc.run.signals": outcome.signals.length });
+    span.end({ ok: true });
+    return outcome;
+  } catch (e) {
+    span.end({ ok: false, message: (e as Error).message });
+    throw e;
+  }
+}
+
+async function runSuiteSpanned(input: SuiteInput): Promise<SuiteOutcome> {
   const { repo, trigger } = input;
   const iso = () => (input.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
   if (repo.config.evals.mode === "scheduled" && trigger === "config-pr") return { skipped: "evals.mode is scheduled: config PRs are not gated", run: null, commit: null, signals: [], signalsCommit: null };

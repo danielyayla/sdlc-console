@@ -1,0 +1,924 @@
+{
+  "schema": 1,
+  "kind": "change-export",
+  "exportedAt": "2026-09-08T10:00:00Z",
+  "exportedBy": {
+    "id": "auditor@veri.example",
+    "name": "Ada Auditor"
+  },
+  "ref": null,
+  "change": {
+    "schema": 1,
+    "id": "CHG-0012",
+    "title": "Invoice PDF rendering",
+    "kind": "fix",
+    "risk": "routine",
+    "created": {
+      "by": "po@veri.example",
+      "at": "2026-08-20T09:00:00Z"
+    },
+    "origin": {
+      "type": "idea"
+    },
+    "record": {
+      "system": "servicenow",
+      "id": "INC0041207",
+      "url": "https://servicenow.example/incident/INC0041207"
+    },
+    "cycle": 2,
+    "repro": null,
+    "closed": null
+  },
+  "derived": {
+    "stage": 1,
+    "stageName": "Plan",
+    "status": "Loop closed — re-entered Plan from incident",
+    "acceptedGates": [],
+    "valid": true,
+    "validationErrors": []
+  },
+  "cycles": [
+    {
+      "cycle": 1,
+      "archived": true,
+      "dir": "sdlc/changes/CHG-0012/cycles/1",
+      "artifacts": [
+        {
+          "index": 0,
+          "name": "intent.md",
+          "path": "sdlc/changes/CHG-0012/cycles/1/intent.md",
+          "sha": "39c1e806781122930823f470b7c261ed422a4fe2",
+          "frontMatter": {
+            "id": "CHG-0012",
+            "artifact": "intent",
+            "cycle": 1,
+            "author": "po@veri.example",
+            "created": "2026-08-20T09:00:00Z",
+            "status": "final",
+            "context_manifest": "sha256:seed-intent-session",
+            "schema": 1
+          },
+          "content": "---\nid: CHG-0012\nartifact: intent\ncycle: 1\nauthor: po@veri.example\ncreated: 2026-08-20T09:00:00Z\nstatus: final\ncontext_manifest: sha256:seed-intent-session\nschema: 1\n---\n# Intent: Invoice PDF rendering\n\n## Problem\nInvoices render as HTML only; customers ask for PDF.\n\n## Proposed outcome\nA PDF download per invoice, identical to the HTML layout.\n\n## Affected users and systems\nCustomers; invoicing web; storage.\n\n## Constraints\nNo third-party rendering service; PDFs under 1 MB.\n\n## Open questions\nNone.\n"
+        },
+        {
+          "index": 1,
+          "name": "spec.md",
+          "path": "sdlc/changes/CHG-0012/cycles/1/spec.md",
+          "sha": "57e418b8fe885d99f0ab1492ef00c2532b23e1f4",
+          "frontMatter": {
+            "id": "CHG-0012",
+            "artifact": "spec",
+            "cycle": 1,
+            "intent_sha": "5ed41f66b6a5a8d0934cc0c375645e00b196ad35",
+            "prompt_ref": "prompts/design-pass@1",
+            "skills": [
+              {
+                "name": "brand",
+                "version": "1.2.0"
+              }
+            ],
+            "concerns": [
+              {
+                "id": "C1",
+                "policy": "privacy",
+                "owner": "legal@veri.example",
+                "resolved": true,
+                "note": "expiring links"
+              }
+            ],
+            "created": "2026-08-20T11:00:00Z",
+            "context_manifest": "sha256:seed-design-pass",
+            "schema": 1
+          },
+          "content": "---\nid: CHG-0012\nartifact: spec\ncycle: 1\nintent_sha: 5ed41f66b6a5a8d0934cc0c375645e00b196ad35\nprompt_ref: prompts/design-pass@1\nskills:\n  - name: brand\n    version: 1.2.0\nconcerns:\n  - id: C1\n    policy: privacy\n    owner: legal@veri.example\n    resolved: true\n    note: expiring links\ncreated: 2026-08-20T11:00:00Z\ncontext_manifest: sha256:seed-design-pass\nschema: 1\n---\n# Spec: Invoice PDF rendering\n\n## Requirements\nRender invoice to PDF server-side; link on invoice page.\n\n## Design\nHeadless browser print pipeline behind a queue.\n\n## Areas of concern\nC1 privacy: PDFs contain addresses — resolved with expiring links.\n\n## Open questions carried forward\nNone.\n"
+        },
+        {
+          "index": 2,
+          "name": "plan.md",
+          "path": "sdlc/changes/CHG-0012/cycles/1/plan.md",
+          "sha": "552808860cb09761ba495140389890e3324eef7a",
+          "frontMatter": {
+            "id": "CHG-0012",
+            "artifact": "plan",
+            "cycle": 1,
+            "spec_sha": "84d62dc83e65704bec36d7387cd70e33ff518651",
+            "rev": 2,
+            "accepted_by": "eng@veri.example",
+            "accepted_at": "2026-08-21T10:00:00Z",
+            "acceptance_line": "GET /invoices/:id.pdf returns a PDF under 1 MB for the 3 fixture invoices",
+            "context_manifest": "sha256:seed-plan-session",
+            "schema": 1
+          },
+          "content": "---\nid: CHG-0012\nartifact: plan\ncycle: 1\nspec_sha: 84d62dc83e65704bec36d7387cd70e33ff518651\nrev: 2\naccepted_by: eng@veri.example\naccepted_at: 2026-08-21T10:00:00Z\nacceptance_line: GET /invoices/:id.pdf returns a PDF under 1 MB for the 3 fixture invoices\ncontext_manifest: sha256:seed-plan-session\nschema: 1\n---\n# Plan: Invoice PDF rendering (from spec.md 84d62dc83e65)\n\n## Files that change\nsrc/invoice/pdf.ts (new)\nsrc/invoice/route.ts\ntest/invoice/pdf.test.ts (new)\n\n## Order of work\n1. render pipeline\n2. route\n3. tests\n\n## Risks\nPrint CSS drift.\n\n## Proof\ntest/invoice/pdf.test.ts + screenshot diff\n"
+        },
+        {
+          "index": 4,
+          "name": "pr.yaml",
+          "path": "sdlc/changes/CHG-0012/cycles/1/pr.yaml",
+          "sha": "c83351a567e4e0c2efd4eb1708cd638c9e95fd71",
+          "frontMatter": null,
+          "content": "schema: 1\nprovider: local\nbranch: CHG-0012/pdf\nbaseBranch: main\nheadSha: b1f3c9a2d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2\nopenedAt: 2026-08-22T14:10:00Z\nmergedAt: 2026-08-23T09:00:00Z\nmergeSha: c2e4d0b3e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3\nreviewers:\n  - eng@veri.example\nreview:\n  session: s-0012-review\n  headSha: b1f3c9a2d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2\n  at: 2026-08-22T16:00:00Z\nfindings:\n  high: 0\n  medium: 1\n  low: 2\nchecks:\n  - name: evidence\n    verdict: pass\nplanMatches: true\n"
+        },
+        {
+          "index": 5,
+          "name": "incident.md",
+          "path": "sdlc/changes/CHG-0012/cycles/1/incident.md",
+          "sha": "1884c9c693341dbfff9cac441cdf14bde00b85f2",
+          "frontMatter": {
+            "id": "CHG-0012",
+            "artifact": "incident",
+            "cycle": 1,
+            "src": "metric:error_rate",
+            "tier": "incident",
+            "created": "2026-09-02T07:30:00Z",
+            "context_manifest": "sha256:seed-diagnose",
+            "schema": 1
+          },
+          "content": "---\nid: CHG-0012\nartifact: incident\ncycle: 1\nsrc: metric:error_rate\ntier: incident\ncreated: 2026-09-02T07:30:00Z\ncontext_manifest: sha256:seed-diagnose\nschema: 1\n---\n# Incident: PDF rendering timeouts after deploy\n\n## Anomaly and evidence\nerror_rate_pct 3.1% vs baseline 0.4% (3σ) since 2026-09-02 06:40; 212 PDF requests timed out at 30 s.\n\n## Proposed outcome\nPDF rendering under 5 s p95 with no timeouts.\n\n## Affected systems\ninvoicing web; pdf queue; customers downloading invoices.\n\n## Open questions\nIs the queue starved by the nightly export?\n"
+        },
+        {
+          "index": 3,
+          "name": "evals/final-round.json",
+          "path": "sdlc/changes/CHG-0012/cycles/1/evals/final-round.json",
+          "sha": "c5a612669093a8f902ea02e4f3da44efca3ea6a2",
+          "frontMatter": null,
+          "content": "{\n  \"schema\": 1,\n  \"n\": 3,\n  \"ts\": \"2026-08-22T13:50:00Z\",\n  \"results\": [\n    {\n      \"name\": \"build\",\n      \"pass\": true,\n      \"exitCode\": 0,\n      \"outputExcerpt\": \"tsc -b\"\n    },\n    {\n      \"name\": \"test\",\n      \"pass\": true,\n      \"exitCode\": 0,\n      \"outputExcerpt\": \"41 passed\"\n    },\n    {\n      \"name\": \"lint\",\n      \"pass\": true,\n      \"exitCode\": 0,\n      \"outputExcerpt\": \"\"\n    }\n  ]\n}\n"
+        }
+      ],
+      "decisions": [
+        {
+          "eventId": "01J8SEEDSEEDSEEDSEED000003",
+          "cycle": 1,
+          "seq": 3,
+          "ts": "2026-08-20T10:00:00Z",
+          "gate": 1,
+          "decision": "accepted",
+          "by": {
+            "id": "po@veri.example",
+            "role": "po"
+          },
+          "source": "cli",
+          "artifactSha": "5ed41f66b6a5a8d0934cc0c375645e00b196ad35",
+          "note": null,
+          "commit": null
+        },
+        {
+          "eventId": "01J8SEEDSEEDSEEDSEED000006",
+          "cycle": 1,
+          "seq": 6,
+          "ts": "2026-08-20T15:00:00Z",
+          "gate": 2,
+          "decision": "accepted",
+          "by": {
+            "id": "po@veri.example",
+            "role": "po"
+          },
+          "source": "cli",
+          "artifactSha": "84d62dc83e65704bec36d7387cd70e33ff518651",
+          "note": null,
+          "commit": null
+        },
+        {
+          "eventId": "01J8SEEDSEEDSEEDSEED00000D",
+          "cycle": 1,
+          "seq": 13,
+          "ts": "2026-08-21T10:00:00Z",
+          "gate": 3,
+          "decision": "accepted",
+          "by": {
+            "id": "eng@veri.example",
+            "role": "eng"
+          },
+          "source": "cli",
+          "artifactSha": "bab33fc194520d5ae70d0a430095ae1230c74325",
+          "note": null,
+          "commit": null
+        },
+        {
+          "eventId": "01J8SEEDSEEDSEEDSEED00000M",
+          "cycle": 1,
+          "seq": 20,
+          "ts": "2026-08-23T09:00:00Z",
+          "gate": 5,
+          "decision": "accepted",
+          "by": {
+            "id": "eng@veri.example",
+            "role": "eng"
+          },
+          "source": "cli",
+          "artifactSha": "615d65e9328d1bef5c7d57e655f11e8e75928928",
+          "note": null,
+          "commit": null
+        },
+        {
+          "eventId": "01J8Z6Q7Y2K3M4N5P6Q7R8S001",
+          "cycle": 1,
+          "seq": 27,
+          "ts": "2026-09-02T09:00:00Z",
+          "gate": 6,
+          "decision": "accepted",
+          "by": {
+            "id": "po@veri.example",
+            "role": "po"
+          },
+          "source": "cli",
+          "artifactSha": "f75c612825b637f0a934ebd7a32ea52a8b0a31a7",
+          "note": null,
+          "commit": null
+        }
+      ],
+      "pr": {
+        "schema": 1,
+        "provider": "local",
+        "branch": "CHG-0012/pdf",
+        "baseBranch": "main",
+        "headSha": "b1f3c9a2d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+        "openedAt": "2026-08-22T14:10:00Z",
+        "mergedAt": "2026-08-23T09:00:00Z",
+        "mergeSha": "c2e4d0b3e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3",
+        "reviewers": [
+          "eng@veri.example"
+        ],
+        "review": {
+          "session": "s-0012-review",
+          "headSha": "b1f3c9a2d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+          "at": "2026-08-22T16:00:00Z"
+        },
+        "findings": {
+          "high": 0,
+          "medium": 1,
+          "low": 2
+        },
+        "checks": [
+          {
+            "name": "evidence",
+            "verdict": "pass"
+          }
+        ],
+        "planMatches": true
+      },
+      "artifactPrs": [],
+      "merges": [
+        {
+          "eventId": "01J8SEEDSEEDSEEDSEED00000N",
+          "ts": "2026-08-23T09:00:00Z",
+          "number": null,
+          "mergeSha": "c2e4d0b3e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3"
+        }
+      ],
+      "runs": [
+        {
+          "schema": 1,
+          "n": 1,
+          "changeId": "CHG-0012",
+          "cycle": 1,
+          "worktree": "CHG-0012/pdf",
+          "headSha": "b1f3c9a2d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2",
+          "fileSet": [
+            "src/invoice/pdf.ts",
+            "src/invoice/route.ts",
+            "test/invoice/pdf.test.ts"
+          ],
+          "configRef": {
+            "claudeMdSha": "56c1747b05154ff91dbd64fdf6dff59e12465a8e",
+            "skills": [
+              {
+                "name": "brand",
+                "version": "a74c76fd9e99d651acca91e10f8c28ccd6ce3b41"
+              }
+            ],
+            "hooksSha": "a913fb3eee604f92e9cfbbce14f0c537819163e2",
+            "model": "claude-opus-5"
+          },
+          "results": [
+            {
+              "caseId": "CASE-0002",
+              "pass": true,
+              "output": "1 passed"
+            }
+          ],
+          "commandResults": [
+            {
+              "name": "build",
+              "cmd": "pnpm build",
+              "exitCode": 0,
+              "pass": true,
+              "output": "tsc -b\n"
+            },
+            {
+              "name": "test",
+              "cmd": "pnpm test",
+              "exitCode": 0,
+              "pass": true,
+              "output": "Tests 41 passed (41)\n"
+            },
+            {
+              "name": "lint",
+              "cmd": "pnpm lint",
+              "exitCode": 0,
+              "pass": true,
+              "output": ""
+            }
+          ],
+          "verdict": "green",
+          "startedAt": "2026-08-22T14:00:00Z",
+          "finishedAt": "2026-08-22T14:06:00Z"
+        }
+      ],
+      "findings": [
+        {
+          "eventId": "01J8SEEDSEEDSEEDSEED00000K",
+          "cycle": 1,
+          "ts": "2026-08-22T16:00:00Z",
+          "severity": "medium",
+          "title": "PDF link not expiring for admin role",
+          "path": "src/invoice/route.ts",
+          "detail": null,
+          "session": "s-0012-review"
+        }
+      ],
+      "deploy": {
+        "schema": 1,
+        "env": "production",
+        "version": "2026.08.23",
+        "at": "2026-08-23T10:00:00Z",
+        "status": "succeeded",
+        "authorizedBy": "eng@veri.example",
+        "authorizedAt": "2026-08-23T09:50:00Z"
+      }
+    },
+    {
+      "cycle": 2,
+      "archived": false,
+      "dir": "sdlc/changes/CHG-0012",
+      "artifacts": [
+        {
+          "index": 0,
+          "name": "intent.md",
+          "path": "sdlc/changes/CHG-0012/intent.md",
+          "sha": "6507a92b68571616b5d6e1ade6392f18bcf9341f",
+          "frontMatter": {
+            "id": "CHG-0012",
+            "artifact": "intent",
+            "cycle": 2,
+            "author": "po@veri.example",
+            "created": "2026-09-02T09:00:00Z",
+            "status": "draft",
+            "schema": 1
+          },
+          "content": "---\nid: CHG-0012\nartifact: intent\ncycle: 2\nauthor: po@veri.example\ncreated: 2026-09-02T09:00:00Z\nstatus: draft\nschema: 1\n---\n# Intent: PDF rendering timeouts after deploy\n\n## Problem\nerror_rate_pct 3.1% vs baseline 0.4% (3σ) since 2026-09-02 06:40; 212 PDF requests timed out at 30 s.\n\n## Proposed outcome\nPDF rendering under 5 s p95 with no timeouts.\n\n## Affected users and systems\ninvoicing web; pdf queue; customers downloading invoices.\n\n## Constraints\n<carried from the previous cycle>\n\n## Open questions\nIs the queue starved by the nightly export?\n"
+        }
+      ],
+      "decisions": [],
+      "pr": null,
+      "artifactPrs": [],
+      "merges": [],
+      "runs": [],
+      "findings": [],
+      "deploy": null
+    }
+  ],
+  "events": [
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000001",
+      "ts": "2026-08-20T09:00:00Z",
+      "seq": 1,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "po@veri.example",
+        "role": "po"
+      },
+      "event": "change.created",
+      "data": {
+        "origin": "idea"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000002",
+      "ts": "2026-08-20T09:05:00Z",
+      "seq": 2,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-intent"
+      },
+      "event": "artifact.committed",
+      "data": {
+        "artifact": 0,
+        "path": "sdlc/changes/CHG-0012/intent.md",
+        "sha": "5ed41f66b6a5a8d0934cc0c375645e00b196ad35"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000003",
+      "ts": "2026-08-20T10:00:00Z",
+      "seq": 3,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "po@veri.example",
+        "role": "po"
+      },
+      "event": "gate.accepted",
+      "data": {
+        "gate": 1,
+        "artifactSha": "5ed41f66b6a5a8d0934cc0c375645e00b196ad35",
+        "source": "cli"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000004",
+      "ts": "2026-08-20T10:00:00Z",
+      "seq": 4,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "stage.entered",
+      "data": {
+        "stage": 2
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000005",
+      "ts": "2026-08-20T11:00:00Z",
+      "seq": 5,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-design"
+      },
+      "event": "artifact.committed",
+      "data": {
+        "artifact": 1,
+        "path": "sdlc/changes/CHG-0012/spec.md",
+        "sha": "84d62dc83e65704bec36d7387cd70e33ff518651"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000006",
+      "ts": "2026-08-20T15:00:00Z",
+      "seq": 6,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "po@veri.example",
+        "role": "po"
+      },
+      "event": "gate.accepted",
+      "data": {
+        "gate": 2,
+        "artifactSha": "84d62dc83e65704bec36d7387cd70e33ff518651",
+        "source": "cli"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000007",
+      "ts": "2026-08-20T15:00:00Z",
+      "seq": 7,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "stage.entered",
+      "data": {
+        "stage": 3
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000008",
+      "ts": "2026-08-21T09:00:00Z",
+      "seq": 8,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-plan"
+      },
+      "event": "plan.drafted",
+      "data": {
+        "rev": 1
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED000009",
+      "ts": "2026-08-21T09:30:00Z",
+      "seq": 9,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "eng@veri.example",
+        "role": "eng"
+      },
+      "event": "question",
+      "data": {
+        "text": "What if print CSS drifts?",
+        "answer": "screenshot diff in proof"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000A",
+      "ts": "2026-08-21T09:40:00Z",
+      "seq": 10,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-plan"
+      },
+      "event": "artifact.committed",
+      "data": {
+        "artifact": 2,
+        "path": "sdlc/changes/CHG-0012/plan.md",
+        "sha": "bab33fc194520d5ae70d0a430095ae1230c74325"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000B",
+      "ts": "2026-08-21T09:40:00Z",
+      "seq": 11,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-plan"
+      },
+      "event": "plan.drafted",
+      "data": {
+        "rev": 2
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000C",
+      "ts": "2026-08-21T09:41:00Z",
+      "seq": 12,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-plan"
+      },
+      "event": "plan.final",
+      "data": {
+        "rev": 2
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000D",
+      "ts": "2026-08-21T10:00:00Z",
+      "seq": 13,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "eng@veri.example",
+        "role": "eng"
+      },
+      "event": "gate.accepted",
+      "data": {
+        "gate": 3,
+        "artifactSha": "bab33fc194520d5ae70d0a430095ae1230c74325",
+        "source": "cli"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000E",
+      "ts": "2026-08-21T10:00:00Z",
+      "seq": 14,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "stage.entered",
+      "data": {
+        "stage": 4
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000F",
+      "ts": "2026-08-22T13:50:00Z",
+      "seq": 15,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-build"
+      },
+      "event": "round",
+      "data": {
+        "n": 3,
+        "results": [
+          {
+            "name": "build",
+            "pass": true,
+            "outputExcerpt": "tsc -b"
+          },
+          {
+            "name": "test",
+            "pass": true,
+            "outputExcerpt": "41 passed"
+          },
+          {
+            "name": "lint",
+            "pass": true,
+            "outputExcerpt": ""
+          }
+        ]
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000G",
+      "ts": "2026-08-22T14:06:00Z",
+      "seq": 16,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "evals.green",
+      "data": {
+        "run": "run-1",
+        "passed": 4,
+        "total": 4
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000H",
+      "ts": "2026-08-22T14:10:00Z",
+      "seq": 17,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "pr.opened",
+      "data": {
+        "headSha": "b1f3c9a2d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000J",
+      "ts": "2026-08-22T14:10:00Z",
+      "seq": 18,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "stage.entered",
+      "data": {
+        "stage": 5
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000K",
+      "ts": "2026-08-22T16:00:00Z",
+      "seq": 19,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-review"
+      },
+      "event": "review.finding",
+      "data": {
+        "severity": "medium",
+        "title": "PDF link not expiring for admin role",
+        "path": "src/invoice/route.ts"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000M",
+      "ts": "2026-08-23T09:00:00Z",
+      "seq": 20,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "eng@veri.example",
+        "role": "eng"
+      },
+      "event": "gate.accepted",
+      "data": {
+        "gate": 5,
+        "artifactSha": "615d65e9328d1bef5c7d57e655f11e8e75928928",
+        "source": "cli"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000N",
+      "ts": "2026-08-23T09:00:00Z",
+      "seq": 21,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "eng@veri.example",
+        "role": "eng"
+      },
+      "event": "pr.merged",
+      "data": {
+        "mergeSha": "c2e4d0b3e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000P",
+      "ts": "2026-08-23T09:00:00Z",
+      "seq": 22,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "stage.entered",
+      "data": {
+        "stage": 6
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000Q",
+      "ts": "2026-08-23T09:50:00Z",
+      "seq": 23,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "eng@veri.example",
+        "role": "eng"
+      },
+      "event": "deploy.authorized",
+      "data": {
+        "env": "production",
+        "version": "2026.08.23"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000R",
+      "ts": "2026-08-23T10:00:00Z",
+      "seq": 24,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "deploy.finished",
+      "data": {
+        "env": "production",
+        "version": "2026.08.23"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000S",
+      "ts": "2026-09-02T07:30:00Z",
+      "seq": 25,
+      "cycle": 1,
+      "actor": {
+        "type": "agent",
+        "id": "claude-code",
+        "session": "s-0012-diagnose"
+      },
+      "event": "artifact.committed",
+      "data": {
+        "artifact": 5,
+        "path": "sdlc/changes/CHG-0012/incident.md",
+        "sha": "f75c612825b637f0a934ebd7a32ea52a8b0a31a7"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8SEEDSEEDSEEDSEED00000T",
+      "ts": "2026-09-02T07:31:00Z",
+      "seq": 26,
+      "cycle": 1,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "record.writeback.ok",
+      "data": {
+        "system": "servicenow",
+        "id": "INC0041207",
+        "artifact": 5,
+        "kind": "committed",
+        "sha": "f75c612825b637f0a934ebd7a32ea52a8b0a31a7",
+        "url": "https://servicenow.example/incident/INC0041207#work-notes"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8Z6Q7Y2K3M4N5P6Q7R8S001",
+      "ts": "2026-09-02T09:00:00Z",
+      "seq": 27,
+      "cycle": 1,
+      "actor": {
+        "type": "human",
+        "id": "po@veri.example",
+        "role": "po"
+      },
+      "event": "gate.accepted",
+      "data": {
+        "gate": 6,
+        "artifactSha": "f75c612825b637f0a934ebd7a32ea52a8b0a31a7",
+        "source": "cli"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8Z6Q7Y2K3M4N5P6Q7R8S002",
+      "ts": "2026-09-02T09:00:00Z",
+      "seq": 28,
+      "cycle": 2,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "cycle.archived",
+      "data": {
+        "cycle": 1,
+        "into": "cycles/1"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8Z6Q7Y2K3M4N5P6Q7R8S003",
+      "ts": "2026-09-02T09:00:00Z",
+      "seq": 29,
+      "cycle": 2,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "artifact.committed",
+      "data": {
+        "artifact": 0,
+        "path": "sdlc/changes/CHG-0012/intent.md",
+        "sha": "6507a92b68571616b5d6e1ade6392f18bcf9341f"
+      }
+    },
+    {
+      "schema": 1,
+      "id": "01J8Z6Q7Y2K3M4N5P6Q7R8S004",
+      "ts": "2026-09-02T09:00:00Z",
+      "seq": 30,
+      "cycle": 2,
+      "actor": {
+        "type": "system",
+        "id": "sdlc-bot"
+      },
+      "event": "stage.entered",
+      "data": {
+        "stage": 1
+      }
+    }
+  ],
+  "evalCases": [
+    {
+      "id": "CASE-0002",
+      "status": "active",
+      "source": {
+        "type": "change",
+        "ref": "CHG-0012"
+      }
+    },
+    {
+      "id": "INC-CHG-0012-1",
+      "status": "draft",
+      "source": {
+        "type": "incident",
+        "ref": "CHG-0012"
+      }
+    }
+  ],
+  "contentHash": {
+    "algorithm": "sha256",
+    "over": "canonical-json",
+    "value": "2f64ab98d85f21a7a4b8b84f8351d06c768812027440b15d175534f713215be3"
+  }
+}

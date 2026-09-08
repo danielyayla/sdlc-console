@@ -28,3 +28,5 @@ export * from "./evals.js";
 export * from "./proposals.js";
 export * from "./skills.js";
 export * from "./records.js";
+export * from "./sha256.js";
+export * from "./export.js";

@@ -14,6 +14,7 @@ import { gitHubCodeHostFrom, type GitHubCodeHost, type WebhookEvent } from "@sdl
 import { refreshFacts, type FactsCache, type RefreshSummary } from "../metrics/index.js";
 import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
 import { runWriteback, type WritebackDeps, type WritebackRun } from "../records.js";
+import type { Tracer } from "../otel.js";
 
 export interface EngineOptions {
   store: StateStore;
@@ -39,6 +40,8 @@ export interface EngineOptions {
   writeback?: WritebackDeps;
   /** A failed write-back is retried on ticks after this gap (default 10 min); the retry action runs it at once. */
   writebackRetryMs?: number;
+  /** OTel tracer (3.3) for the sessions and runs the engine starts; the job spans live in the JobStore. */
+  tracer?: Tracer;
 }
 
 /** What the engine did with a verified webhook delivery — one line, recorded with the delivery. */
@@ -346,7 +349,7 @@ export class Engine {
   }
 
   private fakeSession(view: ChangeView, branch: string, taskId: string | null = null): StoredSession {
-    return { id: `manual-${view.id}`, kind: "build", cycle: view.cycle, resumeCount: 0, worktree: branch, worktreePath: worktreePathFor(this.opts.store.root, branch), branch, changeId: view.id, taskId, mode: "SUPERVISED", engineer: this.opts.identity.id, startedAt: this.now(), heartbeatAt: this.now(), status: "done", target: view.acceptanceLine, files: view.planFiles, subagents: [], loop: { state: "not-run", rounds: [] }, verifier: null, testEditAttempts: 0, waitingOnYou: null, autoRationale: { terms: [] }, modelPin: null, contextManifestRef: null, transcriptRef: null, harnessSessionId: "", pid: null, exitCode: null, command: "", capRaised: false, reviewed: false, costUsd: null, numTurns: null, lastLine: null, error: null };
+    return { id: `manual-${view.id}`, kind: "build", cycle: view.cycle, resumeCount: 0, traceId: null, spanId: null, worktree: branch, worktreePath: worktreePathFor(this.opts.store.root, branch), branch, changeId: view.id, taskId, mode: "SUPERVISED", engineer: this.opts.identity.id, startedAt: this.now(), heartbeatAt: this.now(), status: "done", target: view.acceptanceLine, files: view.planFiles, subagents: [], loop: { state: "not-run", rounds: [] }, verifier: null, testEditAttempts: 0, waitingOnYou: null, autoRationale: { terms: [] }, modelPin: null, contextManifestRef: null, transcriptRef: null, harnessSessionId: "", pid: null, exitCode: null, command: "", capRaised: false, reviewed: false, costUsd: null, numTurns: null, lastLine: null, error: null };
   }
 
   private async forChange(repo: Repo, view: ChangeView): Promise<void> {
@@ -464,7 +467,7 @@ export class Engine {
     try {
       const r = await launchSession(
         { changeId: view.id, kind: sessionKind, ...(sessionKind === "build" ? { mode: view.autoEligible.value ? ("AUTO" as const) : ("SUPERVISED" as const) } : {}), ...(signal ? { reason: signal.reason } : {}) },
-        { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), onExit: (s) => void this.onSessionExit(s) },
+        { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
       );
       this.opts.jobs.update(key, { sessionId: r.session.id, state: r.session.mode === "SUPERVISED" ? "done" : "running", note: r.session.mode === "SUPERVISED" ? "prepared for the engineer" : null }, this.now());
       this.log(`${view.id}: ${kind} → session ${r.session.id} (${r.session.mode})`);
@@ -585,7 +588,7 @@ export class Engine {
     const job = this.opts.jobs.claim({ key, kind: "per-change-run", changeId: session.changeId, cycle: view.cycle, stage: 4 }, this.now());
     if (!job) return null;
     try {
-      const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}) }, repo);
+      const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), parent: this.opts.jobs.spanOf(key) }, repo);
       this.opts.jobs.update(key, { state: "done", note: `run ${outcome.run.n} ${outcome.run.verdict}${outcome.prAction === "opened" ? " · PR opened" : outcome.prAction === "synchronized" ? ` · PR head → ${outcome.run.headSha.slice(0, 7)}` : ""}` }, this.now());
       this.log(`${view.id}: run ${outcome.run.n} ${outcome.run.verdict}`);
       this.opts.registry.patch(session.id, { reviewed: outcome.run.verdict === "green" });
@@ -597,7 +600,7 @@ export class Engine {
           try {
             const r = await launchSession(
               { changeId: session.changeId, kind: "build", taskId: session.taskId ?? undefined, target: session.target ?? undefined, mode: session.mode, resume: { sessionId: session.id, guidance: `The per-change run ${outcome.run.n} is red. Fix these failures, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when green:\n${failing}` } },
-              { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), onExit: (s) => void this.onSessionExit(s) },
+              { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
             );
             this.opts.jobs.update(resumeKey, { state: "running", sessionId: r.session.id }, this.now());
           } catch (e) {
@@ -627,7 +630,7 @@ export class Engine {
     if (!job) return { job: this.opts.jobs.get(key), outcome: null };
     const work = (async (): Promise<SuiteOutcome | null> => {
       try {
-        const outcome = await runSuite({ root: this.opts.store.root, repo, trigger, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), log: (l) => this.log(l) });
+        const outcome = await runSuite({ root: this.opts.store.root, repo, trigger, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), parent: this.opts.jobs.spanOf(key), log: (l) => this.log(l) });
         const note = outcome.skipped ?? `${outcome.run?.id ?? "run"} ${outcome.run?.verdict ?? ""} · ${Math.round((outcome.run?.passRate ?? 0) * 100)}% (${outcome.run?.results.filter((r) => r.pass).length ?? 0}/${outcome.run?.results.length ?? 0})${outcome.signals.length > 0 ? ` · ${outcome.signals.length} triage item(s)` : ""}`;
         this.opts.jobs.update(key, { state: outcome.skipped ? "skipped" : "done", note }, this.now());
         await this.opts.store.refresh(true);

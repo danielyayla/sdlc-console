@@ -13,6 +13,7 @@ import type { SessionRecord } from "./snapshot.js";
 import { StateStore } from "./store.js";
 import { watchRepo } from "./watcher.js";
 import { Authenticator } from "./auth/index.js";
+import { tracerFromEnv, type Tracer } from "./otel.js";
 
 export interface ServeOptions {
   cwd: string;
@@ -37,6 +38,8 @@ export interface ServeOptions {
   /** Hosted mode: `fetch` for the identity provider (tests point it at a fake) and a clock for session expiry. */
   authFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   now?: () => Date;
+  /** OTel tracer (3.3); defaults to what `OTEL_EXPORTER_OTLP_ENDPOINT` asks for (the no-op tracer without it). */
+  tracer?: Tracer;
 }
 
 /** Everything the server holds for one product: its own store, cache, queue and engine over its own `sdlc/` home. */
@@ -68,6 +71,8 @@ export interface RunningServer {
   auth: Authenticator | null;
   /** Every product served, the primary first (3.2). */
   products: ProductRuntime[];
+  /** The OTel tracer every product shares (3.3): sessions, jobs and runs; flushed on close. */
+  tracer: Tracer;
   close: () => Promise<void>;
 }
 
@@ -75,7 +80,7 @@ function loadEmptyConfig(): import("@sdlc/core").ResolvedConfig {
   return resolveConfig(null);
 }
 
-async function startProduct(spec: ProductSpec, opts: ServeOptions, who: GitIdentity, env: Record<string, string | undefined>): Promise<ProductRuntime> {
+async function startProduct(spec: ProductSpec, opts: ServeOptions, who: GitIdentity, env: Record<string, string | undefined>, tracer: Tracer): Promise<ProductRuntime> {
   const registry = new SessionRegistry(spec.home);
   const sessions = opts.sessions ? () => opts.sessions?.() ?? [] : (repo: import("@sdlc/core").Repo | null) => registry.list().map((s) => enrich(s, repo));
   const facts = new FactsCache(registry.database);
@@ -90,10 +95,10 @@ async function startProduct(spec: ProductSpec, opts: ServeOptions, who: GitIdent
   }
   const store = new StateStore({ root: spec.home, identity: who, product: spec.name, cache, sessions, facts: (repo) => collectSources(repo, facts), ...(committer ? { committer } : {}) });
   await store.refresh();
-  const jobs = new JobStore(registry.database);
+  const jobs = new JobStore(registry.database, tracer);
   const log = opts.log ? (line: string) => opts.log?.(`[${spec.name}] ${line}`) : undefined;
   const engine = opts.sdlcBin
-    ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, facts, ...(log ? { log } : {}), ...(opts.env ? { env: opts.env } : {}) })
+    ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, facts, tracer, ...(log ? { log } : {}), ...(opts.env ? { env: opts.env } : {}) })
     : null;
   const deliveries = engine ? new DeliveryLog(registry.database) : null;
   const watcher = opts.watch === false ? null : watchRepo(spec.home, () => void store.refresh().catch(() => undefined));
@@ -123,8 +128,10 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
   if (!primarySpec) throw new Error("nothing to serve");
   const who = opts.identity ?? (await gitIdentity(primarySpec.root));
   if (!who) throw new Error("no git identity — set user.email before serving");
+  const tracer = opts.tracer ?? tracerFromEnv(env, { ...(opts.log ? { log: opts.log } : {}) });
+  if (tracer.enabled) opts.log?.(`[otel] exporting traces for sessions, jobs and runs (OTEL_EXPORTER_OTLP_ENDPOINT)`);
   const products: ProductRuntime[] = [];
-  for (const spec of specs) products.push(await startProduct(spec, opts, who, env));
+  for (const spec of specs) products.push(await startProduct(spec, opts, who, env, tracer));
   const primary = products[0] as ProductRuntime;
   const store = primary.store;
   const authConfig = store.currentRepo?.config.auth ?? null;
@@ -132,7 +139,8 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     ? new Authenticator({ auth: authConfig, config: () => store.currentRepo?.config ?? loadEmptyConfig(), ...(env["SDLC_OIDC_CLIENT_SECRET"] ? { clientSecret: env["SDLC_OIDC_CLIENT_SECRET"] } : {}), ...(opts.authFetch ? { fetch: opts.authFetch } : {}), ...(opts.now ? { now: opts.now } : {}), ...(opts.log ? { log: opts.log } : {}) })
     : null;
   const apps: ProductApp[] = products.map((p) => ({ name: p.name, root: p.root, home: p.home, prefix: p.prefix, store: p.store, registry: p.registry, facts: p.facts, jobs: p.jobs, ...(p.engine ? { engine: p.engine } : {}), ...(p.deliveries ? { deliveries: p.deliveries } : {}) }));
-  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), products: apps, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(opts.env ? { env: opts.env } : {}), ...(auth ? { auth } : {}) });
+  const traceUrlTemplate = env["OTEL_TRACE_URL_TEMPLATE"]?.trim();
+  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), products: apps, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(opts.env ? { env: opts.env } : {}), ...(auth ? { auth } : {}), tracer, ...(traceUrlTemplate ? { traceUrlTemplate } : {}), ...(opts.now ? { now: opts.now } : {}) });
   if (opts.engine) for (const p of products) if (p.engine) void p.engine.tick();
   const host = opts.host ?? "127.0.0.1";
   await new Promise<void>((resolve) => app.server.listen(opts.port ?? 0, host, resolve));
@@ -149,9 +157,12 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     facts: primary.facts,
     auth,
     products,
+    tracer,
     close: async () => {
       await app.close();
       for (const p of products) p.close();
+      // telemetry leaves last; a failing exporter is logged, never awaited beyond its own request
+      await tracer.shutdown().catch(() => undefined);
     },
   };
 }

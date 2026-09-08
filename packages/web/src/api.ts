@@ -31,8 +31,43 @@ export interface ProductInfo {
   engine: boolean;
 }
 
-export async function fetchProducts(): Promise<{ current: string; products: ProductInfo[] }> {
-  return (await (await fetch("/api/products")).json()) as { current: string; products: ProductInfo[] };
+export interface ProductsReply {
+  current: string;
+  products: ProductInfo[];
+  /** `OTEL_TRACE_URL_TEMPLATE` on the server (3.3): where a trace id links to; null without it. */
+  traceUrlTemplate: string | null;
+}
+
+export async function fetchProducts(): Promise<ProductsReply> {
+  const r = (await (await fetch("/api/products")).json()) as Partial<ProductsReply>;
+  return { current: r.current ?? "", products: r.products ?? [], traceUrlTemplate: r.traceUrlTemplate ?? null };
+}
+
+export interface JobRow {
+  key: string;
+  kind: string;
+  changeId: string;
+  cycle: number;
+  stage: number;
+  state: string;
+  createdAt: string;
+  updatedAt: string;
+  sessionId: string | null;
+  error: string | null;
+  note: string | null;
+  traceId: string | null;
+}
+
+/** The product's job queue (jobs, per-change runs and suite runs) from the disposable cache. */
+export async function fetchJobs(product: string | null = null): Promise<JobRow[]> {
+  const r = await fetch(`/api/jobs${productQuery(product)}`);
+  if (!r.ok) return [];
+  return (await r.json()) as JobRow[];
+}
+
+/** `GET /api/changes/<CHG>/export`: the compliance export as a JSON download (3.3). */
+export function exportHref(id: string, product: string | null = null): string {
+  return `/api/changes/${id}/export${productQuery(product)}`;
 }
 
 export async function act(path: string, body: unknown = {}, product: string | null = null): Promise<ActionReply | ActionFailure> {
