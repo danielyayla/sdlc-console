@@ -17,6 +17,8 @@ interface SessionCard {
   changeId: string;
   taskId: string | null;
   kind?: string;
+  /** A band diagnose/propose session (3.4): no change, a breached metric and its triage item instead. */
+  band?: { metric: string; tier: number; triageId: string; job: string } | null;
   mode: string;
   status: string;
   target: string | null;
@@ -117,7 +119,7 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) =
                 <span className={`dot ${running ? "orange pulse" : "inactive"}`} />
                 <span className="mono">{s.worktree}</span>
                 <span className={`chip ${MODE_CLASS[s.mode] ?? ""}`}>{s.mode === "PLAN" ? "PLAN MODE" : s.mode}</span>
-                <button className="chip agent linkchip" onClick={() => onSelect(s.changeId)}>{s.changeId}</button>
+                {s.changeId ? <button className="chip agent linkchip" onClick={() => onSelect(s.changeId)}>{s.changeId}</button> : s.band ? <span className="chip amber" title={s.band.job}>{s.band.metric} {s.band.tier}σ · {s.band.triageId}</span> : null}
                 {s.taskId ? <span className="chip">{s.taskId}</span> : null}
                 {trace ? <a className="chip" href={trace} target="_blank" rel="noreferrer" title={`OTel trace ${s.traceId ?? ""}`}>trace</a> : null}
               </div>

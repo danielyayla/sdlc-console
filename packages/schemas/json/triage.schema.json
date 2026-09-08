@@ -77,6 +77,14 @@
     "acceptedAs": {
       "type": "string",
       "pattern": "^CHG-\\d{4}$"
+    },
+    "job": {
+      "type": "string",
+      "minLength": 1
+    },
+    "session": {
+      "type": "string",
+      "minLength": 1
     }
   },
   "required": [

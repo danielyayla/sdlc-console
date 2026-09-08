@@ -218,10 +218,12 @@ Review the diff. Report bugs, security and compliance findings ranked by severit
 `;
 
 export const BANDS_YAML = `baselineWindow: 30d
+detectEvery: 15m
 metrics:
   - metric: p95_latency_ms
     baseline: 310
     unit: ms
+    sigma: 40
     rules: [western-electric]
     tiers:
       1sigma: { action: log }
@@ -230,12 +232,16 @@ metrics:
   - metric: error_rate_pct
     baseline: 0.4
     unit: "%"
+    sigma: 0.15
     rules: [western-electric]
     tiers:
       1sigma: { action: log }
       2sigma: { action: diagnose, tools: [Read, Grep] }
       3sigma: { action: propose, routes: [pr] }
-runbooks: [rollback]
+runbooks:
+  - id: rollback
+    command: "echo rollback: redeploy the previous release (rehearsed in staging)"
+    description: Roll the export service back to the previous release.
 `;
 
 export const REVIEW_MD = `# Review policy

@@ -19,6 +19,10 @@ export const triage = z.strictObject({
   status: z.enum(["open", "accepted", "dismissed"]),
   dismissal: dismissal.extend({ bandTune: z.string().optional() }).optional(),
   acceptedAs: changeId.optional(),
+  /** The engine job that raised the item from a band breach (3.4), `band:<metric>:<tier>σ:<snapshot ts>`. */
+  job: nonEmpty.optional(),
+  /** The headless session whose diagnosis or proposal the body carries. */
+  session: nonEmpty.optional(),
 });
 
 export type Triage = z.infer<typeof triage>;

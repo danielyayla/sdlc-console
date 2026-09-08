@@ -11,6 +11,7 @@ export const PATHS = {
   config: "sdlc/config.yaml",
   changesDir: "sdlc/changes",
   triageDir: "sdlc/loop/triage",
+  runbooksDir: "sdlc/loop/runbooks",
   findingsDir: "sdlc/security/findings",
   proposalsDir: "sdlc/proposals",
   evalCasesDir: "evals/cases",

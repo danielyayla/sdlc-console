@@ -10,25 +10,10 @@
   ],
   "references": [
     {
-      "path": "../adapters/git/tsconfig.build.json"
-    },
-    {
-      "path": "../adapters/github/tsconfig.build.json"
-    },
-    {
       "path": "../core/tsconfig.build.json"
     },
     {
       "path": "../schemas/tsconfig.build.json"
-    },
-    {
-      "path": "../mcp/tsconfig.build.json"
-    },
-    {
-      "path": "../hooks/tsconfig.build.json"
-    },
-    {
-      "path": "../detect/tsconfig.build.json"
     }
   ]
 }

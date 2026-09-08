@@ -570,3 +570,45 @@ describe("metrics (FR-70)", () => {
     expect(refresh.err).toContain("config.codeHost github and GITHUB_TOKEN");
   });
 });
+
+describe("detection script (3.4)", () => {
+  it("init writes the detect workflow; `sdlc detect` measures the bands.yaml sources, writes the snapshots and exits 2 at ≥2σ", async () => {
+    const dir = await freshRepo();
+    const first = await sdlc(dir, ["init", "--json"]);
+    expect(first.json<{ created: string[] }>().created).toContain(".github/workflows/sdlc-detect.yml");
+    const wf = readFileSync(join(dir, ".github/workflows/sdlc-detect.yml"), "utf8");
+    expect(wf).toContain("npx sdlc detect");
+    expect(wf).toContain("cron:");
+    // no bands.yaml yet: nothing to measure, exit 0
+    const none = await sdlc(dir, ["detect"]);
+    expect(none.code).toBe(0);
+    expect(none.out).toContain("no bands.yaml");
+    writeFileSync(
+      join(dir, "bands.yaml"),
+      `metrics:
+  - metric: p95_latency_ms
+    baseline: 310
+    sigma: 40
+    source: "echo 842"
+    tiers:
+      1sigma: { action: log }
+      2sigma: { action: diagnose, tools: [Read] }
+      3sigma: { action: propose, routes: [pr] }
+`,
+    );
+    const r = await sdlc(dir, ["detect", "--json"]);
+    expect(r.code).toBe(2);
+    const pass = r.json<{ results: { snapshot: { current: number; tier: number; source: { output: string } } }[] }>();
+    expect(pass.results[0]?.snapshot).toMatchObject({ current: 842, tier: 3, source: { output: "842\n" } });
+    expect(readFileSync(join(dir, ".sdlc-state/snapshots/p95_latency_ms.jsonl"), "utf8").trim().split("\n")).toHaveLength(1);
+    const text = await sdlc(dir, ["detect"]);
+    expect(text.code).toBe(2);
+    expect(text.out).toContain("3σ · propose");
+    expect(text.out).toContain("--- p95_latency_ms: echo 842 (exit 0)\n842");
+    // an agent may run it: it commits nothing (the snapshots live under the gitignored cache)
+    const head = await git(dir, ["rev-parse", "HEAD"]);
+    expect((await sdlc(dir, ["detect"], { SDLC_ACTOR_TYPE: "agent" })).code).toBe(2);
+    expect(await git(dir, ["rev-parse", "HEAD"])).toBe(head);
+    expect((await git(dir, ["status", "--porcelain", "--", ".sdlc-state"])).trim()).toBe("");
+  });
+});

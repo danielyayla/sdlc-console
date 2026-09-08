@@ -66,10 +66,10 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
       .catch(() => setProducts([]));
   }, [live]);
 
-  // the job queue (jobs, runs) is cache state, not part of the snapshot: refetched when the snapshot moves, on the Sessions tab
+  // the job queue (jobs, runs) is cache state, not part of the snapshot: refetched when the snapshot moves, on the Sessions and Loop tabs
   const revision = snapshot?.revision ?? 0;
   useEffect(() => {
-    if (!live || state.view !== "sessions") return;
+    if (!live || (state.view !== "sessions" && state.view !== "loop")) return;
     fetchJobs(state.product)
       .then(setJobs)
       .catch(() => setJobs([]));
@@ -154,8 +154,10 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
     body = (
       <Loop
         snapshot={snapshot}
+        jobs={jobs}
         onAccept={(id) => void run(`/triage/${id}/accept`, {})}
         onDismiss={(id, reason, tune) => void run(`/triage/${id}/dismiss`, { reason, bandTune: tune })}
+        onDetect={current?.engine ? () => void run("/detect", {}) : undefined}
         {...(promptImpl ? { prompt: promptImpl } : {})}
       />
     );

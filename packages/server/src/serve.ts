@@ -2,6 +2,7 @@ import type { AddressInfo } from "node:net";
 import { identity as gitIdentity, isRepo, type GitIdentity } from "@sdlc/adapter-git";
 import { gitHubCodeHostFrom } from "@sdlc/adapter-github";
 import { resolveConfig } from "@sdlc/core";
+import { readSnapshots } from "@sdlc/detect";
 import { SnapshotCache } from "./cache.js";
 import { Engine, JobStore } from "./engine/index.js";
 import { collectSources, FactsCache } from "./metrics/index.js";
@@ -93,7 +94,7 @@ async function startProduct(spec: ProductSpec, opts: ServeOptions, who: GitIdent
     const host = gitHubCodeHostFrom(env);
     if (host?.auth === "app") committer = await host.appIdentity();
   }
-  const store = new StateStore({ root: spec.home, identity: who, product: spec.name, cache, sessions, facts: (repo) => collectSources(repo, facts), ...(committer ? { committer } : {}) });
+  const store = new StateStore({ root: spec.home, identity: who, product: spec.name, cache, sessions, facts: (repo) => collectSources(repo, facts), snapshots: () => readSnapshots(spec.home), ...(committer ? { committer } : {}) });
   await store.refresh();
   const jobs = new JobStore(registry.database, tracer);
   const log = opts.log ? (line: string) => opts.log?.(`[${spec.name}] ${line}`) : undefined;
@@ -141,7 +142,14 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
   const apps: ProductApp[] = products.map((p) => ({ name: p.name, root: p.root, home: p.home, prefix: p.prefix, store: p.store, registry: p.registry, facts: p.facts, jobs: p.jobs, ...(p.engine ? { engine: p.engine } : {}), ...(p.deliveries ? { deliveries: p.deliveries } : {}) }));
   const traceUrlTemplate = env["OTEL_TRACE_URL_TEMPLATE"]?.trim();
   const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), products: apps, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(opts.env ? { env: opts.env } : {}), ...(auth ? { auth } : {}), tracer, ...(traceUrlTemplate ? { traceUrlTemplate } : {}), ...(opts.now ? { now: opts.now } : {}) });
-  if (opts.engine) for (const p of products) if (p.engine) void p.engine.tick();
+  if (opts.engine) {
+    for (const p of products) {
+      if (!p.engine) continue;
+      void p.engine.tick();
+      // detection on the bands.yaml schedule (3.4): the deterministic script, then diagnose/propose jobs from the tiers
+      p.engine.startDetection();
+    }
+  }
   const host = opts.host ?? "127.0.0.1";
   await new Promise<void>((resolve) => app.server.listen(opts.port ?? 0, host, resolve));
   const port = (app.server.address() as AddressInfo).port;

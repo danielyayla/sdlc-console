@@ -30,3 +30,4 @@ export * from "./skills.js";
 export * from "./records.js";
 export * from "./sha256.js";
 export * from "./export.js";
+export * from "./bands.js";

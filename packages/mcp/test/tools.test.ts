@@ -69,11 +69,11 @@ async function sdlc(dir: string, args: string[], identity = PO): Promise<{ code:
 const INTENT = "# Intent: Dunning reminders schedule\n\n## Problem\nOverdue invoices get no reminders.\n\n## Proposed outcome\nThree reminders at 7, 14 and 30 days.\n\n## Affected users and systems\nFinance; email service.\n\n## Constraints\nBrand voice; no reminders on disputed invoices.\n\n## Open questions\nEscalate after 30 days?\n";
 
 describe("sdlc-mcp tools", () => {
-  it("lists the twelve tools and no accept/merge/approve/freeze-lift/repro-confirm", async () => {
+  it("lists the fourteen tools and no accept/merge/approve/freeze-lift/repro-confirm", async () => {
     const dir = await seeded();
     const c = await client(dir);
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "propose_claude_md_line", "report_done", "report_finding", "report_repro", "report_round", "request_input", "submit_plan_revision"]);
+    expect(names).toEqual(["get_change", "get_context", "list_work", "log_note", "propose_artifact", "propose_claude_md_line", "report_diagnosis", "report_done", "report_finding", "report_repro", "report_round", "request_input", "run_runbook", "submit_plan_revision"]);
     expect(names.some((n) => /accept|merge|approve|lift|confirm/.test(n))).toBe(false);
   });
 
@@ -295,5 +295,82 @@ describe("sdlc-mcp tools", () => {
     // the read changed nothing on the branch
     expect((await git(wt, ["rev-parse", "HEAD"])).trim()).toBe(head);
     expect((await git(wt, ["ls-tree", "--name-only", "HEAD", "sdlc/changes/CHG-0017/"])).includes("pr.yaml")).toBe(false);
+  });
+});
+
+describe("band tools (3.4): report_diagnosis and the runbook allowlist", () => {
+  const BANDS = `metrics:
+  - metric: p95_latency_ms
+    baseline: 310
+    sigma: 40
+    source: "scripts/p95.sh"
+    tiers:
+      1sigma: { action: log }
+      2sigma: { action: diagnose, tools: [Read, Grep] }
+      3sigma: { action: propose, routes: [pr, "runbook:rollback", "runbook:restart"] }
+  - metric: error_rate_pct
+    baseline: 0.4
+    tiers:
+      1sigma: { action: log }
+      2sigma: { action: diagnose, tools: [Read] }
+      3sigma: { action: propose, routes: [pr] }
+runbooks:
+  - id: rollback
+    command: "echo rolled back && echo warn >&2"
+  - restart
+`;
+  async function withBands(): Promise<string> {
+    const dir = await seeded();
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(join(dir, "bands.yaml"), BANDS);
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "-q", "-m", "bands with sources"]);
+    return dir;
+  }
+
+  it("report_diagnosis keeps the intent-format draft beside the session; an unknown metric or another band's metric is refused", async () => {
+    const dir = await withBands();
+    const c = await client(dir, { SDLC_SESSION: "sess-band", SDLC_BAND: "p95_latency_ms", SDLC_BAND_TIER: "2" });
+    const ok = await call(c, "report_diagnosis", { metric: "p95_latency_ms", title: "  Export p95   regressed ", problem: "per-row lookup", proposedOutcome: "under 400 ms", affected: "finance" });
+    expect(ok.isError).toBe(false);
+    expect(ok.value).toMatchObject({ metric: "p95_latency_ms", title: "Export p95 regressed", session: "sess-band" });
+    const draft = JSON.parse(readFileSync(join(dir, ".sdlc-state/sessions/sess-band/diagnosis.json"), "utf8")) as { title: string; problem: string };
+    expect(draft).toMatchObject({ title: "Export p95 regressed", problem: "per-row lookup" });
+    const other = await call(c, "report_diagnosis", { metric: "error_rate_pct", title: "x", problem: "y", proposedOutcome: "z", affected: "w" });
+    expect(other.isError).toBe(true);
+    expect(String(other.value["error"])).toContain("this session diagnoses p95_latency_ms");
+    const unknown = await call(c, "report_diagnosis", { metric: "nope", title: "x", problem: "y", proposedOutcome: "z", affected: "w" });
+    expect(unknown.isError).toBe(true);
+    expect(String(unknown.value["error"])).toContain("not a band in bands.yaml");
+  });
+
+  it("run_runbook: only a 3σ propose session, only a runbook:<id> route of its band, only an allowlisted id with a command, once — the command comes from bands.yaml and the output is verbatim", async () => {
+    const dir = await withBands();
+    // not a band session at all
+    const plain = await client(dir, { SDLC_SESSION: "sess-plain" });
+    const refused = await call(plain, "run_runbook", { id: "rollback" });
+    expect(refused.isError).toBe(true);
+    expect(String(refused.value["error"])).toContain("only inside a 3σ propose session");
+    // a 2σ diagnose session
+    const two = await client(dir, { SDLC_SESSION: "sess-two", SDLC_BAND: "p95_latency_ms", SDLC_BAND_TIER: "2" });
+    expect(String((await call(two, "run_runbook", { id: "rollback" })).value["error"])).toContain("this session is at 2σ");
+    // a 3σ session of a band whose routes have no runbook
+    const noRoute = await client(dir, { SDLC_SESSION: "sess-nr", SDLC_BAND: "error_rate_pct", SDLC_BAND_TIER: "3" });
+    expect(String((await call(noRoute, "run_runbook", { id: "rollback" })).value["error"])).toContain("not a 3σ route of error_rate_pct");
+    // the right session: an id not on the list, a listed id without a command, then the real one
+    const c = await client(dir, { SDLC_SESSION: "sess-three", SDLC_BAND: "p95_latency_ms", SDLC_BAND_TIER: "3" });
+    expect(String((await call(c, "run_runbook", { id: "deploy" })).value["error"])).toContain("not a 3σ route");
+    expect(String((await call(c, "run_runbook", { id: "restart" })).value["error"])).toContain("listed without a command");
+    const ran = await call(c, "run_runbook", { id: "rollback" });
+    expect(ran.isError).toBe(false);
+    expect(ran.value).toMatchObject({ runbook: "rollback", command: "echo rolled back && echo warn >&2", metric: "p95_latency_ms", exitCode: 0, output: "rolled back\n\nwarn\n" });
+    const runs = readFileSync(join(dir, ".sdlc-state/sessions/sess-three/runbooks.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as { runbook: string; output: string });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.output).toBe("rolled back\n\nwarn\n");
+    const twice = await call(c, "run_runbook", { id: "rollback" });
+    expect(twice.isError).toBe(true);
+    expect(String(twice.value["error"])).toContain("already ran in this session");
+    // nothing was committed: the engine records the run when the session ends
+    expect((await git(dir, ["status", "--porcelain", "--", "sdlc"])).trim()).toBe("");
   });
 });

@@ -29,6 +29,9 @@
     },
     {
       "path": "../mcp/tsconfig.build.json"
+    },
+    {
+      "path": "../detect/tsconfig.build.json"
     }
   ]
 }

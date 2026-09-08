@@ -28,6 +28,7 @@ import {
   type PerChangeRun,
   type Pr,
   type Proposal,
+  type RunbookRun,
   type ReproProof,
   type Round,
   type Tasks,
@@ -96,6 +97,8 @@ export interface Repo {
   changes: Map<string, ChangeFiles>;
   triage: TriageFile[];
   findings: Finding[];
+  /** Runbook invocation records under `sdlc/loop/runbooks/` (3.4). */
+  runbookRuns: RunbookRun[];
   proposals: Proposal[];
   evalCases: EvalCase[];
   evalRuns: EvalRun[];
@@ -352,6 +355,13 @@ export function loadRepo(tree: Tree): Repo {
     if (r.value) findings.push(r.value);
   }
 
+  const runbookRuns: RunbookRun[] = [];
+  for (const path of filesUnder(tree, PATHS.runbooksDir).filter((p) => p.endsWith(".json"))) {
+    const r = parseJson("runbook-run", read(path) ?? "", path);
+    diagnostics.push(...r.diagnostics);
+    if (r.value) runbookRuns.push(r.value);
+  }
+
   const proposals: Proposal[] = [];
   for (const path of filesUnder(tree, PATHS.proposalsDir).filter((p) => /\.ya?ml$/.test(p))) {
     const r = parseYaml("proposal", read(path) ?? "", path);
@@ -392,6 +402,7 @@ export function loadRepo(tree: Tree): Repo {
     changes,
     triage,
     findings,
+    runbookRuns,
     proposals,
     evalCases,
     evalRuns,

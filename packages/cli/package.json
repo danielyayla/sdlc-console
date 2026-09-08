@@ -17,10 +17,11 @@
     "@sdlc/adapter-git": "workspace:*",
     "@sdlc/adapter-github": "workspace:*",
     "@sdlc/core": "workspace:*",
-    "@sdlc/schemas": "workspace:*",
-    "@sdlc/server": "workspace:*",
+    "@sdlc/detect": "workspace:*",
     "@sdlc/hooks": "workspace:*",
-    "@sdlc/mcp": "workspace:*"
+    "@sdlc/mcp": "workspace:*",
+    "@sdlc/schemas": "workspace:*",
+    "@sdlc/server": "workspace:*"
   },
   "bin": {
     "sdlc": "./dist/bin.js"

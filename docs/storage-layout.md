@@ -31,14 +31,16 @@ sdlc/
       log.jsonl                 # append-only ledger; .gitattributes merge=union
       cycles/1/ …
   loop/triage/TRI-0042.md
+  loop/runbooks/RBK-0001.json   # runbook invocation record (allowlisted command, output verbatim)
   security/findings/SEC-0118.yaml
   proposals/PRP-0007.yaml
 .gitattributes                  # sdlc/**/log.jsonl merge=union
 .sdlc-state/                    # gitignored cache
+  snapshots/<metric>.jsonl      # detection snapshots (last N), written by sdlc-detect
 ```
 
 ## IDs
-`CHG-NNNN`, `TRI-NNNN`, `SEC-NNNN`, `PRP-NNNN`, `INC-NNNN`, zero-padded 4 digits. Next id = max(existing on default branch + local branches) + 1. Validator blocks duplicates.
+`CHG-NNNN`, `TRI-NNNN`, `SEC-NNNN`, `PRP-NNNN`, `INC-NNNN`, `RBK-NNNN`, zero-padded 4 digits. Next id = max(existing on default branch + local branches) + 1. Validator blocks duplicates.
 
 ## Branches
 Artifact PRs: `sdlc/CHG-0042/intent|spec|plan`. Task branches / worktrees: `CHG-0042/<task-slug>`.
