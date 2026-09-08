@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { seedTree } from "@sdlc/fixtures";
-import { computeMetrics, deriveAll, factsFromRepo, loadRepo, overlayGitHubFacts, parseWindow, withFiles, type MetricValue } from "../src/index.js";
+import { applyWritePlan, computeMetrics, deriveAll, deriveChange, factsFromRepo, loadRepo, loop, overlayGitHubFacts, parseWindow, withFiles, type MetricValue } from "../src/index.js";
 
 const NOW = "2026-09-03T12:00:00Z";
 
@@ -99,6 +99,39 @@ describe("computeMetrics over the seed with the git-mirror feeds", () => {
     const r2 = loadRepo(t);
     const f = table(computeMetrics(r2, deriveAll(r2).changes, { now: NOW, sources: factsFromRepo(r2) }));
     expect(f(4, "incident → active eval")).toMatchObject({ value: 6, note: "median of 1" });
+  });
+});
+
+describe("archived cycles stay in the feeds (3.0, 2.10 → e2e)", () => {
+  it("after a loop closes, the archived PR, runs and incident still feed the metrics and the change's live cycle adds nothing yet", () => {
+    const before = loadRepo(seedTree());
+    const files0 = before.changes.get("CHG-0012");
+    if (!files0) throw new Error("CHG-0012");
+    const view = deriveChange(before, files0);
+    expect(view.gate?.s).toBe(6);
+    let n = 0;
+    const r = loop(before, view, { now: "2026-09-02T09:00:00Z", newId: () => `01J8Z6Q7Y2K3M4N5P6Q7R8S${(++n).toString(36).toUpperCase().padStart(3, "0")}`.replace(/[ILOU]/g, "X"), actor: { id: "po@veri.example" } });
+    if (!r.ok) throw new Error(JSON.stringify(r.diagnostics));
+    const after = loadRepo(applyWritePlan(seedTree(), r.plan));
+    const files = after.changes.get("CHG-0012");
+    if (!files) throw new Error("CHG-0012");
+    expect(files.change?.cycle).toBe(2);
+    expect(files.pr).toBeNull();
+    expect(files.archivedCycles).toEqual([1]);
+    expect(files.archived.map((a) => [a.cycle, a.pr?.mergedAt, a.runs.map((x) => x.n), a.incident?.frontMatter.cycle, a.deploy?.status])).toEqual([[1, "2026-08-23T09:00:00Z", [1], 1, "succeeded"]]);
+
+    const feeds = factsFromRepo(after);
+    expect(feeds.pr?.filter((p) => p.changeId === "CHG-0012").map((p) => [p.cycle, p.mergedAt, p.reviewedBy])).toEqual([[1, "2026-08-23T09:00:00Z", "review-job"]]);
+    expect(feeds.ci?.filter((c) => c.changeId === "CHG-0012").map((c) => `${c.name} ${c.verdict} ${c.origin}`)).toEqual(["run-1 pass run", "evidence pass status"]);
+    expect(feeds.incidents?.map((f) => [f.id, f.origin])).toEqual([["CHG-0012/cycles/1/incident.md", "incident.md"], ["TRI-0043", "triage"]]);
+
+    // the same 30-day window as the live seed: the closed loop keeps its merge, PR and incident in the numbers
+    const live = table(computeMetrics(before, deriveAll(before).changes, { now: NOW, sources: factsFromRepo(before) }));
+    const closed = table(computeMetrics(after, deriveAll(after).changes, { now: NOW, sources: feeds }));
+    for (const [stage, name] of [[5, "PR open → merge"], [5, "findings per PR"], [5, "deploys"], [4, "first-pass green"], [4, "review time per PR"], [6, "incidents recorded"]] as const) {
+      expect(closed(stage, name)?.value, name).toBe(live(stage, name)?.value);
+    }
+    expect(closed(6, "loops closed")?.value).toBe((live(6, "loops closed")?.value ?? 0) + 1);
   });
 });
 

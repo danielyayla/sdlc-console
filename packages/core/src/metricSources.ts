@@ -1,4 +1,5 @@
 import type { Event } from "@sdlc/schemas";
+import type { Pr } from "@sdlc/schemas";
 import { eventsNamed } from "./events.js";
 import type { ChangeFiles, Repo } from "./repo.js";
 
@@ -9,6 +10,8 @@ import type { ChangeFiles, Repo } from "./repo.js";
  * `incident.md`, triage) and the server overlays what its adapters cached
  * (GitHub reviews and commit statuses). A feed is `null` when nothing feeds
  * it, so a metric can say "n/a · needs <source>" instead of showing zero.
+ * Closed cycles count too: a loop that archived its PR, runs and incident
+ * under `cycles/<n>/` keeps them in the window (3.0, `2.10 → e2e`).
  */
 
 export interface PrFact {
@@ -69,29 +72,35 @@ function firstMergeAfter(events: readonly Event[], ts: string, cycle: number): s
   return null;
 }
 
-function prFactsOf(files: ChangeFiles): PrFact[] {
-  const pr = files.pr;
-  if (!pr) return [];
-  const cycle = files.change?.cycle ?? 1;
-  const opened = eventsNamed(files.events, "pr.opened").filter((e) => e.data.artifact === undefined).at(-1) ?? null;
+function prFactOf(files: ChangeFiles, pr: Pr, cycle: number): PrFact {
+  const opened = eventsNamed(files.events, "pr.opened").filter((e) => e.data.artifact === undefined && e.cycle === cycle).at(-1) ?? null;
   const openedAt = opened?.ts ?? pr.openedAt;
   const agentAuthored = files.events.some((e) => e.cycle === cycle && e.actor.type === "agent" && Date.parse(e.ts) <= Date.parse(openedAt));
-  return [
-    {
-      changeId: files.id,
-      cycle,
-      provider: pr.provider,
-      number: pr.number ?? null,
-      openedHeadSha: opened?.data.headSha ?? pr.headSha,
-      headSha: pr.headSha,
-      openedAt: pr.openedAt,
-      mergedAt: pr.mergedAt ?? null,
-      firstReviewAt: pr.review?.at ?? null,
-      reviewedBy: pr.review ? "review-job" : null,
-      reviews: pr.review ? 1 : 0,
-      agentAuthored,
-    },
-  ];
+  return {
+    changeId: files.id,
+    cycle,
+    provider: pr.provider,
+    number: pr.number ?? null,
+    openedHeadSha: opened?.data.headSha ?? pr.headSha,
+    headSha: pr.headSha,
+    openedAt: pr.openedAt,
+    mergedAt: pr.mergedAt ?? null,
+    firstReviewAt: pr.review?.at ?? null,
+    reviewedBy: pr.review ? "review-job" : null,
+    reviews: pr.review ? 1 : 0,
+    agentAuthored,
+  };
+}
+
+/** The live cycle's PR and every archived cycle's, oldest first. */
+function prsOf(files: ChangeFiles): { pr: Pr; cycle: number }[] {
+  const out = files.archived.filter((a) => a.pr).map((a) => ({ pr: a.pr as Pr, cycle: a.cycle }));
+  if (files.pr) out.push({ pr: files.pr, cycle: files.change?.cycle ?? 1 });
+  return out;
+}
+
+function prFactsOf(files: ChangeFiles): PrFact[] {
+  return prsOf(files).map(({ pr, cycle }) => prFactOf(files, pr, cycle));
 }
 
 function headAt(files: ChangeFiles, headSha: string): string {
@@ -103,13 +112,13 @@ function headAt(files: ChangeFiles, headSha: string): string {
 
 function ciFactsOf(repo: Repo, files: ChangeFiles): CiFact[] {
   const facts: CiFact[] = [];
-  for (const r of files.runs) {
+  for (const r of [...files.archived.flatMap((a) => a.runs), ...files.runs]) {
     facts.push({ changeId: files.id, headSha: r.headSha, name: `run-${r.n}`, verdict: r.verdict === "green" ? "pass" : "fail", origin: "run", startedAt: r.startedAt, finishedAt: r.finishedAt ?? null });
   }
-  if (files.pr) {
-    const at = headAt(files, files.pr.headSha);
-    for (const c of files.pr.checks) {
-      if (at !== "") facts.push({ changeId: files.id, headSha: files.pr.headSha, name: c.name, verdict: c.verdict, origin: "status", startedAt: at, finishedAt: null });
+  for (const { pr } of prsOf(files)) {
+    const at = headAt(files, pr.headSha);
+    for (const c of pr.checks) {
+      if (at !== "") facts.push({ changeId: files.id, headSha: pr.headSha, name: c.name, verdict: c.verdict, origin: "status", startedAt: at, finishedAt: null });
     }
   }
   void repo;
@@ -125,10 +134,11 @@ function suiteFacts(repo: Repo): CiFact[] {
 function incidentFactsOf(repo: Repo): IncidentFact[] {
   const facts: IncidentFact[] = [];
   for (const files of repo.changes.values()) {
-    const inc = files.incident;
-    if (!inc) continue;
-    const fm = inc.frontMatter;
-    facts.push({ id: `${files.id}/incident.md`, changeId: files.id, createdAt: fm.created, fixedAt: firstMergeAfter(files.events, fm.created, fm.cycle), src: fm.src, tier: fm.tier, origin: "incident.md" });
+    const incidents = [...files.archived.filter((a) => a.incident).map((a) => ({ inc: a.incident as NonNullable<typeof a.incident>, id: `${files.id}/cycles/${a.cycle}/incident.md` })), ...(files.incident ? [{ inc: files.incident, id: `${files.id}/incident.md` }] : [])];
+    for (const { inc, id } of incidents) {
+      const fm = inc.frontMatter;
+      facts.push({ id, changeId: files.id, createdAt: fm.created, fixedAt: firstMergeAfter(files.events, fm.created, fm.cycle), src: fm.src, tier: fm.tier, origin: "incident.md" });
+    }
   }
   for (const t of repo.triage) {
     if (t.data.tier !== "incident") continue;

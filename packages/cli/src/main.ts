@@ -23,7 +23,7 @@ import { CliError, table, type Io } from "./io.js";
 
 export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
 
-  sdlc init [--product <name>] [--intent-home <path>]
+  sdlc init [--product <name>] [--intent-home <path>] [--sdlc-bin <command>]
   sdlc validate [--ref <ref>] [--working]
   sdlc change new --title <t> [--kind feature|fix] [--risk routine|high] [--origin idea|ticket:REF|…] [--intent <file|->]
   sdlc change list [--stage n]
@@ -100,6 +100,7 @@ const OPTIONS = {
   url: { type: "string" },
   window: { type: "string" },
   refresh: { type: "boolean" },
+  "sdlc-bin": { type: "string" },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -125,7 +126,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
   try {
     switch (cmd) {
       case "init": {
-        const r = await init(io, { ...(values.product ? { product: values.product } : {}), ...(values["intent-home"] ? { intentHome: values["intent-home"] } : {}) });
+        const r = await init(io, { ...(values.product ? { product: values.product } : {}), ...(values["intent-home"] ? { intentHome: values["intent-home"] } : {}), ...(values["sdlc-bin"] ? { sdlcBin: values["sdlc-bin"] } : {}) });
         emit(io, json, r, () => [...r.created.map((c) => `created  ${c}`), ...r.skipped.map((s) => `kept     ${s}`), ...(r.hooksSnippet ? ["", ".claude/settings.json exists — add these hooks to it:", r.hooksSnippet] : [])].join("\n"));
         return 0;
       }

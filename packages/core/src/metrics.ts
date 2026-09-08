@@ -147,7 +147,8 @@ const repeatReasons: Computer = (i) => {
 };
 
 const firstPassGreen: Computer = (i) => {
-  const withRuns = [...i.repo.changes.values()].filter((f) => f.runs.some((r) => inWindow(r.startedAt, i.window)));
+  // one run list per cycle: a closed loop's runs sit under cycles/<n>/
+  const withRuns = [...i.repo.changes.values()].flatMap((f) => [...f.archived.map((a) => ({ runs: a.runs })), { runs: f.runs }]).filter((f) => f.runs.some((r) => inWindow(r.startedAt, i.window)));
   if (withRuns.length === 0) return { value: null, note: "no per-change runs in window" };
   const green = withRuns.filter((f) => f.runs.find((r) => r.n === 1)?.verdict === "green").length;
   return { value: pct(green, withRuns.length), note: `${green} of ${withRuns.length} changes` };
@@ -222,16 +223,18 @@ const prLatency: Computer = fed(["pr"], (i) => {
 });
 
 const findingsPerPr: Computer = (i) => {
-  const prs = [...i.repo.changes.values()].map((f) => f.pr).filter((p): p is NonNullable<typeof p> => p !== null && inWindow(p.openedAt, i.window));
+  const prs = [...i.repo.changes.values()].flatMap((f) => [...f.archived.map((a) => a.pr), f.pr]).filter((p): p is NonNullable<typeof p> => p !== null && inWindow(p.openedAt, i.window));
   if (prs.length === 0) return { value: null, note: "no PRs in window" };
   const total = prs.reduce((a, p) => a + (p.findings ? p.findings.high + p.findings.medium + p.findings.low : 0), 0);
   return { value: Math.round((total / prs.length) * 10) / 10, note: `over ${plural(prs.length, "PR")}` };
 };
 
-const deploys: Computer = (i) => ({ value: [...i.repo.changes.values()].filter((f) => f.deploy && inWindow(f.deploy.at, i.window)).length, note: "deploy.yaml records" });
+const deployRecords = (i: Inputs) => [...i.repo.changes.values()].flatMap((f) => [...f.archived.map((a) => a.deploy), f.deploy]).filter((d): d is NonNullable<typeof d> => d !== null);
+
+const deploys: Computer = (i) => ({ value: deployRecords(i).filter((d) => inWindow(d.at, i.window)).length, note: "deploy.yaml records" });
 
 const deployFailures: Computer = (i) => {
-  const records = [...i.repo.changes.values()].filter((f) => f.deploy && inWindow(f.deploy.at, i.window) && (f.deploy.status === "failed" || f.deploy.status === "rolled_back")).length;
+  const records = deployRecords(i).filter((d) => inWindow(d.at, i.window) && (d.status === "failed" || d.status === "rolled_back")).length;
   const events = i.events.filter((e) => e.event === "deploy.failed" && inWindow(e.ts, i.window)).length;
   return { value: Math.max(records, events), note: `${plural(records, "record")} failed or rolled back · ${plural(events, "deploy.failed event")}` };
 };

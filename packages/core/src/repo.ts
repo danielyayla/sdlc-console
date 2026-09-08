@@ -60,7 +60,18 @@ export interface ChangeFiles {
   shas: Partial<Record<"intent.md" | "spec.md" | "plan.md" | "pr.yaml" | "incident.md" | "change.yaml", string>>;
   present: { intent: boolean; spec: boolean; plan: boolean; evals: boolean; pr: boolean; incident: boolean };
   archivedCycles: number[];
+  /** The closed cycles' records under `cycles/<n>/`, read for history (metrics, feeds); never edited, never re-validated. */
+  archived: ArchivedCycle[];
   diagnostics: Diagnostic[];
+}
+
+/** What a closed cycle left behind: its PR, per-change runs, incident and deploy record. */
+export interface ArchivedCycle {
+  cycle: number;
+  pr: Pr | null;
+  runs: PerChangeRun[];
+  incident: ParsedArtifact<"incident"> | null;
+  deploy: Deploy | null;
 }
 
 export interface TriageFile {
@@ -125,6 +136,7 @@ export function loadChange(tree: Tree, id: string): ChangeFiles {
     shas: {},
     present: { intent: false, spec: false, plan: false, evals: false, pr: false, incident: false },
     archivedCycles: [],
+    archived: [],
     diagnostics,
   };
 
@@ -220,8 +232,29 @@ export function loadChange(tree: Tree, id: string): ChangeFiles {
     .map((n) => Number(n))
     .filter((n) => Number.isInteger(n) && n > 0)
     .sort((a, b) => a - b);
+  files.archived = files.archivedCycles.map((n) => loadArchivedCycle(tree, at(`cycles/${n}`), n));
 
   return files;
+}
+
+/** An archived cycle was valid when it closed and is immutable since (`cycle.archive.modified`): unreadable files are skipped, not diagnosed. */
+function loadArchivedCycle(tree: Tree, dir: string, cycle: number): ArchivedCycle {
+  const text = (name: string) => readFile(tree, `${dir}/${name}`)?.content;
+  const out: ArchivedCycle = { cycle, pr: null, runs: [], incident: null, deploy: null };
+  const prText = text("pr.yaml");
+  if (prText !== undefined) out.pr = parseYaml("pr", prText, `${dir}/pr.yaml`).value;
+  const deployText = text("deploy.yaml");
+  if (deployText !== undefined) out.deploy = parseYaml("deploy", deployText, `${dir}/deploy.yaml`).value;
+  const incidentText = text("incident.md");
+  if (incidentText !== undefined) out.incident = parseArtifact("incident", incidentText, `${dir}/incident.md`).value as ParsedArtifact<"incident"> | null;
+  for (const path of filesUnder(tree, `${dir}/evals`)) {
+    const name = path.slice(`${dir}/evals`.length + 1);
+    if (!/^run-\d+\.json$/.test(name)) continue;
+    const run = parseJson("per-change-run", readFile(tree, path)?.content ?? "", path).value;
+    if (run) out.runs.push(run);
+  }
+  out.runs.sort((a, b) => a.n - b.n);
+  return out;
 }
 
 function setSha(files: ChangeFiles, name: keyof ChangeFiles["shas"], sha: string | undefined): void {
