@@ -45,6 +45,13 @@ export function TopBar({ state, snapshot, repoLabel, onTab, onRole }: TopBarProp
         })}
       </nav>
       <div className="spacer" />
+      {snapshot?.config.auth ? (
+        <div className="whoami" title={`signed in via ${snapshot.config.auth.issuer}`}>
+          <span className="eyebrow">Signed in</span>
+          <span className="who-name">{snapshot.identity.name ?? snapshot.identity.id}</span>
+          <a className="signout" href="/auth/logout">Sign out</a>
+        </div>
+      ) : null}
       <div className="switcher">
         <span className="eyebrow">Acting as</span>
         <div className="segment" role="group" aria-label="role">

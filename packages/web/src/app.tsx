@@ -49,7 +49,10 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
   useEffect(() => {
     if (snapshot && !seeded.current) {
       seeded.current = true;
-      dispatch({ type: "seed-role", role: snapshot.defaultRole });
+      // hosted mode: start as a role the identity holds; local mode keeps defaultRole (the switcher is a view)
+      const held = snapshot.identity.roles;
+      const role = held.length === 0 || held.includes(snapshot.defaultRole) ? snapshot.defaultRole : held.includes("eng") ? "eng" : held.includes("po") ? "po" : snapshot.defaultRole;
+      dispatch({ type: "seed-role", role });
     }
   }, [snapshot]);
 

@@ -45,7 +45,7 @@ Exit: a change travels 1→6→1 against a GitHub repository with branch protect
 Carry-overs from the Phase 2 exit run first (`→ e2e` rows in decisions.md), then blueprint items 20–23. Order within the phase is a starting point; re-order as the first hosted user shows up.
 
 - [x] 3.0 Phase 2 carry-overs: `sdlc init --sdlc-bin <command>` so generated workflows run a team's own install instead of `npx sdlc` (`2.5 → e2e`); `factsFromRepo` / `computeMetrics` read archived cycles under `cycles/<n>/` so a closed loop keeps its runs, merges and incident in the window (`2.10 → e2e`).
-- [ ] 3.1 Hosted identity: OIDC login on `sdlc serve`, role from the identity provider's claims, role switcher restricted to what the identity allows; local identity + `defaultRole` stays the no-provider path.
+- [x] 3.1 Hosted identity: OIDC login on `sdlc serve`, role from the identity provider's claims, role switcher restricted to what the identity allows; local identity + `defaultRole` stays the no-provider path.
 - [ ] 3.2 Hosted mode server: server-side cache/queue shared across operators (the SQLite cache stays disposable), GitHub App with "on behalf of" authorship and real check runs replacing commit statuses (`2.1`), multi-repo / monorepo product switching.
 - [ ] 3.3 OTel traces for sessions, jobs and runs; compliance export of the ledger and gate decisions per change.
 - [ ] 3.4 Maintain automation: detection script package writing snapshots the Bands table reads (`1.3`); `bands.yaml` tiers → headless diagnose/propose jobs; runbook allowlist for what a job may run.

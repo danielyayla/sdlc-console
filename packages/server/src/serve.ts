@@ -1,5 +1,6 @@
 import type { AddressInfo } from "node:net";
 import { identity as gitIdentity, isRepo, repoRoot, type GitIdentity } from "@sdlc/adapter-git";
+import { resolveConfig } from "@sdlc/core";
 import { Engine, JobStore } from "./engine/index.js";
 import { collectSources, FactsCache } from "./metrics/index.js";
 import { DeliveryLog } from "./github/webhooks.js";
@@ -8,6 +9,7 @@ import { enrich, SessionRegistry } from "./sessions/registry.js";
 import type { SessionRecord } from "./snapshot.js";
 import { StateStore } from "./store.js";
 import { watchRepo } from "./watcher.js";
+import { Authenticator } from "./auth/index.js";
 
 export interface ServeOptions {
   cwd: string;
@@ -27,6 +29,9 @@ export interface ServeOptions {
   log?: (line: string) => void;
   /** Environment for the code host (`GITHUB_TOKEN`) and the webhook receiver (`GITHUB_WEBHOOK_SECRET`); defaults to the process environment. */
   env?: Record<string, string | undefined>;
+  /** Hosted mode: `fetch` for the identity provider (tests point it at a fake) and a clock for session expiry. */
+  authFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+  now?: () => Date;
 }
 
 export interface RunningServer {
@@ -40,7 +45,13 @@ export interface RunningServer {
   /** Webhook deliveries (null without the engine). */
   deliveries: DeliveryLog | null;
   facts: FactsCache;
+  /** Hosted mode (3.1): the identity provider the console signs people in with; null in local mode. */
+  auth: Authenticator | null;
   close: () => Promise<void>;
+}
+
+function loadEmptyConfig(): import("@sdlc/core").ResolvedConfig {
+  return resolveConfig(null);
 }
 
 /** `sdlc serve`: derive from HEAD, watch the repo, serve HTTP + WebSocket. */
@@ -59,7 +70,12 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, facts, ...(opts.log ? { log: opts.log } : {}), ...(opts.env ? { env: opts.env } : {}) })
     : null;
   const deliveries = engine ? new DeliveryLog(registry.database) : null;
-  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(engine ? { engine, jobs } : {}), facts, ...(deliveries ? { deliveries } : {}), ...(opts.env ? { env: opts.env } : {}) });
+  const authConfig = store.currentRepo?.config.auth ?? null;
+  const env = opts.env ?? process.env;
+  const auth = authConfig
+    ? new Authenticator({ auth: authConfig, config: () => store.currentRepo?.config ?? loadEmptyConfig(), ...(env["SDLC_OIDC_CLIENT_SECRET"] ? { clientSecret: env["SDLC_OIDC_CLIENT_SECRET"] } : {}), ...(opts.authFetch ? { fetch: opts.authFetch } : {}), ...(opts.now ? { now: opts.now } : {}), ...(opts.log ? { log: opts.log } : {}) })
+    : null;
+  const app = createApp(store, { ...(opts.webDir ? { webDir: opts.webDir } : {}), registry, ...(opts.sdlcBin ? { sdlcBin: opts.sdlcBin } : {}), ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(engine ? { engine, jobs } : {}), facts, ...(deliveries ? { deliveries } : {}), ...(opts.env ? { env: opts.env } : {}), ...(auth ? { auth } : {}) });
   if (engine && opts.engine) void engine.tick();
   const watcher = opts.watch === false ? null : watchRepo(root, () => void store.refresh().catch(() => undefined));
   const host = opts.host ?? "127.0.0.1";
@@ -75,6 +91,7 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     jobs,
     deliveries,
     facts,
+    auth,
     close: async () => {
       watcher?.close();
       engine?.close();

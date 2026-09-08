@@ -55,6 +55,10 @@
           "github": {
             "type": "string",
             "minLength": 1
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
           }
         },
         "required": [
@@ -63,6 +67,57 @@
         ],
         "additionalProperties": false
       }
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "const": "oidc"
+        },
+        "issuer": {
+          "type": "string",
+          "format": "uri"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "audience": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claim": {
+          "type": "string",
+          "enum": [
+            "email",
+            "preferred_username",
+            "sub"
+          ]
+        },
+        "scopes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "publicUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sessionHours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 720
+        }
+      },
+      "required": [
+        "provider",
+        "issuer",
+        "clientId"
+      ],
+      "additionalProperties": false
     },
     "roles": {
       "type": "array",

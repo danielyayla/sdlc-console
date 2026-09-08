@@ -17,6 +17,7 @@ export interface ActionFailure {
 
 export async function act(path: string, body: unknown = {}): Promise<ActionReply | ActionFailure> {
   const r = await fetch(`/api${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  if (r.status === 401) location.assign("/auth/login");
   const data = (await r.json()) as ActionReply | Omit<ActionFailure, "status">;
   if (r.ok) return data as ActionReply;
   return { ...(data as Omit<ActionFailure, "status">), status: r.status };
@@ -58,8 +59,14 @@ export function subscribe(onSnapshot: (s: Snapshot) => void, onStatus: (connecte
       const msg = JSON.parse(String(ev.data)) as { type: string; snapshot?: Snapshot };
       if (msg.type === "snapshot" && msg.snapshot) onSnapshot(msg.snapshot);
     };
-    socket.onclose = () => {
+    socket.onclose = (ev) => {
       onStatus(false);
+      if (ev.code === 4401) {
+        // hosted mode: no session — the provider signs us in and sends us back here
+        stopped = true;
+        location.assign(`/auth/login?return_to=${encodeURIComponent(location.pathname + location.search)}`);
+        return;
+      }
       if (!stopped) setTimeout(connect, Math.min(delay *= 2, 8000));
     };
     socket.onerror = () => socket?.close();

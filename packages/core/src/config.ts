@@ -32,6 +32,19 @@ export interface ResolvedConfig {
   extraRoles: string[];
   /** `records.connector`: the MCP server in `.mcp.json` that owns the external records (FR-16); null when unset. */
   recordsConnector: string | null;
+  /** Hosted mode (3.1): the OIDC provider `sdlc serve` signs people in with; null = local mode. */
+  auth: ResolvedAuth | null;
+}
+
+export interface ResolvedAuth {
+  provider: "oidc";
+  issuer: string;
+  clientId: string;
+  audience: string;
+  claim: "email" | "preferred_username" | "sub";
+  scopes: string[];
+  publicUrl: string | null;
+  sessionHours: number;
 }
 
 /** Apply defaults from the schema layer; never writes anything back. */
@@ -72,7 +85,30 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
     eligibility: { coverage: config?.eligibility?.coverage ?? CONFIG_DEFAULTS.eligibility.coverage },
     extraRoles: (config?.roles ?? []).map((x) => x.name),
     recordsConnector: config?.records?.connector ?? null,
+    auth: config?.auth
+      ? {
+          provider: "oidc",
+          issuer: config.auth.issuer.replace(/\/$/, ""),
+          clientId: config.auth.clientId,
+          audience: config.auth.audience ?? config.auth.clientId,
+          claim: config.auth.claim ?? "email",
+          scopes: config.auth.scopes ?? ["openid", "email", "profile"],
+          publicUrl: config.auth.publicUrl?.replace(/\/$/, "") ?? null,
+          sessionHours: config.auth.sessionHours ?? 12,
+        }
+      : null,
   };
+}
+
+/** The identity a signed-in person acts as: a declared `subject` wins, else the configured claim must equal `id` (emails compare case-insensitively). Null = not on the list. */
+export function identityForClaims(config: ResolvedConfig, claims: { sub: string; email?: string; preferred_username?: string }): Identity | null {
+  const bySubject = config.identities.find((i) => i.subject !== undefined && i.subject === claims.sub);
+  if (bySubject) return bySubject;
+  const claim = config.auth?.claim ?? "email";
+  const value = claims[claim];
+  if (typeof value !== "string" || value === "") return null;
+  const fold = (s: string) => (claim === "email" ? s.toLowerCase() : s);
+  return config.identities.find((i) => fold(i.id) === fold(value)) ?? null;
 }
 
 /** Roles an identity holds, by git email / handle. Empty when unknown. */
