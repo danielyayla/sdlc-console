@@ -5,20 +5,22 @@ import { stringifyJsonl } from "@sdlc/schemas";
 import { git, gitRaw, type GitIdentity } from "./git.js";
 
 export interface CommitOptions {
-  /** Author and committer of the decision commit (the acting human, or the agent/system identity). */
+  /** Author of the decision commit (the acting human, or the agent/system identity); also the committer unless one is given. */
   identity: GitIdentity;
+  /** Hosted mode (3.2): the GitHub App commits "on behalf of" the author — the App is the committer, never the author. */
+  committer?: GitIdentity;
   /** Refuse unless the working tree is on this branch. */
   branch?: string;
   /** Override the commit timestamp (ISO); defaults to now. */
   date?: string;
 }
 
-function envFor(who: GitIdentity, date?: string): Record<string, string> {
+function envFor(who: GitIdentity, date?: string, committer: GitIdentity = who): Record<string, string> {
   const env: Record<string, string> = {
     GIT_AUTHOR_NAME: who.name,
     GIT_AUTHOR_EMAIL: who.id,
-    GIT_COMMITTER_NAME: who.name,
-    GIT_COMMITTER_EMAIL: who.id,
+    GIT_COMMITTER_NAME: committer.name,
+    GIT_COMMITTER_EMAIL: committer.id,
   };
   if (date) {
     env["GIT_AUTHOR_DATE"] = date;
@@ -65,7 +67,7 @@ export async function commitWritePlan(dir: string, plan: WritePlan, opts: Commit
   }
   if (touched.size === 0) throw new Error("write-plan touches no files");
   await git(dir, ["add", "-A", "--", ...touched]);
-  const env = envFor(opts.identity, opts.date);
+  const env = envFor(opts.identity, opts.date, opts.committer);
   await git(dir, ["commit", "-q", "--only", "-F", "-", "--", ...touched], { input: formatMessage(plan), env });
   return (await git(dir, ["rev-parse", "HEAD"])).trim();
 }
@@ -116,8 +118,8 @@ export async function commitTrailers(dir: string, sha: string): Promise<Record<s
 }
 
 /** Merge a branch into the current one with a merge commit (gate 5, local mode). Returns the merge sha. */
-export async function mergeBranch(dir: string, branch: string, message: string, who: GitIdentity): Promise<string> {
-  await git(dir, ["merge", "--no-ff", "--no-edit", "-m", message, branch], { env: envFor(who) });
+export async function mergeBranch(dir: string, branch: string, message: string, who: GitIdentity, committer?: GitIdentity): Promise<string> {
+  await git(dir, ["merge", "--no-ff", "--no-edit", "-m", message, branch], { env: envFor(who, undefined, committer) });
   return (await git(dir, ["rev-parse", "HEAD"])).trim();
 }
 
@@ -126,10 +128,10 @@ export async function mergeBranch(dir: string, branch: string, message: string, 
  * reaches the default branch when the gate owner accepts. Merges the branch
  * into the current one unless already merged; returns the merge sha or null.
  */
-export async function mergeIfUnmerged(dir: string, branch: string, message: string, who: GitIdentity): Promise<string | null> {
+export async function mergeIfUnmerged(dir: string, branch: string, message: string, who: GitIdentity, committer?: GitIdentity): Promise<string | null> {
   const exists = (await gitRaw(dir, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])).code === 0;
   if (!exists) return null;
   const merged = (await gitRaw(dir, ["merge-base", "--is-ancestor", branch, "HEAD"])).code === 0;
   if (merged) return null;
-  return mergeBranch(dir, branch, message, who);
+  return mergeBranch(dir, branch, message, who, committer);
 }

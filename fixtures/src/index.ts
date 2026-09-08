@@ -79,3 +79,26 @@ export async function realizeSeedRepro(root: string, worktree: string, changeId 
   await git(root, ["commit", "-q", "-m", `sdlc(${changeId}): repro sha`]);
   return sha;
 }
+
+/**
+ * A monorepo seed (3.2): the seed at the root (product `invoicing`, path `.`)
+ * plus the same seed under each nested product path with its own `sdlc/`
+ * home, and the root `sdlc/config.yaml` listing every product. Nothing is
+ * committed; the caller commits.
+ */
+export function writeMonorepoSeed(dir: string, nested: { name: string; path: string }[] = [{ name: "billing", path: "apps/billing" }]): void {
+  writeSeed(dir);
+  const marker = "products:\n  - name: invoicing\n    path: .\n";
+  const rewrite = (home: string, block: string) => {
+    const cfg = join(home, "sdlc", "config.yaml");
+    const text = readFileSync(cfg, "utf8");
+    if (!text.includes(marker)) throw new Error("seed config changed: products block not found");
+    writeFileSync(cfg, text.replace(marker, block));
+  };
+  for (const p of nested) {
+    writeSeed(join(dir, p.path));
+    // a nested home's own config names itself
+    rewrite(join(dir, p.path), `products:\n  - name: ${p.name}\n    path: .\n`);
+  }
+  rewrite(dir, `${marker}${nested.map((p) => `  - name: ${p.name}\n    path: ${p.path}\n`).join("")}`);
+}

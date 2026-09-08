@@ -2,6 +2,7 @@ import type { CollectedSources } from "./metrics/index.js";
 import { blobSha, commitWritePlan, GitError, headSha, newUlid, readTreeWithBranches, type ArtifactBranch, type GitIdentity } from "@sdlc/adapter-git";
 import { loadRepo, rolesOf, validateWritePlan, type Repo, type TransitionContext, type TransitionResult, type Tree } from "@sdlc/core";
 import type { Diagnostic } from "@sdlc/schemas";
+import type { SnapshotCache } from "./cache.js";
 import { buildSnapshot, type Identity, type SessionRecord, type Snapshot } from "./snapshot.js";
 
 export class ActionError extends Error {
@@ -18,8 +19,15 @@ export class ActionError extends Error {
 const ROLE_RULES = /(not-owner|not-engineer|not-po|gate\.via)/;
 
 export interface StoreOptions {
+  /** The SDLC home: the repository root, or a product's directory in a monorepo (3.2). */
   root: string;
   identity: GitIdentity;
+  /** Hosted mode under a GitHub App (3.2): the App's bot user commits on behalf of `identity`; absent = author and committer are the same. */
+  committer?: GitIdentity;
+  /** Product name this store serves (`config.products[].name`, or the repository's directory name). */
+  product?: string;
+  /** Warm start across processes and restarts: the last derived snapshot per tree key. */
+  cache?: SnapshotCache;
   ref?: string;
   /** Session provider; receives the current repo so records can be enriched from the ledger. */
   sessions?: (repo: Repo | null) => SessionRecord[];
@@ -73,6 +81,15 @@ export class StateStore {
     return this.opts.identity;
   }
 
+  /** The committer of this store's commits when it differs from the author (the GitHub App in hosted mode); null otherwise. */
+  get committer(): GitIdentity | null {
+    return this.opts.committer ?? null;
+  }
+
+  get product(): string | null {
+    return this.opts.product ?? null;
+  }
+
   get current(): Snapshot | null {
     return this.s.snapshot;
   }
@@ -110,6 +127,14 @@ export class StateStore {
         s.branches = read.branches;
         s.repo = loadRepo(s.tree);
         s.lastHead = key;
+        // a fresh process on a tree another process already derived: serve that derivation until something moves
+        const warm = !force && !s.snapshot ? this.opts.cache?.get(key) : null;
+        if (warm) {
+          s.revision = warm.snapshot.revision;
+          s.snapshot = { ...warm.snapshot, identity: this.identity(), sessions: this.opts.sessions?.(s.repo) ?? warm.snapshot.sessions };
+          for (const fn of s.listeners) fn(s.snapshot);
+          return s.snapshot;
+        }
         return this.rebuild();
       } finally {
         s.refreshing = null;
@@ -124,6 +149,7 @@ export class StateStore {
     if (!s.repo) throw new Error("store not loaded");
     s.revision += 1;
     s.snapshot = { ...buildSnapshot(s.repo, this.identity(), this.opts.sessions?.(s.repo) ?? [], s.revision, this.opts.now?.() ?? new Date(), this.opts.facts?.(s.repo)), branches: s.branches };
+    if (s.lastHead) this.opts.cache?.put(s.lastHead, s.snapshot);
     for (const fn of s.listeners) fn(s.snapshot);
     return s.snapshot;
   }
@@ -153,7 +179,7 @@ export class StateStore {
     if (report.blocking) throw new ActionError(409, "write-plan rejected by validation", report.diagnostics.filter((d) => d.blocking));
     let commit: string;
     try {
-      commit = await commitWritePlan(this.opts.root, result.plan, { identity: this.opts.identity });
+      commit = await commitWritePlan(this.opts.root, result.plan, { identity: this.opts.identity, ...(this.opts.committer ? { committer: this.opts.committer } : {}) });
     } catch (e) {
       if (e instanceof GitError) throw new ActionError(502, e.message, [], true);
       throw e;

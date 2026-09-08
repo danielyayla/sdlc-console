@@ -9,6 +9,8 @@ import { ActionError, StateStore } from "../store.js";
 export interface GitHubMode {
   host: GitHubCodeHost;
   identity: GitIdentity;
+  /** Under a GitHub App (3.2): the App's bot user commits on behalf of `identity` — author is the person, committer is the App. */
+  committer?: GitIdentity;
   now?: () => Date;
   log?: (line: string) => void;
 }
@@ -58,9 +60,9 @@ export async function withBranchWorktree<T>(root: string, branch: string, fn: (d
   }
 }
 
-/** Commit a write-plan on an artifact branch (decision rides with the artifact into the merge). */
-export function commitOnBranch(root: string, branch: string, plan: WritePlan, identity: GitIdentity): Promise<string> {
-  return withBranchWorktree(root, branch, (dir) => commitWritePlan(dir, plan, { identity }));
+/** Commit a write-plan on an artifact branch (decision rides with the artifact into the merge). `committer` is the App's bot user in hosted App mode. */
+export function commitOnBranch(root: string, branch: string, plan: WritePlan, identity: GitIdentity, committer?: GitIdentity): Promise<string> {
+  return withBranchWorktree(root, branch, (dir) => commitWritePlan(dir, plan, { identity, ...(committer ? { committer } : {}) }));
 }
 
 function viewFor(repo: Repo, id: string): ChangeView {
@@ -199,12 +201,12 @@ export async function acceptViaPr(mode: GitHubMode, store: StateStore, id: strin
   try {
     const repoGh = await mode.host.repoFor(store.root);
     await assertProtected(mode.host.client, repoGh, base);
-    const commit = await commitOnBranch(store.root, target.pr.branch, result.plan, mode.identity);
+    const commit = await commitOnBranch(store.root, target.pr.branch, result.plan, mode.identity, mode.committer);
     await pushBranch(store.root, target.pr.branch);
     const head = await headSha(store.root, target.pr.branch);
     const merged = await mergePull(mode.host.client, repoGh, target.pr.number, { sha: head, method: "merge", title: `sdlc(${id}): accept ${view.docs[target.index].name} (gate ${gate})` });
     if (!merged.merged) throw new CodeHostError(`GitHub did not merge #${target.pr.number}: ${merged.message}`, true);
-    await mergeRemoteBranch(store.root, base, `sdlc(${id}): sync origin/${base} after #${target.pr.number}`, mode.identity);
+    await mergeRemoteBranch(store.root, base, `sdlc(${id}): sync origin/${base} after #${target.pr.number}`, mode.identity, "origin", mode.committer);
     await store.refresh(true);
     return { commit, mergeSha: merged.sha, number: target.pr.number };
   } catch (e) {
@@ -223,7 +225,7 @@ export async function sendBackViaPr(mode: GitHubMode, store: StateStore, id: str
   if (!result.ok) throw refused(result);
   try {
     const repoGh = await mode.host.repoFor(store.root);
-    const commit = await commitOnBranch(store.root, target.pr.branch, result.plan, mode.identity);
+    const commit = await commitOnBranch(store.root, target.pr.branch, result.plan, mode.identity, mode.committer);
     await pushBranch(store.root, target.pr.branch);
     await requestChanges(mode.host.client, repoGh, target.pr.number, feedback.trim());
     await store.refresh(true);
@@ -277,7 +279,7 @@ export async function detectMergedPrs(mode: GitHubMode, store: StateStore): Prom
     if (!pull.merged) continue;
     if (!synced) {
       await requireOnBase(store.root, base);
-      await mergeRemoteBranch(store.root, base, `sdlc: sync origin/${base}`, mode.identity);
+      await mergeRemoteBranch(store.root, base, `sdlc: sync origin/${base}`, mode.identity, "origin", mode.committer);
       synced = true;
       await store.refresh(true);
       repo = store.currentRepo;
@@ -302,7 +304,7 @@ export async function detectMergedPrs(mode: GitHubMode, store: StateStore): Prom
       out.push({ changeId: c.id, gate: c.gate, number: c.number, mergedBy: login, recorded: false, reason: report.diagnostics.filter((d) => d.blocking).map((d) => d.message).join("; ") });
       continue;
     }
-    await commitWritePlan(store.root, result.plan, { identity: actor });
+    await commitWritePlan(store.root, result.plan, { identity: actor, ...(mode.committer ? { committer: mode.committer } : {}) });
     await store.refresh(true);
     repo = store.currentRepo ?? repo;
     out.push({ changeId: c.id, gate: c.gate, number: c.number, mergedBy: login, recorded: true });
@@ -336,7 +338,7 @@ export async function syncRecords(mode: GitHubMode, store: StateStore): Promise<
     if (behind.code === 0 && Number(behind.stdout.trim()) > 0) {
       // origin moved (a merged records PR, a merge done on GitHub): take it before pushing
       await requireOnBase(store.root, base);
-      await mergeRemoteBranch(store.root, base, `sdlc: sync origin/${base}`, mode.identity);
+      await mergeRemoteBranch(store.root, base, `sdlc: sync origin/${base}`, mode.identity, "origin", mode.committer);
       await store.refresh(true);
     }
     const count = await gitRaw(store.root, ["rev-list", "--count", `origin/${base}..${base}`]);

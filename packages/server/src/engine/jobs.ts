@@ -34,12 +34,17 @@ export class JobStore {
     return (this.db.prepare("SELECT json FROM jobs ORDER BY createdAt DESC").all() as { json: string }[]).map((r) => JSON.parse(r.json) as Job);
   }
 
-  /** Claim a key; returns null when the job already exists (idempotent). */
+  /**
+   * Claim a key; null when the job already exists (idempotent). The primary
+   * key does the arbitration inside SQLite, so two operators' processes on
+   * the same cache (3.2) cannot both claim it — one insert wins, the other
+   * sees zero rows changed.
+   */
   claim(job: Omit<Job, "state" | "createdAt" | "updatedAt" | "sessionId" | "error" | "note">, now: string): Job | null {
-    if (!this.db.open || this.get(job.key)) return null;
+    if (!this.db.open) return null;
     const full: Job = { ...job, state: "running", createdAt: now, updatedAt: now, sessionId: null, error: null, note: null };
-    this.db.prepare("INSERT INTO jobs (key, json, createdAt) VALUES (?, ?, ?)").run(full.key, JSON.stringify(full), now);
-    return full;
+    const r = this.db.prepare("INSERT OR IGNORE INTO jobs (key, json, createdAt) VALUES (?, ?, ?)").run(full.key, JSON.stringify(full), now);
+    return r.changes === 1 ? full : null;
   }
 
   update(key: string, patch: Partial<Job>, now: string): Job | null {

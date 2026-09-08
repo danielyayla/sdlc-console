@@ -59,7 +59,7 @@ const USAGE_REPRO = "usage: sdlc repro confirm <CHG> [--file <test> --reason <fa
 const USAGE_FREEZE = "usage: sdlc freeze lift <CHG> --file <path> --reason <text> | sdlc freeze dismiss <CHG> --file <path> --reason <text>";
 
 export async function reproCommand(io: Io, sub: string | undefined, rest: string[], values: Record<string, string | boolean | undefined>, json: boolean): Promise<{ value: unknown; text: string }> {
-  const ctx = await repoContext(io, json);
+  const ctx = await repoContext(io, json, typeof values["product"] === "string" ? values["product"] : undefined);
   const id = rest[0];
   const s = (k: string) => (typeof values[k] === "string" ? (values[k] as string) : undefined);
   if (sub === "confirm" && id) {
@@ -74,7 +74,7 @@ export async function reproCommand(io: Io, sub: string | undefined, rest: string
 }
 
 export async function freezeCommand(io: Io, sub: string | undefined, rest: string[], values: Record<string, string | boolean | undefined>, json: boolean): Promise<{ value: unknown; text: string }> {
-  const ctx = await repoContext(io, json);
+  const ctx = await repoContext(io, json, typeof values["product"] === "string" ? values["product"] : undefined);
   const id = rest[0];
   const file = typeof values["file"] === "string" ? values["file"] : "";
   const reason = typeof values["reason"] === "string" ? values["reason"] : "";

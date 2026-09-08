@@ -78,7 +78,7 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
   if (gate !== 5 && repo.config.codeHost === "github" && artifactPrFor(before, gate, store.current?.branches)) {
     // GitHub mode: the artifact is a pull request; accepting is merging it
     const host = codeHostFor("github", env) as GitHubCodeHost;
-    const r = await acceptViaPr({ host, identity: store.who }, store, id, gate);
+    const r = await acceptViaPr({ host, identity: store.who, ...(store.committer ? { committer: store.committer } : {}) }, store, id, gate);
     const snap = store.current ?? (await store.refresh());
     const after = snap.changes.find((c) => c.id === id);
     const toast = gate === 6 ? `Loop closed — ${id} re-entered Plan` : `${before.gate?.label ?? `gate ${gate}`} — ${id} moved to ${after ? stageDef(after.stage).name : "next stage"} (PR #${r.number} merged)`;
@@ -90,7 +90,7 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
     const current = (await git(store.root, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
     if (current === repo.config.defaultBranch) {
       try {
-        await mergeIfUnmerged(store.root, `sdlc/${id}/${artifact}`, `sdlc(${id}): merge sdlc/${id}/${artifact} (gate ${gate})`, store.who);
+        await mergeIfUnmerged(store.root, `sdlc/${id}/${artifact}`, `sdlc(${id}): merge sdlc/${id}/${artifact} (gate ${gate})`, store.who, store.committer ?? undefined);
       } catch (e) {
         throw new ActionError(502, `merge of sdlc/${id}/${artifact} refused: ${(e as Error).message}`, [], true);
       }
@@ -108,7 +108,7 @@ export async function sendBackGate(store: StateStore, id: string, gate: GateNumb
   const repo0 = store.currentRepo;
   if (repo0 && gate !== 5 && repo0.config.codeHost === "github" && artifactPrFor(view(repo0, id), gate, store.current?.branches)) {
     const host = codeHostFor("github", env) as GitHubCodeHost;
-    const r = await sendBackViaPr({ host, identity: store.who }, store, id, gate, feedback);
+    const r = await sendBackViaPr({ host, identity: store.who, ...(store.committer ? { committer: store.committer } : {}) }, store, id, gate, feedback);
     const snap = store.current ?? (await store.refresh());
     const after = snap.changes.find((c) => c.id === id);
     return { commit: r.commit, snapshot: snap, toast: `${after ? stageDef(after.stage).file : "artifact"} sent back on PR #${r.number} — ${id} stays in ${after ? stageDef(after.stage).name : "stage"}`, changeId: id };
@@ -135,7 +135,7 @@ export async function newChange(store: StateStore, input: CreateChangeInput): Pr
     if (report.blocking) throw new ActionError(409, "write-plan rejected by validation", report.diagnostics.filter((d) => d.blocking));
     const id = res.plan.changeId ?? "change";
     const branch = `sdlc/${id}/intent`;
-    const commit = await commitOnBranch(store.root, branch, res.plan, store.who);
+    const commit = await commitOnBranch(store.root, branch, res.plan, store.who, store.committer ?? undefined);
     const snapshot = await store.refresh(true);
     return { commit, snapshot, toast: `${id} created on ${branch} — its PR is the Plan gate`, changeId: id };
   }

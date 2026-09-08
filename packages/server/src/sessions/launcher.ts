@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { addWorktree, branchExists, commitWritePlan, currentBranch, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
+import { addWorktree, branchExists, commitWritePlan, currentBranch, gitRaw, newUlid, readTree, showPrefix, type GitIdentity } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo, logPath, normalizeReason, repeatSignals, stageDef, type ChangeView, type Repo, type RepeatSignal, type WritePlan } from "@sdlc/core";
 import { PROPOSAL_JOB, buildContext, type ContextBundle } from "@sdlc/mcp";
 import type { Event } from "@sdlc/schemas";
@@ -28,6 +28,7 @@ export interface LaunchInput {
 }
 
 export interface LaunchDeps {
+  /** The SDLC home: the repository root, or a product's directory in a monorepo (3.2). */
   root: string;
   registry: SessionRegistry;
   /** Path to the sdlc bin, for the per-session MCP config. */
@@ -64,6 +65,7 @@ function branchFor(kind: SessionKind, view: ChangeView, taskId: string | null): 
   return `sdlc/${view.id}/${artifact}`;
 }
 
+/** Where the branch's worktree is checked out; the session works in the home inside it (`<worktree>/<prefix>`). */
 export function worktreePathFor(root: string, branch: string): string {
   return join(root, ".sdlc-state", "worktrees", branch.replace(/\//g, "__"));
 }
@@ -147,15 +149,21 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
 
   const branch = branchFor(kind, view, taskId);
   if (kind === "review" && !(await branchExists(deps.root, branch))) throw new ActionError(409, `the PR branch ${branch} is not in this clone; the review reads the pushed head, it never recreates it`);
-  const worktree = worktreePathFor(deps.root, branch);
+  // a monorepo product (3.2): the worktree checks out the whole repository; the session lives in the product's home inside it
+  const prefix = await showPrefix(deps.root);
+  const checkout = worktreePathFor(deps.root, branch);
+  const worktree = prefix === "" ? checkout : join(checkout, prefix.replace(/\/$/, ""));
   // a review session's own ledger lines are lifecycle records: they commit on the default branch, not on the PR branch
   const ledgerDir = kind === "review" || kind === "propose" ? deps.root : worktree;
-  if (!existsSync(worktree)) {
+  if (!existsSync(checkout)) {
     mkdirSync(join(deps.root, ".sdlc-state", "worktrees"), { recursive: true });
+    // the cache directory is disposable: a checkout deleted with it is pruned so its branch can be checked out again
+    await gitRaw(deps.root, ["worktree", "prune"]);
     const base = repo.config.defaultBranch;
     const onBase = (await currentBranch(deps.root)) === base ? "HEAD" : base;
-    await addWorktree(deps.root, worktree, branch, onBase);
+    await addWorktree(deps.root, checkout, branch, onBase);
   }
+  const homeEnv = prefix === "" ? {} : { SDLC_HOME: prefix.replace(/\/$/, "") };
 
   const resuming = input.resume ?? null;
   const id = resuming?.sessionId ?? `sess-${newUlid().slice(-10).toLowerCase()}`;
@@ -164,7 +172,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   const stateDir = join(worktree, ".sdlc-state", "sessions", id);
   mkdirSync(stateDir, { recursive: true });
   const mcpConfig = join(stateDir, "mcp.json");
-  writeFileSync(mcpConfig, `${JSON.stringify({ mcpServers: { sdlc: { command: "node", args: [deps.sdlcBin, "mcp"], env: { SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent" } } } }, null, 2)}\n`);
+  writeFileSync(mcpConfig, `${JSON.stringify({ mcpServers: { sdlc: { command: "node", args: [deps.sdlcBin, "mcp"], env: { SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent", ...homeEnv } } } }, null, 2)}\n`);
   const bundle: ContextBundle = buildContext(repo, view, kind === "propose" ? PROPOSAL_JOB : undefined);
   const prompt = resuming ? resuming.guidance : promptFor(kind, { view, bundle, sessionId: id, target, reviewPolicy: repo.reviewPolicy?.text ?? null, signal, claudeMd: repo.claudeMd ? { wordCount: repo.claudeMd.wordCount, text: readFileSync(join(deps.root, "CLAUDE.md"), "utf8") } : null });
   writeFileSync(join(stateDir, "prompt.md"), prompt);
@@ -239,7 +247,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   const child = (deps.spawnImpl ?? spawn)(claudeBin, args, {
     cwd: worktree,
     // the harness's own git commits are attributed to the agent identity (§12.4), not to the engineer who launched it
-    env: { ...env, SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent", SDLC_AGENT_ID: AGENT.id, GIT_AUTHOR_NAME: AGENT.name, GIT_AUTHOR_EMAIL: AGENT.id, GIT_COMMITTER_NAME: AGENT.name, GIT_COMMITTER_EMAIL: AGENT.id },
+    env: { ...env, SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent", SDLC_AGENT_ID: AGENT.id, GIT_AUTHOR_NAME: AGENT.name, GIT_AUTHOR_EMAIL: AGENT.id, GIT_COMMITTER_NAME: AGENT.name, GIT_COMMITTER_EMAIL: AGENT.id, ...homeEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
   deps.registry.patch(id, { pid: child.pid ?? null });

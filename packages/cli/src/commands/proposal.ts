@@ -28,7 +28,7 @@ export function proposalDismissCommand(ctx: CliContext, id: string, reason: stri
 const USAGE = "usage: sdlc proposal accept <PRP> | sdlc proposal dismiss <PRP> --reason <text>";
 
 export async function proposalCommand(io: Io, sub: string | undefined, rest: string[], values: Record<string, string | boolean | undefined>, json: boolean): Promise<{ value: unknown; text: string }> {
-  const ctx = await repoContext(io, json);
+  const ctx = await repoContext(io, json, typeof values["product"] === "string" ? values["product"] : undefined);
   const id = rest[0];
   if (sub === "accept" && id) {
     const r = await proposalAccept(ctx, id);

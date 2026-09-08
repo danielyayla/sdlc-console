@@ -170,7 +170,8 @@ export class Engine {
       return null;
     }
     this.lastSync = Date.now();
-    const summary = await syncGitHub({ host, identity: this.opts.identity, ...(this.opts.now ? { now: this.opts.now } : {}), log: (l) => this.log(l) }, this.opts.store);
+    const committer = this.opts.store.committer;
+    const summary = await syncGitHub({ host, identity: this.opts.identity, ...(committer ? { committer } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), log: (l) => this.log(l) }, this.opts.store);
     const fetched = await this.refreshFacts(host).catch((e: Error) => {
       this.log(`metrics facts: ${e.message}`);
       return false;
@@ -483,7 +484,7 @@ export class Engine {
       if (!r.ok) throw new Error(r.diagnostics.map((d) => d.message).join("; "));
       const report = validateWritePlan(repo, r.plan);
       if (report.blocking) throw new Error(`task split rejected by validation: ${report.diagnostics.filter((d) => d.blocking).map((d) => d.message).join("; ")}`);
-      await commitWritePlan(this.opts.store.root, r.plan, { identity: this.opts.identity });
+      await commitWritePlan(this.opts.store.root, r.plan, { identity: this.opts.identity, ...(this.opts.store.committer ? { committer: this.opts.store.committer } : {}) });
       this.opts.jobs.update(key, { state: "done", note: `${proposed.length} tasks confirmed` }, this.now());
       await this.opts.store.refresh(true);
     } catch (e) {

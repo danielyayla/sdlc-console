@@ -1,4 +1,5 @@
 import type { Snapshot } from "@sdlc/server";
+import type { ProductInfo } from "../api";
 import { ROLE_LABEL, type Role } from "../lib/format";
 import type { UIState, View } from "../state";
 
@@ -16,21 +17,39 @@ export interface TopBarProps {
   state: UIState;
   snapshot: Snapshot | null;
   repoLabel: string;
+  /** Products the server holds (3.2); the switcher shows when there is more than one. */
+  products?: ProductInfo[];
   onTab: (view: Exclude<View, "detail">) => void;
   onRole: (role: Role) => void;
+  onProduct?: (name: string | null) => void;
 }
 
-export function TopBar({ state, snapshot, repoLabel, onTab, onRole }: TopBarProps) {
+export function TopBar({ state, snapshot, repoLabel, products = [], onTab, onRole, onProduct }: TopBarProps) {
   const b = snapshot?.badges[state.role];
   const counts: Partial<Record<View, number>> = { gates: b?.gates ?? 0, loop: b?.loop ?? 0, security: b?.security ?? 0 };
   const held = snapshot?.identity.roles ?? [];
   const canSwitch = (r: Role) => held.length === 0 || held.includes(r);
+  const primary = products.find((p) => p.primary)?.name ?? null;
+  const selected = state.product ?? primary ?? "";
   return (
     <header className="topbar">
       <div className="brand">
         <span className="brand-square" aria-hidden="true" />
         <span>Veri</span>
-        <span className="brand-repo">/ {repoLabel} / SDLC console</span>
+        {products.length > 1 ? (
+          <label className="product-switch">
+            <span className="eyebrow">Product</span>
+            <select aria-label="product" value={selected} onChange={(e) => onProduct?.(e.target.value === primary ? null : e.target.value)}>
+              {products.map((p) => (
+                <option key={p.name} value={p.name} title={p.home}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <span className="brand-repo">/ {repoLabel} / SDLC console</span>
+        )}
       </div>
       <nav className="tabs" aria-label="views">
         {TABS.map((t) => {

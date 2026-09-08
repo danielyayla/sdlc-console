@@ -1,16 +1,39 @@
-import { blobSha, commitWritePlan, defaultBranch, identity as gitIdentity, isRepo, newUlid, readTree, readWorkingTree, repoRoot, type GitIdentity } from "@sdlc/adapter-git";
+import { resolve } from "node:path";
+import { blobSha, commitWritePlan, defaultBranch, homeFor, identity as gitIdentity, isRepo, newUlid, readTree, readWorkingTree, type GitIdentity } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo, validateWritePlan, type ChangeView, type Repo, type TransitionContext, type Tree, type WritePlan } from "@sdlc/core";
 import { CliError, type Io } from "./io.js";
 
 export interface CliContext {
   io: Io;
+  /** The SDLC home the command works in: the repository root, or a product's directory in a monorepo (3.2). */
   root: string;
+  /** Repository top level. */
+  repoRoot: string;
   json: boolean;
 }
 
-export async function repoContext(io: Io, json: boolean): Promise<CliContext> {
+/**
+ * Where a command works: the nearest `sdlc/` home from the working directory
+ * (`SDLC_HOME` when set). `--product <name>` (or `SDLC_PRODUCT`) picks one of
+ * the home's `config.products[]` instead; a home that lists several products
+ * refuses to guess when the working directory is not inside one of them.
+ */
+export async function repoContext(io: Io, json: boolean, product?: string): Promise<CliContext> {
   if (!(await isRepo(io.cwd))) throw new CliError(`${io.cwd} is not a git repository — run \`git init\` first`);
-  return { io, root: await repoRoot(io.cwd), json };
+  const found = await homeFor(io.cwd, io.env);
+  const wanted = product ?? io.env["SDLC_PRODUCT"];
+  const tree = await readTree(found.home, "HEAD").catch(() => null);
+  const products = tree ? (loadRepo(tree).rawConfig?.products ?? []) : [];
+  if (wanted) {
+    const hit = products.find((p) => p.name === wanted);
+    if (!hit) throw new CliError(products.length === 0 ? `no products are configured in ${found.home}/sdlc/config.yaml; --product ${wanted} names none` : `no product named ${wanted}; ${found.home} lists ${products.map((p) => p.name).join(", ")}`);
+    return { io, root: resolve(found.home, hit.path), repoRoot: found.root, json };
+  }
+  const nested = products.filter((p) => resolve(found.home, p.path) !== found.home);
+  if (nested.length > 0 && products.length > 1 && !io.env["SDLC_HOME"]) {
+    throw new CliError(`${found.home} lists ${products.length} products (${products.map((p) => p.name).join(", ")}); pass --product <name>, set SDLC_PRODUCT, or run the command inside the product's directory`);
+  }
+  return { io, root: found.home, repoRoot: found.root, json };
 }
 
 /** Mutating commands refuse when the launcher marks the process as an agent (§9.1). */

@@ -26,6 +26,8 @@ export interface PrCheck {
   verdict: "pass" | "fail" | "pending";
   /** One line, literal (a count, a verdict); never a summary of the output. */
   summary: string;
+  /** The toolchain output behind the verdict, verbatim; a GitHub App publishes it as the check run's text (3.2). */
+  evidence?: string;
 }
 
 /** What a finished review job reports to the code host: the tally as a check, the findings verbatim. */

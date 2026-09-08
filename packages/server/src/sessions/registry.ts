@@ -1,6 +1,7 @@
-import Database from "better-sqlite3";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import type Database from "better-sqlite3";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { cachePathFor, openCache } from "../cache.js";
 import type { Repo } from "@sdlc/core";
 import { eventsNamed } from "@sdlc/core";
 import { loopState, readReproDraft, readRounds, type ReproDraft, type StoredRound } from "@sdlc/mcp";
@@ -51,14 +52,12 @@ interface Row {
   json: string;
 }
 
-/** SQLite-backed session registry under `.sdlc-state/sessions.db` (decisions P11: disposable cache). */
+/** SQLite-backed session registry in the product's cache, `.sdlc-state/sessions.db` (decisions P11: disposable cache). */
 export class SessionRegistry {
   private readonly db: Database.Database;
 
-  constructor(readonly root: string, file = join(root, ".sdlc-state", "sessions.db")) {
-    mkdirSync(dirname(file), { recursive: true });
-    this.db = new Database(file);
-    this.db.pragma("journal_mode = WAL");
+  constructor(readonly root: string, file = cachePathFor(root)) {
+    this.db = openCache(file);
     this.db.exec("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, changeId TEXT NOT NULL, startedAt TEXT NOT NULL, json TEXT NOT NULL)");
   }
 

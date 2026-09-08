@@ -2,18 +2,21 @@ import type { Role } from "./lib/format";
 
 export type View = "board" | "detail" | "gates" | "sessions" | "config" | "loop" | "security" | "metrics";
 
-/** Spec §2 UIState, nothing more. */
+/** Spec §2 UIState plus the product in view (3.2: a server may hold several). */
 export interface UIState {
   view: View;
   role: Role;
   sel: string | null;
   art: number | null;
   toast: { text: string; n: number } | null;
+  /** Product the console shows; null = the server's primary product. */
+  product: string | null;
 }
 
 export type UIAction =
   | { type: "tab"; view: Exclude<View, "detail"> }
   | { type: "role"; role: Role }
+  | { type: "product"; name: string | null }
   | { type: "select"; id: string }
   | { type: "back" }
   | { type: "art"; index: number | null }
@@ -21,17 +24,19 @@ export type UIAction =
   | { type: "toast.clear"; n: number }
   | { type: "seed-role"; role: Role };
 
-export function initialState(role: Role = "po"): UIState {
-  return { view: "board", role, sel: null, art: null, toast: null };
+export function initialState(role: Role = "po", product: string | null = null): UIState {
+  return { view: "board", role, sel: null, art: null, toast: null, product };
 }
 
-/** Tab switch clears selection; role switch never changes view; accept resets artifact selection via `art: null`. */
+/** Tab switch clears selection; role switch never changes view; product switch keeps the tab but drops the selection (ids belong to a product); accept resets artifact selection via `art: null`. */
 export function reduce(state: UIState, action: UIAction): UIState {
   switch (action.type) {
     case "tab":
       return { ...state, view: action.view, sel: null, art: null };
     case "role":
       return { ...state, role: action.role };
+    case "product":
+      return state.product === action.name ? state : { ...state, product: action.name, view: state.view === "detail" ? "board" : state.view, sel: null, art: null };
     case "seed-role":
       return state.role === action.role ? state : { ...state, role: action.role };
     case "select":

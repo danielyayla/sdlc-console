@@ -1,5 +1,7 @@
-import { CodeHostError, git, mergeRemoteBranch, pushBranch, recordOpenedPr, recordSyncedPr, remoteUrl, type CodeHost, type GitIdentity, type OpenPrInput, type OpenPrResult, type ReviewReport } from "@sdlc/adapter-git";
+import { CodeHostError, git, mergeRemoteBranch, pushBranch, recordOpenedPr, recordSyncedPr, remoteUrl, type CodeHost, type GitIdentity, type OpenPrInput, type OpenPrResult, type PrCheck, type ReviewReport } from "@sdlc/adapter-git";
 import type { Pr } from "@sdlc/schemas";
+import { installationTokenSource, type InstallationTokenSource } from "./app.js";
+import { checkConclusion, publishCheckRun } from "./checks.js";
 import { GitHubClient, GitHubError } from "./client.js";
 import { assertProtected } from "./protection.js";
 import { getPull, mergePull, openPull, reviewPull } from "./pulls.js";
@@ -10,6 +12,7 @@ export interface GitHubCodeHostOptions {
   credentials: GitHubCredentials;
   fetch?: typeof fetch;
   remote?: string;
+  now?: () => Date;
 }
 
 function hostError(e: unknown): CodeHostError {
@@ -18,20 +21,42 @@ function hostError(e: unknown): CodeHostError {
   return new CodeHostError((e as Error).message, true);
 }
 
+/** The findings check the App opens with the PR and the review completes. */
+const FINDINGS_CHECK = "sdlc/findings";
+
 /**
- * GitHub mode (token). The code PR is real: the task branch is pushed, the PR
- * opened, the evidence verdict published as a commit status, and gate 5
- * merges through the API — where branch protection, not this adapter, has
- * the last word.
+ * GitHub mode. The code PR is real: the task branch is pushed, the PR opened,
+ * the checks published, and gate 5 merges through the API — where branch
+ * protection, not this adapter, has the last word. Under a token (2.1) the
+ * checks are commit statuses; under a GitHub App (3.2) they are check runs
+ * carrying the evidence verbatim, and `sdlc/findings` opens `in_progress`
+ * with the PR and completes when the review reports.
  */
 export class GitHubCodeHost implements CodeHost {
   readonly provider = "github" as const;
   readonly client: GitHubClient;
+  /** How the API is authenticated: a personal/actions token, or an App installation. */
+  readonly auth: "token" | "app";
+  private readonly tokens: InstallationTokenSource | null;
   private readonly remote: string;
 
   constructor(private readonly opts: GitHubCodeHostOptions) {
-    this.client = new GitHubClient({ token: opts.credentials.token, apiUrl: opts.credentials.apiUrl, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+    const c = opts.credentials;
+    const common = { apiUrl: c.apiUrl, ...(opts.fetch ? { fetch: opts.fetch } : {}) };
+    this.tokens = c.app ? installationTokenSource(c.app, { ...common, ...(opts.now ? { now: opts.now } : {}) }) : null;
+    this.client = new GitHubClient(this.tokens ? { tokenSource: this.tokens, ...common } : { token: c.token ?? "", ...common });
+    this.auth = this.tokens ? "app" : "token";
     this.remote = opts.remote ?? "origin";
+  }
+
+  /** The App's bot user, the committer of "on behalf of" commits; null in token mode. */
+  async appIdentity(): Promise<GitIdentity | null> {
+    if (!this.tokens) return null;
+    try {
+      return await this.tokens.identity();
+    } catch (e) {
+      throw hostError(e);
+    }
   }
 
   async repoFor(root: string): Promise<GitHubRepo> {
@@ -40,6 +65,20 @@ export class GitHubCodeHost implements CodeHost {
     const parsed = url ? parseGitHubRemote(url) : null;
     if (!parsed) throw new CodeHostError(`remote ${this.remote} is not a GitHub repository${url ? ` (${url})` : ""}; set GITHUB_REPOSITORY=owner/repo`, false);
     return parsed;
+  }
+
+  /** Every check on the head: statuses under a token, check runs (evidence in `output.text`) under the App. */
+  private async publishChecks(repo: GitHubRepo, view: OpenPrInput["view"], sha: string, checks: PrCheck[], url: string): Promise<void> {
+    if (this.auth === "token") {
+      for (const check of checks) await publishStatus(this.client, repo, sha, { context: `sdlc/${check.name}`, state: verdictState(check.verdict), description: check.summary, targetUrl: url });
+      return;
+    }
+    for (const check of checks) {
+      await publishCheckRun(this.client, repo, { name: `sdlc/${check.name}`, headSha: sha, ...checkConclusion(check.verdict), title: check.summary, summary: check.summary, ...(check.evidence !== undefined ? { text: check.evidence } : {}), detailsUrl: url });
+    }
+    if (!checks.some((c) => `sdlc/${c.name}` === FINDINGS_CHECK)) {
+      await publishCheckRun(this.client, repo, { name: FINDINGS_CHECK, headSha: sha, status: "in_progress", title: "review pending", summary: `the review session's findings on ${sha.slice(0, 7)} complete this run; a code owner approves and merges (${view.id})`, detailsUrl: url });
+    }
   }
 
   async openPr(input: OpenPrInput): Promise<OpenPrResult> {
@@ -55,9 +94,7 @@ export class GitHubCodeHost implements CodeHost {
         body: [`Change ${input.view.id} · cycle ${input.view.cycle} · risk ${input.view.risk}`, "", `Plan: sdlc/changes/${input.view.id}/plan.md`, `Evidence: sdlc/changes/${input.view.id}/evals/ (per-change run ${verdict === "pass" ? "green" : "red"})`, `Plan matches: ${input.planMatches === null ? "unknown" : input.planMatches ? "yes" : "no"}`].join("\n"),
       });
       if (pull.headSha !== input.headSha) throw new CodeHostError(`pushed ${input.branch} is at ${pull.headSha.slice(0, 7)} but the run tested ${input.headSha.slice(0, 7)}`, false);
-      for (const check of input.checks) {
-        await publishStatus(this.client, repo, input.headSha, { context: `sdlc/${check.name}`, state: verdictState(check.verdict), description: check.summary, targetUrl: pull.url });
-      }
+      await this.publishChecks(repo, input.view, input.headSha, input.checks, pull.url);
       const pr: Pr = {
         schema: 1,
         provider: "github",
@@ -69,7 +106,7 @@ export class GitHubCodeHost implements CodeHost {
         openedAt: input.now,
         reviewers: pull.reviewers,
         checks: input.checks.map((c) => ({ name: c.name, verdict: c.verdict, ...(c.summary ? { summary: c.summary } : {}) })),
-      ...(input.autoFindings && input.autoFindings.length > 0 ? { autoFindings: input.autoFindings } : {}),
+        ...(input.autoFindings && input.autoFindings.length > 0 ? { autoFindings: input.autoFindings } : {}),
         planMatches: input.planMatches,
       };
       return await recordOpenedPr(input, pr);
@@ -80,8 +117,8 @@ export class GitHubCodeHost implements CodeHost {
 
   /**
    * The PR's head moved (a push, delivered as `pull_request.synchronize`) and
-   * the run tested it: the checks go on the new head as statuses and `pr.yaml`
-   * follows. The PR must still be open at exactly the tested head.
+   * the run tested it: the checks go on the new head and `pr.yaml` follows.
+   * The PR must still be open at exactly the tested head.
    */
   async syncPr(input: OpenPrInput, existing: Pr): Promise<OpenPrResult> {
     if (existing.number === undefined) throw new CodeHostError("pr.yaml has no pull request number; nothing to synchronize on GitHub", false);
@@ -91,9 +128,7 @@ export class GitHubCodeHost implements CodeHost {
       const pull = await getPull(this.client, repo, existing.number);
       if (pull.state !== "open" || pull.merged) throw new CodeHostError(`PR #${existing.number} is ${pull.merged ? "merged" : "closed"}; the head cannot be synchronized`, false);
       if (pull.headSha !== input.headSha) throw new CodeHostError(`PR #${existing.number} is at ${pull.headSha.slice(0, 7)} but the run tested ${input.headSha.slice(0, 7)}`, true);
-      for (const check of input.checks) {
-        await publishStatus(this.client, repo, input.headSha, { context: `sdlc/${check.name}`, state: verdictState(check.verdict), description: check.summary, targetUrl: pull.url });
-      }
+      await this.publishChecks(repo, input.view, input.headSha, input.checks, pull.url);
       return await recordSyncedPr(input, { ...existing, reviewers: pull.reviewers });
     } catch (e) {
       throw hostError(e);
@@ -101,20 +136,24 @@ export class GitHubCodeHost implements CodeHost {
   }
 
   /**
-   * Review outcome on the PR: the severity tally as the `sdlc/findings`
-   * status on the reviewed head (failure while a high finding stands) and the
-   * findings verbatim as a `COMMENT` review — never an approval. Both land
-   * on a merged PR too: a review that ends after the merge is still reported.
+   * Review outcome on the PR: the severity tally as `sdlc/findings` on the
+   * reviewed head (failure while a high finding stands) and the findings
+   * verbatim as a `COMMENT` review — never an approval. Both land on a merged
+   * PR too: a review that ends after the merge is still reported.
    */
   async reportReview(root: string, pr: Pr, report: ReviewReport): Promise<void> {
     if (pr.number === undefined) throw new CodeHostError("pr.yaml has no pull request number; nothing to report on GitHub", false);
     try {
       const repo = await this.repoFor(root);
       const tally = `${report.tally.high} high · ${report.tally.medium} medium · ${report.tally.low} low`;
-      await publishStatus(this.client, repo, report.headSha, { context: "sdlc/findings", state: report.verdict === "pass" ? "success" : "failure", description: `review of ${report.headSha.slice(0, 7)}: ${tally}`, ...(pr.url !== undefined ? { targetUrl: pr.url } : {}) });
       const lines = report.findings.map((f) => `- **${f.severity}** ${f.title}${f.path ? ` — \`${f.path}\`` : ""}${f.detail ? `\n\n  ${f.detail.replace(/\n/g, "\n  ")}` : ""}`);
       const late = report.mergedAt !== undefined ? [`This pull request merged at ${report.mergedAt}, before the review ended; the findings are on record for the code owner.`, ""] : [];
       const body = [`sdlc review of ${report.headSha.slice(0, 7)} (session ${report.session}): ${tally}.`, "", ...late, ...(lines.length > 0 ? lines : ["No findings."]), "", "Findings inform; a code owner approves and merges."].join("\n");
+      if (this.auth === "token") {
+        await publishStatus(this.client, repo, report.headSha, { context: FINDINGS_CHECK, state: report.verdict === "pass" ? "success" : "failure", description: `review of ${report.headSha.slice(0, 7)}: ${tally}`, ...(pr.url !== undefined ? { targetUrl: pr.url } : {}) });
+      } else {
+        await publishCheckRun(this.client, repo, { name: FINDINGS_CHECK, headSha: report.headSha, status: "completed", conclusion: report.verdict === "pass" ? "success" : "failure", title: `review of ${report.headSha.slice(0, 7)}: ${tally}`, summary: `${report.findings.length} finding${report.findings.length === 1 ? "" : "s"} by session ${report.session}; findings inform, a code owner approves and merges`, text: body, ...(pr.url !== undefined ? { detailsUrl: pr.url } : {}) });
+      }
       await reviewPull(this.client, repo, pr.number, { event: "COMMENT", body });
     } catch (e) {
       throw hostError(e);
@@ -130,7 +169,8 @@ export class GitHubCodeHost implements CodeHost {
       await assertProtected(this.client, repo, pr.baseBranch);
       const merged = await mergePull(this.client, repo, pr.number, { sha: pr.headSha, method: "merge", title: message });
       if (!merged.merged) throw new CodeHostError(`GitHub did not merge #${pr.number}: ${merged.message}`, true);
-      await mergeRemoteBranch(root, pr.baseBranch, `${message.replace(/\s*\(gate 5\)$/, "")} — sync ${this.remote}/${pr.baseBranch} after #${pr.number}`, who, this.remote);
+      const committer = (await this.appIdentity()) ?? who;
+      await mergeRemoteBranch(root, pr.baseBranch, `${message.replace(/\s*\(gate 5\)$/, "")} — sync ${this.remote}/${pr.baseBranch} after #${pr.number}`, who, this.remote, committer);
       return merged.sha;
     } catch (e) {
       throw hostError(e);
@@ -138,7 +178,7 @@ export class GitHubCodeHost implements CodeHost {
   }
 }
 
-/** A GitHub host from the environment, or null when no token is set. */
+/** A GitHub host from the environment, or null when neither a token nor App credentials are set. */
 export function gitHubCodeHostFrom(env: Env, fetchImpl?: typeof fetch): GitHubCodeHost | null {
   const credentials = credentialsFrom(env);
   if (!credentials) return null;

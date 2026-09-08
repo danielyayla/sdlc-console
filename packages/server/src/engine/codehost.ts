@@ -5,13 +5,13 @@ export { SYSTEM_IDENTITY, systemEvent, LocalCodeHost, CodeHostError };
 export type { CodeHost };
 
 /**
- * The code host for `config.codeHost`. GitHub mode needs `GITHUB_TOKEN` in the
- * server's environment; without it the host refuses clearly instead of
+ * The code host for `config.codeHost`. GitHub mode needs `GITHUB_TOKEN` or the
+ * App variables in the server's environment; without them the host refuses clearly instead of
  * falling back to a local merge (that would be a way around branch protection).
  */
 export function codeHostFor(provider: "local" | "github", env: Env = process.env): CodeHost {
   if (provider === "local") return new LocalCodeHost();
   const host = gitHubCodeHostFrom(env);
-  if (!host) throw new CodeHostError("GitHub mode needs GITHUB_TOKEN (or GH_TOKEN) in the environment of sdlc serve / sdlc accept; set config.codeHost: local to work without a code host", false);
+  if (!host) throw new CodeHostError("GitHub mode needs GITHUB_TOKEN (or GH_TOKEN), or a GitHub App (SDLC_GITHUB_APP_ID, SDLC_GITHUB_APP_INSTALLATION_ID, SDLC_GITHUB_APP_PRIVATE_KEY[_FILE]), in the environment of sdlc serve / sdlc accept; set config.codeHost: local to work without a code host", false);
   return host;
 }

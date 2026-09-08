@@ -1,3 +1,4 @@
+import { createVerify } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
@@ -16,6 +17,16 @@ export interface FakePull {
   merged_by: string | null;
 }
 
+export interface FakeCheckRun {
+  id: number;
+  name: string;
+  head_sha: string;
+  status: string;
+  conclusion: string | null;
+  details_url: string | null;
+  output: Record<string, unknown>;
+}
+
 export interface FakeState {
   protected: boolean;
   pulls: FakePull[];
@@ -25,6 +36,22 @@ export interface FakeState {
   requests: { method: string; path: string; auth: string | null }[];
   /** GitHub computes mergeability after a push: while > 0, `GET /pulls/:n` reports `mergeable_state: unknown` (decrementing) and the merge answers 405. */
   mergeabilityPending: number;
+  /** App mode: check runs (`POST /check-runs`, `PATCH /check-runs/:id`), newest first per head as GitHub lists them. */
+  checkRuns: FakeCheckRun[];
+  /** App mode: installation tokens minted so far (`ghs_<n>`) with their expiry. */
+  installationTokens: { token: string; expiresAt: number }[];
+  /** App mode: JWTs that verified against the App's public key. */
+  jwtsAccepted: number;
+}
+
+/** A GitHub App installed on the fake: the JWT must verify against `publicKey` and carry `iss: id`. */
+export interface FakeApp {
+  id: number;
+  slug: string;
+  installationId: number;
+  publicKey: string;
+  /** Token lifetime (GitHub: 1 h); short in tests to prove the refresh. */
+  tokenTtlMs?: number;
 }
 
 export interface FakeGitHub {
@@ -34,7 +61,26 @@ export interface FakeGitHub {
   repo: string;
   bare: string;
   state: FakeState;
+  app: FakeApp | null;
   close(): Promise<void>;
+}
+
+/** Verify an RS256 JWT against the App's public key; the payload when it verifies and `iss` matches, else null. */
+function verifyAppJwt(jwt: string, app: FakeApp): { iss: string; iat: number; exp: number } | null {
+  const [head, body, sig] = jwt.split(".");
+  if (!head || !body || !sig) return null;
+  try {
+    const header = JSON.parse(Buffer.from(head, "base64url").toString("utf8")) as { alg?: string };
+    if (header.alg !== "RS256") return null;
+    const ok = createVerify("RSA-SHA256").update(`${head}.${body}`).verify(app.publicKey, Buffer.from(sig, "base64url"));
+    if (!ok) return null;
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as { iss: string; iat: number; exp: number };
+    if (String(payload.iss) !== String(app.id)) return null;
+    if (payload.exp * 1000 < Date.now()) return null;
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -43,11 +89,12 @@ export interface FakeGitHub {
  * branch resource with its `protected` flag. Enough to prove the adapter
  * without a network.
  */
-export async function startFakeGitHub(opts: { bare: string; owner?: string; repo?: string; token?: string; protected?: boolean }): Promise<FakeGitHub> {
+export async function startFakeGitHub(opts: { bare: string; owner?: string; repo?: string; token?: string; protected?: boolean; app?: FakeApp }): Promise<FakeGitHub> {
   const owner = opts.owner ?? "acme";
   const repo = opts.repo ?? "widgets";
   const token = opts.token ?? "ghp_test";
-  const state: FakeState = { protected: opts.protected ?? true, pulls: [], statuses: [], reviews: [], comments: [], requests: [], mergeabilityPending: 0 };
+  const app = opts.app ?? null;
+  const state: FakeState = { protected: opts.protected ?? true, pulls: [], statuses: [], reviews: [], comments: [], requests: [], mergeabilityPending: 0, checkRuns: [], installationTokens: [], jwtsAccepted: 0 };
   const prefix = `/repos/${owner}/${repo}`;
   // when the fake recorded a status or review, served as created_at/updated_at/submitted_at unless the body carries its own
   const recordedAt = new WeakMap<object, string>();
@@ -90,12 +137,60 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
     const [path = "/", query = ""] = (req.url ?? "/").split("?");
     const auth = typeof req.headers.authorization === "string" ? req.headers.authorization : null;
     state.requests.push({ method, path, auth });
-    if (auth !== `Bearer ${token}`) return send(res, 401, { message: "Bad credentials" });
+    const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
+    // who is calling: the PAT, an unexpired installation token, or the App's own JWT
+    const asApp = bearer && app && bearer.includes(".") ? verifyAppJwt(bearer, app) : null;
+    const asInstallation = bearer ? state.installationTokens.find((t) => t.token === bearer && t.expiresAt > Date.now()) : undefined;
+    const asToken = bearer === token;
+    const body = method === "GET" ? {} : await readBody(req);
+    let m: RegExpExecArray | null;
+
+    // App endpoints (JWT only)
+    if (path === "/app" || path.startsWith("/app/")) {
+      if (!asApp || !app) return send(res, 401, { message: "A JSON web token could not be decoded" });
+      state.jwtsAccepted++;
+      if (method === "GET" && path === "/app") return send(res, 200, { id: app.id, slug: app.slug, name: app.slug, owner: { login: owner } });
+      if (method === "POST" && (m = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(path))) {
+        if (Number(m[1]) !== app.installationId) return send(res, 404, { message: "Not Found" });
+        const minted = { token: `ghs_${state.installationTokens.length + 1}`, expiresAt: Date.now() + (app.tokenTtlMs ?? 3_600_000) };
+        state.installationTokens.push(minted);
+        return send(res, 201, { token: minted.token, expires_at: new Date(minted.expiresAt).toISOString(), permissions: { checks: "write", contents: "write", pull_requests: "write" } });
+      }
+      return send(res, 404, { message: `no route ${method} ${path}` });
+    }
+    if (!asToken && !asInstallation) return send(res, 401, { message: "Bad credentials" });
+    if (method === "GET" && (m = /^\/users\/([^/]+)$/.exec(path))) {
+      const login = decodeURIComponent(m[1] ?? "");
+      if (app && login === `${app.slug}[bot]`) return send(res, 200, { login, id: 90_000 + app.id, type: "Bot" });
+      return send(res, 200, { login, id: 1, type: "User" });
+    }
     if (!path.startsWith(prefix)) return send(res, 404, { message: "Not Found" });
     const rest = path.slice(prefix.length);
-    const body = method === "GET" ? {} : await readBody(req);
+    const actor = asInstallation && app ? `${app.slug}[bot]` : "token-user";
 
-    let m: RegExpExecArray | null;
+    // check runs need the App: a PAT is refused the way GitHub refuses it
+    if (rest === "/check-runs" && method === "POST") {
+      if (!asInstallation) return send(res, 403, { message: "Resource not accessible by personal access token" });
+      const run: FakeCheckRun = { id: state.checkRuns.length + 1, name: String(body["name"]), head_sha: String(body["head_sha"]), status: String(body["status"] ?? "queued"), conclusion: typeof body["conclusion"] === "string" ? body["conclusion"] : null, details_url: typeof body["details_url"] === "string" ? body["details_url"] : null, output: (body["output"] as Record<string, unknown>) ?? {} };
+      state.checkRuns.unshift(run);
+      return send(res, 201, { ...run, html_url: `https://github.example/${owner}/${repo}/runs/${run.id}` });
+    }
+    if ((m = /^\/check-runs\/(\d+)$/.exec(rest)) && method === "PATCH") {
+      if (!asInstallation) return send(res, 403, { message: "Resource not accessible by personal access token" });
+      const run = state.checkRuns.find((r) => r.id === Number(m?.[1]));
+      if (!run) return send(res, 404, { message: "Not Found" });
+      if (typeof body["status"] === "string") run.status = body["status"];
+      if (typeof body["conclusion"] === "string") run.conclusion = body["conclusion"];
+      if (typeof body["details_url"] === "string") run.details_url = body["details_url"];
+      if (body["output"] && typeof body["output"] === "object") run.output = { ...run.output, ...(body["output"] as Record<string, unknown>) };
+      return send(res, 200, { ...run, html_url: `https://github.example/${owner}/${repo}/runs/${run.id}` });
+    }
+    if ((m = /^\/commits\/([0-9a-f]{40})\/check-runs$/.exec(rest)) && method === "GET") {
+      const q = new URLSearchParams(query);
+      const name = q.get("check_name");
+      const runs = state.checkRuns.filter((r) => r.head_sha === m?.[1] && (!name || r.name === name));
+      return send(res, 200, { total_count: runs.length, check_runs: runs.map((r) => ({ ...r, html_url: `https://github.example/${owner}/${repo}/runs/${r.id}` })) });
+    }
     if (method === "GET" && (m = /^\/branches\/([^/]+)$/.exec(rest))) {
       const name = decodeURIComponent(m[1] ?? "");
       const sha = await headOf(name);
@@ -145,7 +240,7 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
         pull.merged = true;
         pull.state = "closed";
         pull.merge_commit_sha = sha;
-        pull.merged_by = typeof req.headers["x-fake-login"] === "string" ? req.headers["x-fake-login"] : "token-user";
+        pull.merged_by = typeof req.headers["x-fake-login"] === "string" ? req.headers["x-fake-login"] : actor;
         return send(res, 200, { sha, merged: true, message: "Pull Request successfully merged" });
       } catch (e) {
         return send(res, 405, { message: `merge failed: ${(e as Error).message}` });
@@ -195,6 +290,7 @@ export async function startFakeGitHub(opts: { bare: string; owner?: string; repo
     repo,
     bare: opts.bare,
     state,
+    app,
     close: () => new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve()))),
   };
 }

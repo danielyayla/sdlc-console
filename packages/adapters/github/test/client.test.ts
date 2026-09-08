@@ -44,8 +44,8 @@ describe("remote parsing and credentials", () => {
 
   it("takes GITHUB_TOKEN (or GH_TOKEN), GITHUB_API_URL and GITHUB_REPOSITORY from the environment", () => {
     expect(credentialsFrom({})).toBeNull();
-    expect(credentialsFrom({ GH_TOKEN: "t" })).toEqual({ token: "t", apiUrl: "https://api.github.com", repository: null });
-    expect(credentialsFrom({ GITHUB_TOKEN: "t", GITHUB_API_URL: "http://127.0.0.1:1/", GITHUB_REPOSITORY: "acme/widgets" })).toEqual({ token: "t", apiUrl: "http://127.0.0.1:1/", repository: { owner: "acme", repo: "widgets" } });
+    expect(credentialsFrom({ GH_TOKEN: "t" })).toEqual({ token: "t", app: null, apiUrl: "https://api.github.com", repository: null });
+    expect(credentialsFrom({ GITHUB_TOKEN: "t", GITHUB_API_URL: "http://127.0.0.1:1/", GITHUB_REPOSITORY: "acme/widgets" })).toEqual({ token: "t", app: null, apiUrl: "http://127.0.0.1:1/", repository: { owner: "acme", repo: "widgets" } });
   });
 });
 
