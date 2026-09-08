@@ -42,15 +42,18 @@ export function findingsVerdict(tally: ReviewTally): "pass" | "fail" {
  * `review.finding` event per finding with the agent as actor, the severity
  * tally, a `findings` check and the reviewed head on `pr.yaml`. Committed by
  * the system on the default branch so the PR head stays the tested head.
+ * A PR merged before the review ended is still recorded (`review.afterMerge`):
+ * findings inform, so the merge does not discard them.
  */
 export function recordReview(repo: Repo, view: ChangeView, outcome: ReviewOutcome, ctx: Pick<TransitionContext, "now" | "newId">): TransitionResult {
   const files = repo.changes.get(view.id);
   if (!files?.change) return refuse("change.missing", `${view.id} not loaded`);
   if (!files.pr) return refuse("review.no-pr", `${view.id} has no pr.yaml; a review needs a pull request`);
-  if (files.pr.mergedAt !== undefined) return refuse("review.merged", `${view.id}'s PR is already merged`);
   if (files.pr.headSha !== outcome.headSha) return refuse("review.head-mismatch", `the review looked at ${outcome.headSha.slice(0, 7)} but the PR head is ${files.pr.headSha.slice(0, 7)}; run the per-change run again`);
   if (files.pr.review?.headSha === outcome.headSha) return refuse("review.recorded", `head ${outcome.headSha.slice(0, 7)} was already reviewed by session ${files.pr.review.session}`);
 
+  // findings inform, they never block: a code owner may merge before the review ends, and the review still goes on record
+  const afterMerge = files.pr.mergedAt !== undefined;
   const tally = tallyFindings(outcome.findings);
   const verdict = findingsVerdict(tally);
   const ev = new EventBuilder({ ...ctx, actor: { id: SYSTEM_ACTOR.id } } as TransitionContext, files, view.id);
@@ -60,14 +63,14 @@ export function recordReview(repo: Repo, view: ChangeView, outcome: ReviewOutcom
     ...files.pr,
     findings: tally,
     checks: [...files.pr.checks.filter((c) => c.name !== "findings"), { name: "findings", verdict }],
-    review: { session: outcome.session, headSha: outcome.headSha, at: ctx.now },
+    review: { session: outcome.session, headSha: outcome.headSha, at: ctx.now, ...(afterMerge ? { afterMerge: true as const } : {}) },
   };
   const first = events[0];
   const plan: WritePlan = {
     changeId: view.id,
     files: [{ path: `${files.dir}/pr.yaml`, content: stringifyYaml(pr) }],
     events: events.map((e) => ev.write(e)),
-    commitMessage: `sdlc(${view.id}): review of ${outcome.headSha.slice(0, 7)} · ${outcome.findings.length} finding${outcome.findings.length === 1 ? "" : "s"} (${tally.high} high, ${tally.medium} medium, ${tally.low} low)`,
+    commitMessage: `sdlc(${view.id}): review of ${outcome.headSha.slice(0, 7)} · ${outcome.findings.length} finding${outcome.findings.length === 1 ? "" : "s"} (${tally.high} high, ${tally.medium} medium, ${tally.low} low)${afterMerge ? " · after the merge" : ""}`,
     trailers: { ...(first ? { "SDLC-Event": first.id } : {}), "SDLC-Actor": `system:${SYSTEM_ACTOR.id}` },
     actor: { type: "system", id: SYSTEM_ACTOR.id },
   };

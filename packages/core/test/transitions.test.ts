@@ -18,6 +18,7 @@ import {
   nextChangeId,
   patchFinding,
   proposeTasks,
+  recordReview,
   sendBack,
   withFiles as withFilesT,
   type TransitionContext,
@@ -381,5 +382,26 @@ describe("dismissProposal", () => {
     const after = loadRepo(applyWritePlan(tree, plan));
     expect(after.proposals[0]).toMatchObject({ status: "dismissed", dismissal: { by: "eng@example.com", reason: "already covered by lint" } });
     expect(dismissProposal(after, "PRP-0007", "again", ENG_CTX()).ok).toBe(false);
+  });
+});
+
+describe("recordReview", () => {
+  it("a review that ends after the merge is still recorded and marked so — findings inform, the merge does not discard them", () => {
+    const events = [...acceptedThrough([1, 2, 3]), ev("pr.merged", SYSTEM, { mergeSha: SHA })];
+    const tree = withChange(baseTree(), { id: "CHG-0001", intent: true, spec: true, plan: { files: ["src/a.ts"], accepted: true }, runs: ["green"], pr: { merged: true }, events });
+    const { repo, view } = viewOf(tree, "CHG-0001");
+    expect(view.stage).toBe(6);
+    const outcome = { session: "sess-r1", agentId: "claude-code", headSha: SHA, findings: [{ severity: "low" as const, title: "renderFooter with no argument throws" }] };
+    const plan = expectOk(recordReview(repo, view, outcome, ctxFor("x")));
+    expect(plan.files[0]?.content).toContain("afterMerge: true");
+    expect(plan.commitMessage).toContain("1 finding (0 high, 0 medium, 1 low) · after the merge");
+    expect(plan.events.map((e) => e.event.event)).toEqual(["review.finding"]);
+    const next = viewOf(applyWritePlan(tree, plan), "CHG-0001").view;
+    expect(next.stage).toBe(6);
+    expect(next.pr?.review).toEqual({ session: "sess-r1", headSha: SHA, at: "2026-09-04T09:00:00Z", afterMerge: true });
+    expect(next.pr?.findings).toEqual({ high: 0, medium: 0, low: 1 });
+    expect(next.findings.map((f) => f.title)).toEqual(["renderFooter with no argument throws"]);
+    // the same head is not reviewed twice, merged or not
+    expect(recordReview(loadRepo(applyWritePlan(tree, plan)), next, outcome, ctxFor("x")).ok).toBe(false);
   });
 });

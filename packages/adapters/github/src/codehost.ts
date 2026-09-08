@@ -103,7 +103,8 @@ export class GitHubCodeHost implements CodeHost {
   /**
    * Review outcome on the PR: the severity tally as the `sdlc/findings`
    * status on the reviewed head (failure while a high finding stands) and the
-   * findings verbatim as a `COMMENT` review — never an approval.
+   * findings verbatim as a `COMMENT` review — never an approval. Both land
+   * on a merged PR too: a review that ends after the merge is still reported.
    */
   async reportReview(root: string, pr: Pr, report: ReviewReport): Promise<void> {
     if (pr.number === undefined) throw new CodeHostError("pr.yaml has no pull request number; nothing to report on GitHub", false);
@@ -112,7 +113,8 @@ export class GitHubCodeHost implements CodeHost {
       const tally = `${report.tally.high} high · ${report.tally.medium} medium · ${report.tally.low} low`;
       await publishStatus(this.client, repo, report.headSha, { context: "sdlc/findings", state: report.verdict === "pass" ? "success" : "failure", description: `review of ${report.headSha.slice(0, 7)}: ${tally}`, ...(pr.url !== undefined ? { targetUrl: pr.url } : {}) });
       const lines = report.findings.map((f) => `- **${f.severity}** ${f.title}${f.path ? ` — \`${f.path}\`` : ""}${f.detail ? `\n\n  ${f.detail.replace(/\n/g, "\n  ")}` : ""}`);
-      const body = [`sdlc review of ${report.headSha.slice(0, 7)} (session ${report.session}): ${tally}.`, "", ...(lines.length > 0 ? lines : ["No findings."]), "", "Findings inform; a code owner approves and merges."].join("\n");
+      const late = report.mergedAt !== undefined ? [`This pull request merged at ${report.mergedAt}, before the review ended; the findings are on record for the code owner.`, ""] : [];
+      const body = [`sdlc review of ${report.headSha.slice(0, 7)} (session ${report.session}): ${tally}.`, "", ...late, ...(lines.length > 0 ? lines : ["No findings."]), "", "Findings inform; a code owner approves and merges."].join("\n");
       await reviewPull(this.client, repo, pr.number, { event: "COMMENT", body });
     } catch (e) {
       throw hostError(e);

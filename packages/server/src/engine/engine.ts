@@ -518,7 +518,7 @@ export class Engine {
     await this.runForSession(session);
   }
 
-  /** A review session finished: mirror its findings into the change and onto the PR (once per session). */
+  /** A review session finished: mirror its findings into the change and onto the PR (once per session) — also when the PR merged while it ran. */
   async mirrorForSession(session: StoredSession): Promise<Job | null> {
     await this.opts.store.refresh(true);
     const repo = this.opts.store.currentRepo;
@@ -526,7 +526,7 @@ export class Engine {
     if (!repo || !files) return null;
     const view = deriveChange(repo, files);
     const key = `${session.changeId}:${view.cycle}:5:review-mirror:${session.id}`;
-    const job = this.opts.jobs.claim({ key, kind: "review-mirror", changeId: session.changeId, cycle: view.cycle, stage: 5 }, this.now());
+    const job = this.opts.jobs.claim({ key, kind: "review-mirror", changeId: session.changeId, cycle: view.cycle, stage: view.stage }, this.now());
     if (!job) return null;
     try {
       const outcome = await mirrorReview({ root: this.opts.store.root, view, session, ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}) }, repo);

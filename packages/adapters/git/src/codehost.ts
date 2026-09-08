@@ -35,6 +35,8 @@ export interface ReviewReport {
   findings: { severity: "high" | "medium" | "low"; title: string; path?: string; detail?: string }[];
   tally: { high: number; medium: number; low: number };
   verdict: "pass" | "fail";
+  /** Set when the PR merged before the review ended; the report is for the record. */
+  mergedAt?: string;
 }
 
 export interface OpenPrResult {

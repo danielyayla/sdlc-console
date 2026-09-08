@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, initRepo, readTree } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo } from "@sdlc/core";
-import { PO, writeSeed } from "@sdlc/fixtures";
+import { PO, realizeSeedRepro, writeSeed } from "@sdlc/fixtures";
 import { appendFinding } from "@sdlc/mcp";
-import { ActionError, Engine, JobStore, SessionRegistry, StateStore, launchSession, type Exec } from "../src/index.js";
+import { ActionError, Engine, JobStore, SessionRegistry, StateStore, acceptGate, launchSession, type Exec } from "../src/index.js";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.sh", import.meta.url));
 const ENG = { id: "eng@veri.example", name: "Eli Ng" };
@@ -47,11 +47,13 @@ function harness(dir: string, autoLaunch = false) {
 }
 
 /** CHG-0018 to stage 5 in local mode: a build session's commit, then the per-change run opens the local PR. */
-async function toStage5(dir: string, autoLaunch = false) {
+async function toStage5(dir: string, autoLaunch = false, repro = false) {
   const h = harness(dir, autoLaunch);
   await h.store.refresh();
   const launched = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE });
   const wt = launched.session.worktreePath;
+  // 2.7: gate 5 needs a real repro commit before the fix
+  if (repro) await realizeSeedRepro(dir, wt);
   mkdirSync(join(wt, "src/export"), { recursive: true });
   writeFileSync(join(wt, "src/export/csv.ts"), "export const fixed = true;\n");
   await git(wt, ["add", "-A"]);
@@ -164,6 +166,24 @@ describe("review findings mirror (2.3, local mode)", () => {
     const view = await viewOf(dir, "CHG-0018");
     expect(view.pr?.review).toMatchObject({ session: review.session.id, headSha: s5.head });
     expect(view.findings.map((f) => [f.severity, f.title])).toEqual([["medium", "header row dropped"]]);
+  }, 30_000);
+
+  it("a review that ends after the code owner merged is still recorded, marked as ending after the merge", async () => {
+    const dir = await seeded();
+    const s5 = await toStage5(dir, false, true);
+    const review = await launchSession({ changeId: "CHG-0018", kind: "review", mode: "SUPERVISED" }, { root: dir, registry: s5.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE });
+    await acceptGate(s5.store, "CHG-0018", 5);
+    expect((await viewOf(dir, "CHG-0018")).stage).toBe(6);
+    appendFinding(s5.worktree, review.session.id, { n: 1, ts: "2026-09-04T09:05:00Z", severity: "low", title: "late but kept" });
+    s5.registry.patch(review.session.id, { status: "done" });
+    const job = await s5.engine.mirrorForSession({ ...review.session, status: "done" });
+    expect(job?.state).toBe("done");
+    expect(job?.note).toBe(`review of ${s5.head.slice(0, 7)}: 0 high · 0 medium · 1 low`);
+    const view = await viewOf(dir, "CHG-0018");
+    expect(view.stage).toBe(6);
+    expect(view.pr?.review).toMatchObject({ session: review.session.id, headSha: s5.head, afterMerge: true });
+    expect(view.findings.map((f) => [f.severity, f.title])).toEqual([["low", "late but kept"]]);
+    expect((await git(dir, ["log", "-1", "--format=%s"])).trim()).toContain("after the merge");
   }, 30_000);
 
   it("with autoLaunch the engine starts one headless review per PR head and mirrors it when the harness ends; a later tick does not launch again", async () => {

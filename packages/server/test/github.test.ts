@@ -519,6 +519,39 @@ describe("review findings mirror + check runs in GitHub mode (2.3)", () => {
     expect(r.toast).toContain("Maintain");
     expect((await viewOf(dir, "CHG-0018")).stage).toBe(6);
   }, 40_000);
+
+  it("a code owner who merges before the review ends does not lose it: the review is recorded after the merge and its findings still reach the merged PR", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const h = await buildAndRun(dir, env);
+    expect(h.job?.state).toBe("done");
+    const pushed = (await git(gh.bare, ["rev-parse", "refs/heads/CHG-0018/export-fix"])).trim();
+    const review = await launchSession({ changeId: "CHG-0018", kind: "review", mode: "SUPERVISED" }, { root: dir, registry: h.registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE_CLAUDE });
+    // the engineer merges through the API while the review session is still running
+    const r = await acceptGate(h.store, "CHG-0018", 5, env);
+    expect(r.toast).toContain("Maintain");
+    expect((await viewOf(dir, "CHG-0018")).stage).toBe(6);
+    expect(gh.state.pulls[0]?.merged).toBe(true);
+
+    appendFinding(h.worktree, review.session.id, { n: 1, ts: "2026-09-04T09:05:00Z", severity: "low", title: "renderFooter with no argument throws", path: "src/site.js" });
+    h.registry.patch(review.session.id, { status: "done" });
+    const job = await h.engine.mirrorForSession({ ...review.session, status: "done" });
+    expect(job?.state).toBe("done");
+    expect(job?.stage).toBe(6);
+    const view = await viewOf(dir, "CHG-0018");
+    expect(view.stage).toBe(6);
+    expect(view.pr?.review).toEqual({ session: review.session.id, headSha: pushed, at: "2026-09-04T09:00:00Z", afterMerge: true });
+    expect(view.pr?.findings).toEqual({ high: 0, medium: 0, low: 1 });
+    expect(view.findings.map((f) => [f.severity, f.title])).toEqual([["low", "renderFooter with no argument throws"]]);
+    expect((await git(dir, ["log", "-1", "--format=%s", "main"])).trim()).toContain("after the merge");
+    // on GitHub: the tally as a status on the reviewed head and the findings as a COMMENT review on the merged PR, which says the merge came first
+    expect(gh.state.statuses.at(-1)).toMatchObject({ sha: pushed, body: { state: "success", context: "sdlc/findings", description: `review of ${pushed.slice(0, 7)}: 0 high · 0 medium · 1 low` } });
+    expect(gh.state.reviews).toHaveLength(1);
+    expect(gh.state.reviews[0]?.number).toBe(1);
+    expect(gh.state.reviews[0]?.body["event"]).toBe("COMMENT");
+    const body = String(gh.state.reviews[0]?.body["body"]);
+    expect(body).toMatch(/This pull request merged at \S+, before the review ended/);
+    expect(body).toContain("- **low** renderFooter with no argument throws — `src/site.js`");
+  }, 40_000);
 });
 
 async function gitRawShow(dir: string, spec: string): Promise<string | null> {

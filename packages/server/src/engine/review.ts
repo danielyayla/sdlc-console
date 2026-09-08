@@ -59,7 +59,7 @@ export async function mirrorReview(input: MirrorInput, repo: Repo): Promise<Mirr
   const pr = repo.changes.get(view.id)?.pr;
   if (pr) {
     const host = input.codeHost ?? codeHostFor(repo.config.codeHost, input.env);
-    await host.reportReview(input.root, pr, { headSha: reviewed, session: session.id, findings, tally, verdict });
+    await host.reportReview(input.root, pr, { headSha: reviewed, session: session.id, findings, tally, verdict, ...(pr.mergedAt !== undefined ? { mergedAt: pr.mergedAt } : {}) });
   }
   return { commit, headSha: reviewed, count: findings.length, tally, verdict };
 }
