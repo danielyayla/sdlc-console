@@ -33,17 +33,37 @@ export interface StoreOptions {
  * transition, validate the write-plan, commit it through the git adapter and
  * refresh. Nothing lifecycle-related is kept in memory beyond the snapshot.
  */
-export class StateStore {
-  private tree: Tree | null = null;
-  private repo: Repo | null = null;
-  private snapshot: Snapshot | null = null;
-  private branches: ArtifactBranch[] = [];
-  private revision = 0;
-  private lastHead: string | null = null;
-  private readonly listeners = new Set<(s: Snapshot) => void>();
-  private refreshing: Promise<Snapshot> | null = null;
+/** The state every view of a store shares: one tree, one snapshot, one revision counter, one listener set. */
+interface Shared {
+  tree: Tree | null;
+  repo: Repo | null;
+  snapshot: Snapshot | null;
+  branches: ArtifactBranch[];
+  revision: number;
+  lastHead: string | null;
+  listeners: Set<(s: Snapshot) => void>;
+  refreshing: Promise<Snapshot> | null;
+}
 
-  constructor(private readonly opts: StoreOptions) {}
+export class StateStore {
+  private readonly s: Shared;
+
+  constructor(
+    private readonly opts: StoreOptions,
+    shared?: Shared,
+  ) {
+    this.s = shared ?? { tree: null, repo: null, snapshot: null, branches: [], revision: 0, lastHead: null, listeners: new Set(), refreshing: null };
+  }
+
+  /**
+   * The same store acting as someone else (hosted mode, 3.1): one tree and
+   * snapshot for everyone, decisions committed under the person who made
+   * them. The server's own identity keeps the engine's commits.
+   */
+  as(who: GitIdentity): StateStore {
+    if (who.id === this.opts.identity.id && who.name === this.opts.identity.name) return this;
+    return new StateStore({ ...this.opts, identity: who }, this.s);
+  }
 
   get root(): string {
     return this.opts.root;
@@ -54,16 +74,20 @@ export class StateStore {
   }
 
   get current(): Snapshot | null {
-    return this.snapshot;
+    return this.s.snapshot;
   }
 
   get currentRepo(): Repo | null {
-    return this.repo;
+    return this.s.repo;
+  }
+
+  private get repo(): Repo | null {
+    return this.s.repo;
   }
 
   subscribe(fn: (s: Snapshot) => void): () => void {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    this.s.listeners.add(fn);
+    return () => this.s.listeners.delete(fn);
   }
 
   identity(): Identity {
@@ -73,36 +97,35 @@ export class StateStore {
 
   /** Re-read HEAD and re-derive. Coalesces concurrent calls. */
   refresh(force = false): Promise<Snapshot> {
-    if (this.refreshing) return this.refreshing;
-    this.refreshing = (async () => {
+    const s = this.s;
+    if (s.refreshing) return s.refreshing;
+    s.refreshing = (async () => {
       try {
         const head = await headSha(this.opts.root, this.opts.ref ?? "HEAD");
         // unmerged artifact branches (drafts in review) are part of what the console shows
         const read = await readTreeWithBranches(this.opts.root, this.opts.ref ?? "HEAD");
         const key = `${head}|${read.branches.map((b) => `${b.branch}@${b.head}`).join(",")}`;
-        if (!force && key === this.lastHead && this.snapshot) return this.snapshot;
-        this.tree = read.tree;
-        this.branches = read.branches;
-        this.repo = loadRepo(this.tree);
-        this.lastHead = key;
-        this.revision += 1;
-        this.snapshot = { ...buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date(), this.opts.facts?.(this.repo)), branches: this.branches };
-        for (const fn of this.listeners) fn(this.snapshot);
-        return this.snapshot;
+        if (!force && key === s.lastHead && s.snapshot) return s.snapshot;
+        s.tree = read.tree;
+        s.branches = read.branches;
+        s.repo = loadRepo(s.tree);
+        s.lastHead = key;
+        return this.rebuild();
       } finally {
-        this.refreshing = null;
+        s.refreshing = null;
       }
     })();
-    return this.refreshing;
+    return s.refreshing;
   }
 
-  /** Something outside the tree changed (sessions): rebuild the snapshot without re-reading git. */
+  /** Something outside the tree changed (sessions): rebuild the snapshot without re-reading git. The snapshot's identity is the server's; `as(who).identity()` is a viewer's. */
   rebuild(): Snapshot {
-    if (!this.repo) throw new Error("store not loaded");
-    this.revision += 1;
-    this.snapshot = { ...buildSnapshot(this.repo, this.identity(), this.opts.sessions?.(this.repo) ?? [], this.revision, this.opts.now?.() ?? new Date(), this.opts.facts?.(this.repo)), branches: this.branches };
-    for (const fn of this.listeners) fn(this.snapshot);
-    return this.snapshot;
+    const s = this.s;
+    if (!s.repo) throw new Error("store not loaded");
+    s.revision += 1;
+    s.snapshot = { ...buildSnapshot(s.repo, this.identity(), this.opts.sessions?.(s.repo) ?? [], s.revision, this.opts.now?.() ?? new Date(), this.opts.facts?.(s.repo)), branches: s.branches };
+    for (const fn of s.listeners) fn(s.snapshot);
+    return s.snapshot;
   }
 
   context(extra: Partial<TransitionContext> = {}): TransitionContext {

@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { gitRaw } from "@sdlc/adapter-git";
 import { computeMetrics, deriveAll, parseWindow, readFile, type ArtifactIndex, type Tree } from "@sdlc/core";
+import type { Snapshot } from "./snapshot.js";
 import { readRounds } from "@sdlc/mcp";
 import { parseFrontMatter, type GateNumber } from "@sdlc/schemas";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -33,6 +34,8 @@ import { clearRepro, downgradeSession, launchSession, markReproRejected, reproDr
 import { acceptProposalAction } from "./proposals.js";
 import { linkRecordAction, retryWritebackAction, type WritebackDeps } from "./records.js";
 import { ActionError, type StateStore } from "./store.js";
+import type { Authenticator } from "./auth/index.js";
+import { parseCookies, SESSION_COOKIE } from "./auth/index.js";
 
 type Body = Record<string, unknown>;
 
@@ -162,6 +165,8 @@ export interface AppOptions {
   deliveries?: DeliveryLog;
   /** Environment for the code host (`GITHUB_TOKEN`) and the webhook receiver (`GITHUB_WEBHOOK_SECRET`). */
   env?: Record<string, string | undefined>;
+  /** Hosted mode (3.1): sign-in through the identity provider; every request and socket acts as the signed-in identity. */
+  auth?: Authenticator;
 }
 
 export interface HttpApp {
@@ -171,7 +176,12 @@ export interface HttpApp {
 }
 
 /** HTTP JSON + WebSocket snapshot transport (blueprint §9.2). */
-export function createApp(store: StateStore, options: AppOptions = {}): HttpApp {
+export function createApp(baseStore: StateStore, options: AppOptions = {}): HttpApp {
+  const auth = options.auth ?? null;
+  /** Paths any caller may reach without a session: the webhook receiver has its own signature, health is for probes. */
+  const open = (parts: string[]) => parts[1] === "webhooks" || parts[1] === "health";
+  /** A viewer's own snapshot: the shared one with their identity (and so their held roles) in it. */
+  const forViewer = (snap: Snapshot, store: StateStore): Snapshot => (store === baseStore ? snap : { ...snap, identity: store.identity() });
   const server = createServer((req, res) => {
     void route(req, res).catch((e: unknown) => {
       if (e instanceof ActionError) {
@@ -183,35 +193,58 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
   });
 
   const wss = new WebSocketServer({ noServer: true });
-  const clients = new Set<WebSocket>();
+  const clients = new Map<WebSocket, StateStore>();
   server.on("upgrade", (req, socket, head) => {
     if ((req.url ?? "").split("?")[0] !== "/api/events") {
       socket.destroy();
       return;
     }
+    const who = auth ? auth.identityOf(req) : null;
     wss.handleUpgrade(req, socket, head, (ws) => {
-      clients.add(ws);
+      if (auth && !who) {
+        // the client sees 4401 and goes to /auth/login
+        ws.close(4401, "sign in");
+        return;
+      }
+      const store = who ? baseStore.as(who) : baseStore;
+      clients.set(ws, store);
       ws.on("close", () => clients.delete(ws));
-      const snap = store.current;
-      if (snap) ws.send(JSON.stringify({ type: "snapshot", snapshot: snap }));
+      const snap = baseStore.current;
+      if (snap) ws.send(JSON.stringify({ type: "snapshot", snapshot: forViewer(snap, store) }));
     });
   });
-  const unsubscribe = store.subscribe((snapshot) => {
-    const msg = JSON.stringify({ type: "snapshot", snapshot });
-    for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(msg);
+  const unsubscribe = baseStore.subscribe((snapshot) => {
+    const shared = JSON.stringify({ type: "snapshot", snapshot });
+    for (const [ws, store] of clients) if (ws.readyState === ws.OPEN) ws.send(store === baseStore ? shared : JSON.stringify({ type: "snapshot", snapshot: forViewer(snapshot, store) }));
   });
 
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://localhost");
     const parts = url.pathname.split("/").filter(Boolean);
     const method = req.method ?? "GET";
+    if (auth && parts[0] === "auth" && (await auth.handle(req, res, url))) return;
     if (parts[0] !== "api") {
       if (method === "GET" && options.webDir && serveStatic(options.webDir, url, res)) return;
       throw new ActionError(404, "not found");
     }
+    // hosted mode: who is asking decides what the snapshot says and who signs the commit
+    let store = baseStore;
+    if (auth && !open(parts)) {
+      const who = auth.identityOf(req);
+      if (!who) {
+        json(res, 401, { error: "sign in to use the console", login: "/auth/login", signedIn: parseCookies(req.headers.cookie)[SESSION_COOKIE] !== undefined ? "expired" : false });
+        return;
+      }
+      store = baseStore.as(who);
+    }
 
+    if (method === "GET" && parts[1] === "me" && parts.length === 2) {
+      await store.refresh();
+      json(res, 200, { identity: store.identity(), auth: auth ? { provider: auth.provider.provider, issuer: auth.provider.issuer, logout: "/auth/logout" } : { provider: "local" } });
+      return;
+    }
     if (method === "GET" && parts[1] === "state" && parts.length === 2) {
-      json(res, 200, await store.refresh());
+      json(res, 200, forViewer(await store.refresh(), store));
       return;
     }
     if (method === "GET" && parts[1] === "jobs") {
@@ -509,7 +542,7 @@ export function createApp(store: StateStore, options: AppOptions = {}): HttpApp 
     close: () =>
       new Promise<void>((resolve) => {
         unsubscribe();
-        for (const ws of clients) ws.close();
+        for (const ws of clients.keys()) ws.close();
         wss.close();
         server.close(() => resolve());
       }),

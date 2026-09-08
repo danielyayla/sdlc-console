@@ -53,6 +53,9 @@ a { color: inherit; }
 .badge { font-family: var(--font-mono); font-size: 10px; background: var(--amber); color: var(--accent-text); border-radius: 999px; padding: 0 6px; line-height: 16px; }
 .spacer { flex: 1; }
 .switcher { display: flex; align-items: center; gap: 8px; }
+.whoami { display: flex; align-items: center; gap: 8px; margin-right: 16px; }
+.whoami .who-name { font-weight: 600; }
+.whoami .signout { color: var(--muted, #667); font-size: 12px; text-decoration: underline; }
 .segment { display: inline-flex; border: 1px solid var(--border-default); border-radius: var(--radius-control); overflow: hidden; }
 .segment button { background: transparent; border: 0; color: var(--text-muted); padding: 4px 10px; cursor: pointer; }
 .segment button.active { background: var(--bg-hover); color: var(--text-primary); }

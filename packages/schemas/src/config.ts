@@ -8,6 +8,23 @@ export const identity = z.strictObject({
   skillsOwned: z.array(nonEmpty).optional(),
   /** Code-host login, so a merge performed on GitHub can be attributed to this identity. */
   github: nonEmpty.optional(),
+  /** OIDC subject (`sub`) in hosted mode; without it the provider's `auth.claim` (email by default) must equal `id`. */
+  subject: nonEmpty.optional(),
+});
+
+/** Hosted mode (3.1): who may open the console is decided by the identity provider, what they may do by `identities`. */
+export const auth = z.strictObject({
+  provider: z.literal("oidc"),
+  issuer: z.string().url(),
+  clientId: nonEmpty,
+  /** Expected `aud`; defaults to `clientId`. */
+  audience: nonEmpty.optional(),
+  /** Claim matched against `identities[].id` when no `subject` matches (default email). */
+  claim: z.enum(["email", "preferred_username", "sub"]).optional(),
+  scopes: z.array(nonEmpty).optional(),
+  /** Public origin of the console (behind a proxy or tunnel); defaults to the request's Host. */
+  publicUrl: z.string().url().optional(),
+  sessionHours: z.number().int().min(1).max(24 * 30).optional(),
 });
 
 export const thresholds = z.strictObject({
@@ -59,6 +76,8 @@ export const config = z.strictObject({
   /** Where gates that need a PR are executed; local mode has no PRs and lets a tech lead accept high-risk plans via CLI. */
   codeHost: z.enum(["local", "github"]).optional(),
   identities: z.array(identity).min(1),
+  /** Hosted mode login; absent = local mode (git identity + role switcher). */
+  auth: auth.optional(),
   /** Extra roles (decisions Q15) gate non-gate actions or PR reviews only. */
   roles: z
     .array(z.strictObject({ name: role, description: z.string().optional() }))

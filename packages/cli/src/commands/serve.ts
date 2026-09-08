@@ -30,6 +30,7 @@ export async function serveCommand(io: Io, opts: ServeOptions): Promise<RunningS
   const webDir = findWebDir();
   const server = await startServer({ cwd: ctx.root, identity: who, port: opts.port ?? DEFAULT_PORT, ...(opts.host ? { host: opts.host } : {}), sdlcBin: fileURLToPath(new URL("../bin.js", import.meta.url)), ...(webDir ? { webDir } : {}), engine: opts.engine === true, log: (line) => io.stderr(`${line}\n`) });
   const webhooks = io.env["GITHUB_WEBHOOK_SECRET"] ? `  webhooks: ${server.url}/api/webhooks/github` : "";
-  io.stdout(`${server.url}${webDir ? "" : "  (API only — build @sdlc/web to serve the console)"}${opts.engine ? "  engine: on" : ""}${webhooks}\n`);
+  const auth = server.auth ? `  auth: oidc via ${server.auth.provider.issuer}${io.env["SDLC_OIDC_CLIENT_SECRET"] ? "" : " (public client, PKCE)"}` : "";
+  io.stdout(`${server.url}${webDir ? "" : "  (API only — build @sdlc/web to serve the console)"}${opts.engine ? "  engine: on" : ""}${auth}${webhooks}\n`);
   return server;
 }
