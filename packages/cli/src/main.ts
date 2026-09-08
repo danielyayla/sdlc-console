@@ -316,7 +316,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         throw new CliError("usage: sdlc evals run|gate|harvest|trigger");
       }
       case "metrics": {
-        const r = await metricsReport(await repoContext(io, json, values.product), { stage: typeof values.stage === "string" ? values.stage : undefined, window: typeof values.window === "string" ? values.window : undefined, refresh: values.refresh === true });
+        const r = await metricsReport(await repoContext(io, json, values.product), { stage: typeof values.stage === "string" ? values.stage : undefined, window: typeof values.window === "string" ? values.window : undefined, refresh: values.refresh === true, ...(io.now ? { now: io.now } : {}) });
         emit(io, json, r, () => renderMetrics(r));
         return 0;
       }
@@ -339,7 +339,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         if (!sub) throw new CliError("usage: sdlc export <CHG> [--format json|md] [--out <file>]");
         const format = values.format ?? "json";
         if (format !== "json" && format !== "md") throw new CliError("--format must be json or md");
-        const r = await exportCommand(ctx, sub, { format, ...(values.ref ? { ref: values.ref } : {}), ...(values.out ? { out: values.out } : {}) });
+        const r = await exportCommand(ctx, sub, { format, ...(values.ref ? { ref: values.ref } : {}), ...(values.out ? { out: values.out } : {}), ...(io.now ? { now: io.now } : {}) });
         if (r.out) emit(io, json, { file: r.out, contentHash: r.doc.contentHash.value, events: r.doc.events.length, cycles: r.doc.cycles.length }, () => `wrote ${r.out} · ${r.doc.cycles.length} cycle(s) · ${r.doc.events.length} events · sha256 ${r.doc.contentHash.value}`);
         else io.stdout(json && format === "md" ? `${JSON.stringify(r.doc, null, 2)}\n` : r.text);
         return 0;
