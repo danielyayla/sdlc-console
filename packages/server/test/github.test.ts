@@ -343,6 +343,40 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     expect((await viewOf(dir, id)).stage).toBe(2);
   }, 60_000);
 
+  it("a human who merges the intent PR seconds after it opens, before the console pushed its pr.opened line, leaves a ledger-only branch — the next pass records the merge and opens no second PR", async () => {
+    const { dir, gh, env } = await githubSeed();
+    mapLogin(dir, PO, "priya-gh");
+    await git(dir, ["commit", "-q", "-am", "sdlc(config): map priya-gh"]);
+    await git(dir, ["push", "-q", "origin", "main"]);
+    const { engine } = harness(dir, env);
+    const po = new StateStore({ root: dir, identity: PO_ID });
+    await po.refresh();
+    const created = await newChange(po, { title: "Nightly digest", kind: "feature", risk: "routine", origin: { type: "idea" }, intentBody: "# Intent: Nightly digest\n\n## Problem\nNo digest.\n\n## Proposed outcome\nA digest.\n\n## Affected users and systems\nMail.\n\n## Constraints\nNone.\n\n## Open questions\nNone.\n" });
+    const id = created.changeId ?? "";
+    const branch = `sdlc/${id}/intent`;
+    const sync1 = await engine.sync();
+    expect(sync1?.opened).toHaveLength(1);
+    // origin's branch as GitHub saw it at the merge: the intent commit without the console's pr.opened line
+    const opened = (await git(dir, ["rev-parse", branch])).trim();
+    await git(gh.bare, ["update-ref", `refs/heads/${branch}`, `${opened}~1`]);
+    await mergeOnGitHub(gh, 1, "priya-gh");
+    const sync2 = await engine.sync();
+    expect(sync2?.merges).toMatchObject([{ changeId: id, gate: 1, mergedBy: "priya-gh", recorded: true }]);
+    expect(sync2?.opened).toEqual([]);
+    expect(sync2?.errors).toEqual([]);
+    const intentPulls = () => gh.state.pulls.filter((p) => p.head === branch);
+    expect(intentPulls()).toHaveLength(1);
+    expect(gh.state.pulls.map((p) => p.head)).toEqual([branch, "sdlc/records"]); // the recorded gate travels in the records PR, as usual
+    const v = await viewOf(dir, id);
+    expect(v.stage).toBe(2);
+    expect(v.acceptedGates).toEqual([1]);
+    // the local branch is still one ledger commit past main; a further pass leaves it alone too
+    expect((await git(dir, ["diff", "--name-only", "main", branch])).trim()).toBe(`sdlc/changes/${id}/log.jsonl`);
+    const sync3 = await engine.sync();
+    expect(sync3?.opened).toEqual([]);
+    expect(intentPulls()).toHaveLength(1);
+  }, 60_000);
+
   it("a branch carrying ledger lines only (a session started or failed before proposing) opens no PR; the PR opens once the artifact is on it", async () => {
     const { dir, gh, env } = await githubSeed();
     const { engine } = harness(dir, env);
