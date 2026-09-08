@@ -1,11 +1,13 @@
 import type { ChangeView } from "@sdlc/core";
 import { useEffect, useState } from "react";
 import { fetchArtifact, type Artifact } from "../api";
-import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, dotClass, ownsGate, relativeTime, riskLabel, viewerState, waitingFor, type Role } from "../lib/format";
+import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, dotClass, ownsGate, prLabel, prNoun, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
 
 export interface ChangeDetailProps {
   view: ChangeView;
   role: Role;
+  /** `config.codeHost` (3.7): names artifact requests "PR #n" on GitHub, "MR !n" on GitLab. */
+  codeHost?: CodeHost;
   art: number | null;
   now: Date;
   /** Injected for server-side rendering tests; defaults to the HTTP fetch. */
@@ -113,7 +115,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
           <div className="viewer-head">
             <span className="file">{ARTIFACT_FILES[selected]}</span>
             <span className="chip gray">{viewerState(doc, view)}</span>
-            {selectedPr && !selectedPr.merged ? <a className="chip" href={selectedPr.url} target="_blank" rel="noreferrer">PR #{selectedPr.number}</a> : null}
+            {selectedPr && !selectedPr.merged ? <a className="chip" href={selectedPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, selectedPr.number)}</a> : null}
             {view.record ? (view.record.url ? <a className="chip" href={view.record.url} target="_blank" rel="noreferrer" title="external record">{view.record.system} {view.record.id}</a> : <span className="chip" title="external record">{view.record.system} {view.record.id}</span>) : null}
             {doc.record.writeback && doc.record.writeback.state !== "ok" ? (
               <>
@@ -139,9 +141,9 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="eyebrow">Human gate · {waitingFor(gate.since, p.now)}</div>
               <h3>{gate.label}</h3>
               <div className="who">owner: {gate.ownerLabel}</div>
-              {reviewPr ? <div className="who">in review as <a href={reviewPr.url} target="_blank" rel="noreferrer">PR #{reviewPr.number}</a> · merging it is the decision</div> : null}
+              {reviewPr ? <div className="who">in review as <a href={reviewPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, reviewPr.number)}</a> · merging it is the decision</div> : null}
               {techLead ? (
-                <div className="waiting">Waiting on tech lead — approval happens via PR review on plan.md.{reviewPr ? <> <a href={reviewPr.url} target="_blank" rel="noreferrer">PR #{reviewPr.number}</a></> : null}</div>
+                <div className="waiting">Waiting on tech lead — approval happens via {prLabel(p.codeHost)} review on plan.md.{reviewPr ? <> <a href={reviewPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, reviewPr.number)}</a></> : null}</div>
               ) : owned ? (
                 <>
                   {view.recordBlock ? <div className="waiting" role="note">{view.recordBlock}</div> : null}
@@ -217,8 +219,8 @@ export function ChangeDetail(p: ChangeDetailProps) {
           ) : null}
           {view.pr ? (
             <div className="panel pr">
-              <div className="eyebrow">Pull request · {view.pr.provider}</div>
-              <h3>{view.pr.url ? <a href={view.pr.url} target="_blank" rel="noreferrer">#{view.pr.number} {view.pr.branch}</a> : view.pr.branch}</h3>
+              <div className="eyebrow">{prNoun(view.pr.provider)} · {view.pr.provider}</div>
+              <h3>{view.pr.url ? <a href={view.pr.url} target="_blank" rel="noreferrer">{prLabel(view.pr.provider, view.pr.number)} {view.pr.branch}</a> : view.pr.branch}</h3>
               <div className="who">→ {view.pr.baseBranch} · head {view.pr.headSha.slice(0, 7)}{view.pr.mergeSha ? ` · merged ${view.pr.mergeSha.slice(0, 7)}` : ""}</div>
               <ul className="activity">
                 {view.pr.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.summary ? `${c.verdict} · ${c.summary}` : c.verdict}</span></li>)}

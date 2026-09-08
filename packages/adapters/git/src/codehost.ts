@@ -46,14 +46,18 @@ export interface OpenPrResult {
   commit: string;
 }
 
+/** Which code host `sdlc/config.yaml` names: no host, GitHub (pull requests) or GitLab (merge requests). */
+export type CodeHostProvider = "local" | "github" | "gitlab";
+
 /**
  * Code-host adapter (blueprint §7.6). Local mode records a branch merge;
- * GitHub mode (`@sdlc/adapter-github`) opens and merges real pull requests.
- * Both write the same `pr.yaml` mirror and ledger events; neither offers a
- * way around the gate-5 human.
+ * GitHub mode (`@sdlc/adapter-github`) opens and merges real pull requests,
+ * GitLab mode (`@sdlc/adapter-gitlab`, 3.7) real merge requests. All write
+ * the same `pr.yaml` mirror and ledger events; none offers a way around the
+ * gate-5 human.
  */
 export interface CodeHost {
-  readonly provider: "local" | "github";
+  readonly provider: CodeHostProvider;
   openPr(input: OpenPrInput): Promise<OpenPrResult>;
   /**
    * The PR's head moved and the run tested the new head (2.4): record it on

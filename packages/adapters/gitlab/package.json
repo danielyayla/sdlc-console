@@ -1,0 +1,21 @@
+{
+  "name": "@sdlc/adapter-gitlab",
+  "version": "0.0.0",
+  "private": true,
+  "description": "GitLab code-host adapter: merge requests as gates, commit statuses in the MR pipeline widget, protected-branch refusal and webhooks over the REST v4 API.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@sdlc/adapter-git": "workspace:*",
+    "@sdlc/core": "workspace:*",
+    "@sdlc/schemas": "workspace:*"
+  }
+}

@@ -52,8 +52,8 @@ export async function changeNew(ctx: CliContext, opts: NewChangeOptions): Promis
   if (!r.ok) throw new CliError("change new refused", 2, r.diagnostics);
   const id = r.plan.changeId;
   if (!id) throw new CliError("createChange produced no change id");
-  if (repo.config.codeHost === "github") {
-    // GitHub mode: the change is born on sdlc/<CHG>/intent; its PR is the Plan gate (2.2)
+  if (repo.config.codeHost !== "local") {
+    // hosted mode: the change is born on sdlc/<CHG>/intent; its PR / MR is the Plan gate (2.2)
     const report = validateWritePlan(repo, r.plan);
     if (report.blocking) throw new CliError("write-plan rejected by validation", 1, report.diagnostics.filter((d) => d.blocking));
     const branch = `sdlc/${id}/intent`;

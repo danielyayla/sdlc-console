@@ -1,10 +1,10 @@
-import { CodeHostError, git, mergeRemoteBranch, pushBranch, recordOpenedPr, recordSyncedPr, remoteUrl, type CodeHost, type GitIdentity, type OpenPrInput, type OpenPrResult, type PrCheck, type ReviewReport } from "@sdlc/adapter-git";
+import { CodeHostError, git, mergeRemoteBranch, pushBranch, recordOpenedPr, recordSyncedPr, remoteUrl, type GitIdentity, type HostedCodeHost, type HostedPr, type MergeHostedPrInput, type MergeOutcome, type OpenHostedPrInput, type OpenPrInput, type OpenPrResult, type PrCheck, type ReviewReport } from "@sdlc/adapter-git";
 import type { Pr } from "@sdlc/schemas";
 import { installationTokenSource, type InstallationTokenSource } from "./app.js";
 import { checkConclusion, publishCheckRun } from "./checks.js";
 import { GitHubClient, GitHubError } from "./client.js";
 import { assertProtected } from "./protection.js";
-import { getPull, mergePull, openPull, reviewPull } from "./pulls.js";
+import { findOpenPull, getPull, mergePull, openPull, requestChanges, reviewPull } from "./pulls.js";
 import { credentialsFrom, parseGitHubRemote, type Env, type GitHubCredentials, type GitHubRepo } from "./remote.js";
 import { publishStatus, verdictState } from "./statuses.js";
 
@@ -32,8 +32,9 @@ const FINDINGS_CHECK = "sdlc/findings";
  * carrying the evidence verbatim, and `sdlc/findings` opens `in_progress`
  * with the PR and completes when the review reports.
  */
-export class GitHubCodeHost implements CodeHost {
+export class GitHubCodeHost implements HostedCodeHost {
   readonly provider = "github" as const;
+  readonly loginField = "github" as const;
   readonly client: GitHubClient;
   /** How the API is authenticated: a personal/actions token, or an App installation. */
   readonly auth: "token" | "app";
@@ -65,6 +66,63 @@ export class GitHubCodeHost implements CodeHost {
     const parsed = url ? parseGitHubRemote(url) : null;
     if (!parsed) throw new CodeHostError(`remote ${this.remote} is not a GitHub repository${url ? ` (${url})` : ""}; set GITHUB_REPOSITORY=owner/repo`, false);
     return parsed;
+  }
+
+  label(number: number): string {
+    return `PR #${number}`;
+  }
+
+  noreplyAddress(login: string): string {
+    return `${login}@users.noreply.github.com`;
+  }
+
+  async assertProtected(root: string, branch: string): Promise<void> {
+    try {
+      await assertProtected(this.client, await this.repoFor(root), branch);
+    } catch (e) {
+      throw hostError(e);
+    }
+  }
+
+  async findOpenPr(root: string, headBranch: string): Promise<HostedPr | null> {
+    try {
+      return await findOpenPull(this.client, await this.repoFor(root), headBranch);
+    } catch (e) {
+      throw hostError(e);
+    }
+  }
+
+  async openHostedPr(root: string, input: OpenHostedPrInput): Promise<HostedPr> {
+    try {
+      return await openPull(this.client, await this.repoFor(root), input);
+    } catch (e) {
+      throw hostError(e);
+    }
+  }
+
+  async getHostedPr(root: string, number: number): Promise<HostedPr> {
+    try {
+      return await getPull(this.client, await this.repoFor(root), number);
+    } catch (e) {
+      throw hostError(e);
+    }
+  }
+
+  async mergeHostedPr(root: string, number: number, input: MergeHostedPrInput): Promise<MergeOutcome> {
+    try {
+      return await mergePull(this.client, await this.repoFor(root), number, { sha: input.sha, method: "merge", ...(input.title ? { title: input.title } : {}), ...(input.message ? { message: input.message } : {}) });
+    } catch (e) {
+      throw hostError(e);
+    }
+  }
+
+  /** Send-back on GitHub: a "request changes" review carrying the feedback. */
+  async requestChanges(root: string, number: number, body: string): Promise<void> {
+    try {
+      await requestChanges(this.client, await this.repoFor(root), number, body);
+    } catch (e) {
+      throw hostError(e);
+    }
   }
 
   /** Every check on the head: statuses under a token, check runs (evidence in `output.text`) under the App. */

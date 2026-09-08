@@ -6,13 +6,15 @@ import { installHooks } from "@sdlc/hooks";
 import { stringifyYaml } from "@sdlc/schemas";
 import { CliError, type Io } from "../io.js";
 import { TEMPLATES } from "../templates.js";
-import { WORKFLOW_FILES, detectWorkflow, evalsWorkflow, productionGateWorkflow, validateWorkflow, type InstallStep } from "../workflows.js";
+import { GITLAB_CI_FILE, WORKFLOW_FILES, detectWorkflow, evalsWorkflow, gitlabCi, productionGateWorkflow, validateWorkflow, type InstallStep } from "../workflows.js";
 
 export interface InitOptions {
   product?: string;
   intentHome?: string;
   /** Command the generated workflows run instead of `npx sdlc` (a team's own install, e.g. `node tools/sdlc/bin.js`). */
   sdlcBin?: string;
+  /** `config.codeHost` (default local). `gitlab` writes `.gitlab-ci.yml` with the same jobs instead of the GitHub Actions workflows (3.7). */
+  codeHost?: "local" | "github" | "gitlab";
 }
 
 /** The Install step follows the lockfile present when init runs; none means no step (the team adds one if `bin` needs it). */
@@ -59,7 +61,7 @@ export async function init(io: Io, opts: InitOptions): Promise<InitResult> {
   const config: Record<string, unknown> = {
     schema: 1,
     defaultRole: "po",
-    codeHost: "local",
+    codeHost: opts.codeHost ?? "local",
     identities: [{ id: who?.id ?? "you@example.com", ...(who?.name ? { name: who.name } : {}), roles: ["po", "eng", "tech_lead"] }],
     thresholds: { autoFilesMax: 12, maxLoopRounds: 5, sessionCeiling: 4, suiteMinSize: 20 },
     records: { intent: "repo", spec: "repo", plan: "repo", evals: "repo", pr: "repo", incident: "repo" },
@@ -75,10 +77,15 @@ export async function init(io: Io, opts: InitOptions): Promise<InitResult> {
   // CI: the eval suite as the config-change gate, and validation on every PR (create-only). The command and the
   // install step are the team's: `--sdlc-bin` names their install, the lockfile picks the package manager (3.0).
   const workflow = { install: installFromLockfile(root), ...(opts.sdlcBin ? { bin: opts.sdlcBin } : {}) };
-  put(WORKFLOW_FILES.evals, evalsWorkflow(workflow));
-  put(WORKFLOW_FILES.validate, validateWorkflow(workflow));
-  put(WORKFLOW_FILES.detect, detectWorkflow(workflow));
-  put(WORKFLOW_FILES.productionGate, productionGateWorkflow(workflow));
+  if (opts.codeHost === "gitlab") {
+    // GitLab CI (3.7): one pipeline file carrying the same jobs the GitHub workflows carry
+    put(GITLAB_CI_FILE, gitlabCi(workflow));
+  } else {
+    put(WORKFLOW_FILES.evals, evalsWorkflow(workflow));
+    put(WORKFLOW_FILES.validate, validateWorkflow(workflow));
+    put(WORKFLOW_FILES.detect, detectWorkflow(workflow));
+    put(WORKFLOW_FILES.productionGate, productionGateWorkflow(workflow));
+  }
 
   if (installMergeUnion(root)) created.push(".gitattributes");
   else skipped.push(".gitattributes");

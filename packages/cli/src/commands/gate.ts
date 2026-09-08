@@ -1,6 +1,5 @@
 import { git, mergeIfUnmerged } from "@sdlc/adapter-git";
-import { StateStore, acceptViaPr, artifactPrFor, codeHostFor, sendBackViaPr, ActionError } from "@sdlc/server";
-import type { GitHubCodeHost } from "@sdlc/adapter-github";
+import { StateStore, acceptViaPr, artifactPrFor, codeHostFor, hostedCodeHostFor, sendBackViaPr, ActionError } from "@sdlc/server";
 import { accept, sendBack, type ChangeView } from "@sdlc/core";
 import type { GateNumber } from "@sdlc/schemas";
 import { actingIdentity, assertHuman, baseBranch, commitPlan, loadCommitted, transitionContext, viewOf, type CliContext } from "../context.js";
@@ -19,9 +18,9 @@ function cliError(e: unknown): CliError {
   return new CliError((e as Error).message, 2);
 }
 
-/** GitHub mode: when the gate's artifact is a pull request, gate actions go through it; returns the store to act with. */
-async function githubArtifactPr(ctx: CliContext, codeHost: "local" | "github", who: { id: string; name: string }, id: string, gate: GateNumber): Promise<StateStore | null> {
-  if (codeHost !== "github" || gate === 5) return null;
+/** Hosted mode (GitHub / GitLab): when the gate's artifact is a pull request, gate actions go through it; returns the store to act with. */
+async function hostedArtifactPr(ctx: CliContext, codeHost: "local" | "github" | "gitlab", who: { id: string; name: string }, id: string, gate: GateNumber): Promise<StateStore | null> {
+  if (codeHost === "local" || gate === 5) return null;
   const store = new StateStore({ root: ctx.root, identity: who });
   const snap = await store.refresh();
   const v = snap.changes.find((c) => c.id === id);
@@ -39,10 +38,10 @@ export async function acceptCommand(ctx: CliContext, id: string, gate: GateNumbe
   const who = await actingIdentity(ctx);
   const { repo } = await loadCommitted(ctx);
   const view = viewOf(repo, id);
-  const viaPr = await githubArtifactPr(ctx, repo.config.codeHost, who, id, gate);
+  const viaPr = await hostedArtifactPr(ctx, repo.config.codeHost, who, id, gate);
   if (viaPr) {
     try {
-      const host = codeHostFor("github", ctx.io.env) as GitHubCodeHost;
+      const host = hostedCodeHostFor(repo.config.codeHost, ctx.io.env);
       const r = await acceptViaPr({ host, identity: who }, viaPr, id, gate);
       const after = await loadCommitted(ctx);
       return { id, gate, commit: r.commit, mergeSha: r.mergeSha, view: viewOf(after.repo, id) };
@@ -61,7 +60,7 @@ export async function acceptCommand(ctx: CliContext, id: string, gate: GateNumbe
     try {
       const host = codeHostFor(repo.config.codeHost, ctx.io.env);
       mergeSha = await host.merge(ctx.root, view.pr, `sdlc(${id}): merge ${view.pr.branch} (gate 5)`, who);
-      if (host.provider === "github") source = "pr.merge";
+      if (host.provider !== "local") source = "pr.merge";
     } catch (e) {
       throw new CliError(`merge refused: ${(e as Error).message}`, 2);
     }
@@ -87,10 +86,10 @@ export async function sendBackCommand(ctx: CliContext, id: string, gate: GateNum
   const who = await actingIdentity(ctx);
   const { repo } = await loadCommitted(ctx);
   const view = viewOf(repo, id);
-  const viaPr = await githubArtifactPr(ctx, repo.config.codeHost, who, id, gate);
+  const viaPr = await hostedArtifactPr(ctx, repo.config.codeHost, who, id, gate);
   if (viaPr) {
     try {
-      const host = codeHostFor("github", ctx.io.env) as GitHubCodeHost;
+      const host = hostedCodeHostFor(repo.config.codeHost, ctx.io.env);
       const r = await sendBackViaPr({ host, identity: who }, viaPr, id, gate, feedback);
       const after = await loadCommitted(ctx);
       return { id, gate, commit: r.commit, view: viewOf(after.repo, id) };

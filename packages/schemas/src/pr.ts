@@ -15,10 +15,10 @@ export const autoFinding = z.strictObject({
   dismissal: dismissal.optional(),
 });
 
-/** `sdlc/changes/<id>/pr.yaml`: mirror of the code-host PR (or a local branch merge). */
+/** `sdlc/changes/<id>/pr.yaml`: mirror of the code-host PR / MR (or a local branch merge); `number` is the PR number on GitHub and the MR iid on GitLab. */
 export const pr = z.strictObject({
   schema: schemaVersion,
-  provider: z.enum(["github", "local"]),
+  provider: z.enum(["github", "gitlab", "local"]),
   number: z.number().int().min(1).optional(),
   url: z.url().optional(),
   branch: nonEmpty,

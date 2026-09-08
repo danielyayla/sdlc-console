@@ -116,6 +116,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
       <ChangeDetail
         view={selected}
         role={state.role}
+        codeHost={snapshot.config.codeHost}
         art={state.art}
         now={now}
         loadArtifact={artifactLoader}

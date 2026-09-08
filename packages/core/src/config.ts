@@ -13,17 +13,25 @@ export interface ResolvedThresholds {
   skillPassThreshold: number;
 }
 
-/** Identity whose `github` login matches (case-insensitive), for attributing merges done on the code host. */
-export function identityForGitHubLogin(config: ResolvedConfig, login: string): Identity | null {
+/** Which code host the config names; `local` has no host. */
+export type CodeHostProvider = "local" | "github" | "gitlab";
+
+/** Identity whose host login (`github` or `gitlab` on the identity) matches, case-insensitively — for attributing merges done on the code host. */
+export function identityForHostLogin(config: ResolvedConfig, field: "github" | "gitlab", login: string): Identity | null {
   const wanted = login.toLowerCase();
-  return config.identities.find((i) => i.github?.toLowerCase() === wanted) ?? null;
+  return config.identities.find((i) => i[field]?.toLowerCase() === wanted) ?? null;
+}
+
+/** Identity whose `github` login matches (case-insensitive), for attributing merges done on GitHub. */
+export function identityForGitHubLogin(config: ResolvedConfig, login: string): Identity | null {
+  return identityForHostLogin(config, "github", login);
 }
 
 export interface ResolvedConfig {
   present: boolean;
   defaultRole: "po" | "eng";
   defaultBranch: string;
-  codeHost: "local" | "github";
+  codeHost: CodeHostProvider;
   identities: Identity[];
   thresholds: ResolvedThresholds;
   records: Record<"intent" | "spec" | "plan" | "evals" | "pr" | "incident", RecordsMode>;

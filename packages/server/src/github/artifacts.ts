@@ -1,19 +1,26 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { addWorktree, blobSha, CodeHostError, commitWritePlan, currentBranch, diffFiles, fetchRemote, git, gitRaw, headSha, listWorktrees, mergeRemoteBranch, newUlid, pushBranch, removeWorktree, type GitIdentity } from "@sdlc/adapter-git";
-import { assertProtected, findOpenPull, getPull, GitHubError, mergePull, openPull, requestChanges, type GitHubCodeHost } from "@sdlc/adapter-github";
-import { accept, ARTIFACT_INDEX_FOR_GATE, deriveChange, identityForGitHubLogin, logPath, recordArtifactPr, sendBack, stageDef, validateWritePlan, type ArtifactIndex, type ChangeView, type Repo, type TransitionContext, type TransitionResult, type WritePlan } from "@sdlc/core";
+import { addWorktree, blobSha, CodeHostError, commitWritePlan, currentBranch, diffFiles, fetchRemote, git, gitRaw, headSha, hostName, listWorktrees, mergeRemoteBranch, newUlid, prNoun, pushBranch, removeWorktree, type GitIdentity, type HostedCodeHost } from "@sdlc/adapter-git";
+import { accept, ARTIFACT_INDEX_FOR_GATE, deriveChange, identityForHostLogin, logPath, recordArtifactPr, sendBack, stageDef, validateWritePlan, type ArtifactIndex, type ChangeView, type Repo, type TransitionContext, type TransitionResult, type WritePlan } from "@sdlc/core";
 import type { GateNumber } from "@sdlc/schemas";
 import { ActionError, StateStore } from "../store.js";
 
-export interface GitHubMode {
-  host: GitHubCodeHost;
+/**
+ * Hosted mode (GitHub since 2.2, GitLab since 3.7): everything here speaks
+ * the `HostedCodeHost` contract, never one host's API. "PR" in the names and
+ * the ledger is the record's word for a pull request or a merge request.
+ */
+export interface HostedMode {
+  host: HostedCodeHost;
   identity: GitIdentity;
   /** Under a GitHub App (3.2): the App's bot user commits on behalf of `identity` — author is the person, committer is the App. */
   committer?: GitIdentity;
   now?: () => Date;
   log?: (line: string) => void;
 }
+
+/** @deprecated name from 2.2; `HostedMode` since 3.7. */
+export type GitHubMode = HostedMode;
 
 const ROLE_RULES = /(not-owner|not-engineer|not-po|gate\.via)/;
 
@@ -25,15 +32,15 @@ function refused(result: Extract<TransitionResult, { ok: false }>): ActionError 
 
 function hostError(e: unknown): ActionError {
   if (e instanceof ActionError) return e;
-  const retryable = e instanceof CodeHostError ? e.retryable : e instanceof GitHubError ? e.retryable : true;
+  const retryable = e instanceof CodeHostError ? e.retryable : true;
   return new ActionError(retryable ? 502 : 409, (e as Error).message, [], retryable);
 }
 
-function iso(mode: GitHubMode): string {
+function iso(mode: HostedMode): string {
   return (mode.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-function context(mode: GitHubMode, actor: GitIdentity, extra: Partial<TransitionContext> = {}): TransitionContext {
+function context(mode: HostedMode, actor: GitIdentity, extra: Partial<TransitionContext> = {}): TransitionContext {
   return { now: iso(mode), newId: newUlid, actor, blobSha, ...extra };
 }
 
@@ -73,7 +80,7 @@ function viewFor(repo: Repo, id: string): ChangeView {
 
 function requireOnBase(root: string, base: string): Promise<void> {
   return currentBranch(root).then((current) => {
-    if (current !== base) throw new ActionError(409, `GitHub mode merges into ${base}; the working tree is on ${current}`);
+    if (current !== base) throw new ActionError(409, `hosted mode merges into ${base}; the working tree is on ${current}`);
   });
 }
 
@@ -95,15 +102,16 @@ export interface PushedArtifactBranch {
 
 /**
  * Every unmerged `sdlc/<CHG>/<artifact>` branch that carries its artifact
- * becomes a pull request: push, open (or find) the PR, record
- * `pr.opened{artifact}` on the branch, push again. A branch with ledger lines
- * only (a session started, or failed, before proposing) is not in review yet
- * and opens nothing. Idempotent: a branch whose PR is already recorded is
- * pushed again only when its head moved past origin's — the agent's revisions
- * reach the PR the reviewer reads — and never reopened. A branch that differs
- * from the base by ledger lines only is dropped: nothing to review.
+ * becomes a pull request (merge request on GitLab): push, open (or find) it,
+ * record `pr.opened{artifact}` on the branch, push again. A branch with
+ * ledger lines only (a session started, or failed, before proposing) is not
+ * in review yet and opens nothing. Idempotent: a branch whose PR is already
+ * recorded is pushed again only when its head moved past origin's — the
+ * agent's revisions reach the PR the reviewer reads — and never reopened. A
+ * branch that differs from the base by ledger lines only is dropped: nothing
+ * to review.
  */
-export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Promise<{ opened: OpenedArtifactPr[]; pushed: PushedArtifactBranch[]; errors: string[] }> {
+export async function openArtifactPrs(mode: HostedMode, store: StateStore): Promise<{ opened: OpenedArtifactPr[]; pushed: PushedArtifactBranch[]; errors: string[] }> {
   const snap = await store.refresh();
   const repo = store.currentRepo;
   if (!repo) return { opened: [], pushed: [], errors: ["repository not loaded"] };
@@ -111,7 +119,7 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
   const opened: OpenedArtifactPr[] = [];
   const pushed: PushedArtifactBranch[] = [];
   const errors: string[] = [];
-  const repoGh = await mode.host.repoFor(store.root);
+  const noun = prNoun(mode.host.provider);
   for (const b of snap.branches ?? []) {
     const index = ({ intent: 0, spec: 1, plan: 2, incident: 5 } as const)[b.artifact];
     let view: ChangeView;
@@ -137,7 +145,7 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
       try {
         await pushBranch(store.root, b.branch);
         pushed.push({ changeId: view.id, artifact: index, branch: b.branch, number: recorded.number, head: b.head });
-        mode.log?.(`${view.id}: ${doc.name} revised · PR #${recorded.number} updated`);
+        mode.log?.(`${view.id}: ${doc.name} revised · ${mode.host.label(recorded.number)} updated`);
       } catch (e) {
         errors.push(`${b.branch}: ${(e as Error).message}`);
         mode.log?.(`${b.branch}: ${(e as Error).message}`);
@@ -146,20 +154,20 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
     }
     if (doc.state === "absent") continue;
     try {
-      await assertProtected(mode.host.client, repoGh, base);
+      await mode.host.assertProtected(store.root, base);
       await pushBranch(store.root, b.branch);
-      const pull = (await findOpenPull(mode.host.client, repoGh, b.branch)) ?? (await openPull(mode.host.client, repoGh, {
+      const pull = (await mode.host.findOpenPr(store.root, b.branch)) ?? (await mode.host.openHostedPr(store.root, {
         head: b.branch,
         base,
         title: `sdlc(${view.id}): ${doc.name} for review (gate ${stageDef((index + 1) as 1 | 2 | 3 | 6).gate ?? ""})`,
-        body: [`${view.id} · ${view.title}`, "", `Artifact: ${doc.path}`, `Merging this PR is the gate decision; the console records it as gate.accepted{source: pr.merge}.`].join("\n"),
+        body: [`${view.id} · ${view.title}`, "", `Artifact: ${doc.path}`, `Merging this ${noun} is the gate decision; the console records it as gate.accepted{source: pr.merge}.`].join("\n"),
       }));
       const r = recordArtifactPr(repo, view, index, { number: pull.number, url: pull.url, branch: b.branch, headSha: b.head }, context(mode, mode.identity));
       if (!r.ok) throw refused(r);
       await commitOnBranch(store.root, b.branch, r.plan, { id: "sdlc-bot@sdlc.local", name: "sdlc-bot" });
       await pushBranch(store.root, b.branch);
       opened.push({ changeId: view.id, artifact: index, branch: b.branch, number: pull.number, url: pull.url });
-      mode.log?.(`${view.id}: ${doc.name} in review as PR #${pull.number}`);
+      mode.log?.(`${view.id}: ${doc.name} in review as ${mode.host.label(pull.number)}`);
     } catch (e) {
       errors.push(`${b.branch}: ${(e as Error).message}`);
       mode.log?.(`${b.branch}: ${(e as Error).message}`);
@@ -169,13 +177,13 @@ export async function openArtifactPrs(mode: GitHubMode, store: StateStore): Prom
   return { opened, pushed, errors };
 }
 
-/** True when the gate's artifact sits on an unmerged branch with an open PR — the GitHub-mode path applies. */
+/** True when the gate's artifact sits on an unmerged branch with an open PR — the hosted-mode path applies. */
 export function artifactPrFor(view: ChangeView, gate: GateNumber, branches?: readonly { branch: string }[]): { index: ArtifactIndex; pr: NonNullable<ChangeView["artifactPrs"][ArtifactIndex]> } | null {
   if (gate === 5) return null;
   const index = ARTIFACT_INDEX_FOR_GATE[gate];
   const pr = view.artifactPrs[index];
   if (!pr || pr.merged) return null;
-  // a branch already merged into the base (PR merged on GitHub, decision not yet recorded) is handled on the base branch
+  // a branch already merged into the base (PR merged on the host, decision not yet recorded) is handled on the base branch
   if (branches && !branches.some((b) => b.branch === pr.branch)) return null;
   return { index, pr };
 }
@@ -186,27 +194,27 @@ export function artifactPrFor(view: ChangeView, gate: GateNumber, branches?: rea
  * as precondition — branch protection has the last word. Then the local base
  * branch takes origin's merge.
  */
-export async function acceptViaPr(mode: GitHubMode, store: StateStore, id: string, gate: GateNumber): Promise<{ commit: string; mergeSha: string; number: number }> {
+export async function acceptViaPr(mode: HostedMode, store: StateStore, id: string, gate: GateNumber): Promise<{ commit: string; mergeSha: string; number: number }> {
   const repo = store.currentRepo;
   if (!repo) throw new ActionError(502, "repository not loaded", [], true);
   const base = repo.config.defaultBranch;
   const view = viewFor(repo, id);
   const target = artifactPrFor(view, gate, store.current?.branches);
-  if (!target) throw new ActionError(409, `${id}: no open pull request carries the artifact for gate ${gate}; the engine opens one for sdlc/${id}/<artifact> on its next pass (or run sdlc sync)`);
+  if (!target) throw new ActionError(409, `${id}: no open ${prNoun(mode.host.provider)} carries the artifact for gate ${gate}; the engine opens one for sdlc/${id}/<artifact> on its next pass (or run sdlc sync)`);
   await requireOnBase(store.root, base);
   const result = accept(repo, view, gate, context(mode, mode.identity, { source: "pr.merge" }));
   if (!result.ok) throw refused(result);
   const report = validateWritePlan(repo, result.plan);
   if (report.blocking) throw new ActionError(409, "write-plan rejected by validation", report.diagnostics.filter((d) => d.blocking));
   try {
-    const repoGh = await mode.host.repoFor(store.root);
-    await assertProtected(mode.host.client, repoGh, base);
+    await mode.host.assertProtected(store.root, base);
     const commit = await commitOnBranch(store.root, target.pr.branch, result.plan, mode.identity, mode.committer);
     await pushBranch(store.root, target.pr.branch);
     const head = await headSha(store.root, target.pr.branch);
-    const merged = await mergePull(mode.host.client, repoGh, target.pr.number, { sha: head, method: "merge", title: `sdlc(${id}): accept ${view.docs[target.index].name} (gate ${gate})` });
-    if (!merged.merged) throw new CodeHostError(`GitHub did not merge #${target.pr.number}: ${merged.message}`, true);
-    await mergeRemoteBranch(store.root, base, `sdlc(${id}): sync origin/${base} after #${target.pr.number}`, mode.identity, "origin", mode.committer);
+    const label = mode.host.label(target.pr.number);
+    const merged = await mode.host.mergeHostedPr(store.root, target.pr.number, { sha: head, title: `sdlc(${id}): accept ${view.docs[target.index].name} (gate ${gate})` });
+    if (!merged.merged) throw new CodeHostError(`${hostName(mode.host.provider)} did not merge ${label}: ${merged.message}`, true);
+    await mergeRemoteBranch(store.root, base, `sdlc(${id}): sync origin/${base} after ${label}`, mode.identity, "origin", mode.committer);
     await store.refresh(true);
     return { commit, mergeSha: merged.sha, number: target.pr.number };
   } catch (e) {
@@ -214,20 +222,19 @@ export async function acceptViaPr(mode: GitHubMode, store: StateStore, id: strin
   }
 }
 
-/** Send back through the PR: `gate.sent_back` on the branch plus a "request changes" review carrying the feedback. */
-export async function sendBackViaPr(mode: GitHubMode, store: StateStore, id: string, gate: GateNumber, feedback: string): Promise<{ commit: string; number: number }> {
+/** Send back through the PR: `gate.sent_back` on the branch plus the host's "request changes" (a review on GitHub, a note on GitLab) carrying the feedback. */
+export async function sendBackViaPr(mode: HostedMode, store: StateStore, id: string, gate: GateNumber, feedback: string): Promise<{ commit: string; number: number }> {
   const repo = store.currentRepo;
   if (!repo) throw new ActionError(502, "repository not loaded", [], true);
   const view = viewFor(repo, id);
   const target = artifactPrFor(view, gate, store.current?.branches);
-  if (!target) throw new ActionError(409, `${id}: no open pull request carries the artifact for gate ${gate}`);
+  if (!target) throw new ActionError(409, `${id}: no open ${prNoun(mode.host.provider)} carries the artifact for gate ${gate}`);
   const result = sendBack(repo, view, gate, feedback, context(mode, mode.identity, { source: "console" }));
   if (!result.ok) throw refused(result);
   try {
-    const repoGh = await mode.host.repoFor(store.root);
     const commit = await commitOnBranch(store.root, target.pr.branch, result.plan, mode.identity, mode.committer);
     await pushBranch(store.root, target.pr.branch);
-    await requestChanges(mode.host.client, repoGh, target.pr.number, feedback.trim());
+    await mode.host.requestChanges(store.root, target.pr.number, feedback.trim());
     await store.refresh(true);
     return { commit, number: target.pr.number };
   } catch (e) {
@@ -245,18 +252,18 @@ export interface DetectedMerge {
 }
 
 /**
- * Pull requests merged on GitHub itself (a tech lead merging the plan PR, an
- * engineer merging the code PR): bring origin's base in, then record the gate
- * decision under the identity mapped to the merger's login. An unmapped login
- * is recorded as `<login>@users.noreply.github.com` and the gate-ownership
- * rule keeps the change out of the queues until config maps it.
+ * Pull requests merged on the host itself (a tech lead merging the plan PR,
+ * an engineer merging the code PR): bring origin's base in, then record the
+ * gate decision under the identity mapped to the merger's login (the
+ * `github` / `gitlab` field on config identities). An unmapped login is
+ * recorded under the host's no-reply address and the gate-ownership rule
+ * keeps the change out of the queues until config maps it.
  */
-export async function detectMergedPrs(mode: GitHubMode, store: StateStore): Promise<DetectedMerge[]> {
+export async function detectMergedPrs(mode: HostedMode, store: StateStore): Promise<DetectedMerge[]> {
   await store.refresh();
   let repo = store.currentRepo;
   if (!repo) return [];
   const base = repo.config.defaultBranch;
-  const repoGh = await mode.host.repoFor(store.root);
   const candidates: { id: string; gate: GateNumber; number: number; mergeSha?: string }[] = [];
   for (const files of repo.changes.values()) {
     const view = deriveChange(repo, files);
@@ -264,16 +271,17 @@ export async function detectMergedPrs(mode: GitHubMode, store: StateStore): Prom
       const gate = ({ 0: 1, 1: 2, 2: 3, 5: 6 } as Record<string, GateNumber | undefined>)[k];
       if (pr && !pr.merged && gate) candidates.push({ id: view.id, gate, number: pr.number });
     }
-    if (view.pr?.provider === "github" && view.pr.number !== undefined && !view.pr.mergeSha) candidates.push({ id: view.id, gate: 5, number: view.pr.number });
+    if (view.pr && view.pr.provider === mode.host.provider && view.pr.number !== undefined && !view.pr.mergeSha) candidates.push({ id: view.id, gate: 5, number: view.pr.number });
   }
   const out: DetectedMerge[] = [];
   let synced = false;
   for (const c of candidates) {
+    const label = mode.host.label(c.number);
     let pull;
     try {
-      pull = await getPull(mode.host.client, repoGh, c.number);
+      pull = await mode.host.getHostedPr(store.root, c.number);
     } catch (e) {
-      mode.log?.(`${c.id}: PR #${c.number}: ${(e as Error).message}`);
+      mode.log?.(`${c.id}: ${label}: ${(e as Error).message}`);
       continue;
     }
     if (!pull.merged) continue;
@@ -291,12 +299,12 @@ export async function detectMergedPrs(mode: GitHubMode, store: StateStore): Prom
       continue;
     }
     const login = pull.mergedBy ?? "unknown";
-    const mapped = identityForGitHubLogin(repo.config, login);
-    const actor: GitIdentity = mapped ? { id: mapped.id, name: mapped.name ?? mapped.id } : { id: `${login}@users.noreply.github.com`, name: login };
+    const mapped = identityForHostLogin(repo.config, mode.host.loginField, login);
+    const actor: GitIdentity = mapped ? { id: mapped.id, name: mapped.name ?? mapped.id } : { id: mode.host.noreplyAddress(login), name: login };
     const result = accept(repo, view, c.gate, context(mode, actor, { source: "pr.merge", ...(c.gate === 5 && pull.mergeSha ? { mergeSha: pull.mergeSha } : {}) }));
     if (!result.ok) {
       out.push({ changeId: c.id, gate: c.gate, number: c.number, mergedBy: login, recorded: false, reason: result.diagnostics.map((d) => d.message).join("; ") });
-      mode.log?.(`${c.id}: PR #${c.number} merged on GitHub by ${login} but not recorded: ${result.diagnostics.map((d) => d.message).join("; ")}`);
+      mode.log?.(`${c.id}: ${label} merged on ${hostName(mode.host.provider)} by ${login} but not recorded: ${result.diagnostics.map((d) => d.message).join("; ")}`);
       continue;
     }
     const report = validateWritePlan(repo, result.plan);
@@ -308,7 +316,7 @@ export async function detectMergedPrs(mode: GitHubMode, store: StateStore): Prom
     await store.refresh(true);
     repo = store.currentRepo ?? repo;
     out.push({ changeId: c.id, gate: c.gate, number: c.number, mergedBy: login, recorded: true });
-    mode.log?.(`${c.id}: gate ${c.gate} recorded from PR #${c.number} merged by ${login}`);
+    mode.log?.(`${c.id}: gate ${c.gate} recorded from ${label} merged by ${login}`);
   }
   return out;
 }
@@ -328,7 +336,7 @@ export interface RecordsSync {
  * branch protection keeps it from pushing. They reach origin through one
  * long-lived `sdlc/records` PR that the console keeps current and a human merges.
  */
-export async function syncRecords(mode: GitHubMode, store: StateStore): Promise<RecordsSync> {
+export async function syncRecords(mode: HostedMode, store: StateStore): Promise<RecordsSync> {
   const repo = store.currentRepo ?? (await store.refresh(), store.currentRepo);
   if (!repo) return { ahead: 0, pushed: false, error: "repository not loaded" };
   const base = repo.config.defaultBranch;
@@ -336,7 +344,7 @@ export async function syncRecords(mode: GitHubMode, store: StateStore): Promise<
     await fetchRemote(store.root, "origin", base);
     const behind = await gitRaw(store.root, ["rev-list", "--count", `${base}..origin/${base}`]);
     if (behind.code === 0 && Number(behind.stdout.trim()) > 0) {
-      // origin moved (a merged records PR, a merge done on GitHub): take it before pushing
+      // origin moved (a merged records PR, a merge done on the host): take it before pushing
       await requireOnBase(store.root, base);
       await mergeRemoteBranch(store.root, base, `sdlc: sync origin/${base}`, mode.identity, "origin", mode.committer);
       await store.refresh(true);
@@ -345,12 +353,11 @@ export async function syncRecords(mode: GitHubMode, store: StateStore): Promise<
     const ahead = count.code === 0 ? Number(count.stdout.trim()) : 0;
     if (ahead === 0) return { ahead, pushed: false };
     await git(store.root, ["push", "--quiet", "origin", `refs/heads/${base}:refs/heads/${RECORDS_BRANCH}`]);
-    const repoGh = await mode.host.repoFor(store.root);
-    const pull = (await findOpenPull(mode.host.client, repoGh, RECORDS_BRANCH)) ?? (await openPull(mode.host.client, repoGh, {
+    const pull = (await mode.host.findOpenPr(store.root, RECORDS_BRANCH)) ?? (await mode.host.openHostedPr(store.root, {
       head: RECORDS_BRANCH,
       base,
       title: "sdlc: lifecycle records",
-      body: "Lifecycle records the console committed on its local default branch: ledger events, per-change runs, pr.yaml mirrors, cycle archives. Nothing here changes code. Merge to bring origin up to date; the console keeps this PR current.",
+      body: `Lifecycle records the console committed on its local default branch: ledger events, per-change runs, pr.yaml mirrors, cycle archives. Nothing here changes code. Merge to bring origin up to date; the console keeps this ${prNoun(mode.host.provider)} current.`,
     }));
     return { ahead, pushed: true, number: pull.number, url: pull.url };
   } catch (e) {
@@ -369,11 +376,11 @@ export interface SyncSummary {
 }
 
 /**
- * One GitHub-mode pass: merges done on GitHub first (so a branch merged
+ * One hosted-mode pass: merges done on the host first (so a branch merged
  * there is off the list before anything tries to open a PR for it), then
  * artifact PRs, then the records PR.
  */
-export async function syncGitHub(mode: GitHubMode, store: StateStore): Promise<SyncSummary> {
+export async function syncCodeHost(mode: HostedMode, store: StateStore): Promise<SyncSummary> {
   const errors: string[] = [];
   const merges = await detectMergedPrs(mode, store).catch((e: Error) => {
     errors.push(`merge detection: ${e.message}`);
@@ -383,3 +390,6 @@ export async function syncGitHub(mode: GitHubMode, store: StateStore): Promise<S
   const records = await syncRecords(mode, store);
   return { opened: opened.opened, pushed: opened.pushed, merges, records, errors: [...errors, ...opened.errors] };
 }
+
+/** @deprecated name from 2.2; `syncCodeHost` since 3.7 (the pass is the same on GitLab). */
+export const syncGitHub = syncCodeHost;

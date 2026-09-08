@@ -30,6 +30,8 @@ export const identity = z.strictObject({
   skillsOwned: z.array(nonEmpty).optional(),
   /** Code-host login, so a merge performed on GitHub can be attributed to this identity. */
   github: nonEmpty.optional(),
+  /** GitLab username, so a merge request merged on GitLab can be attributed to this identity (3.7). */
+  gitlab: nonEmpty.optional(),
   /** OIDC subject (`sub`) in hosted mode; without it the provider's `auth.claim` (email by default) must equal `id`. */
   subject: nonEmpty.optional(),
 });
@@ -96,7 +98,7 @@ export const config = z.strictObject({
   defaultRole: z.enum(["po", "eng"]),
   defaultBranch: z.string().optional(),
   /** Where gates that need a PR are executed; local mode has no PRs and lets a tech lead accept high-risk plans via CLI. */
-  codeHost: z.enum(["local", "github"]).optional(),
+  codeHost: z.enum(["local", "github", "gitlab"]).optional(),
   identities: z.array(identity).min(1),
   /** Hosted mode login; absent = local mode (git identity + role switcher). */
   auth: auth.optional(),

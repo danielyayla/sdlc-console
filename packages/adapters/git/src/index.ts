@@ -15,4 +15,5 @@ export * from "./ledger.js";
 export * from "./attributes.js";
 export * from "./remote.js";
 export * from "./codehost.js";
+export * from "./hosted.js";
 export * from "./branches.js";

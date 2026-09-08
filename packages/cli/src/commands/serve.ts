@@ -36,10 +36,12 @@ export async function serveCommand(io: Io, opts: ServeOptions): Promise<RunningS
   const webDir = findWebDir();
   const repos = (opts.repos ?? []).map((r) => resolve(io.cwd, r));
   const server = await startServer({ cwd: ctx.root, ...(repos.length > 0 ? { repos } : {}), identity: who, port: opts.port ?? DEFAULT_PORT, ...(opts.host ? { host: opts.host } : {}), sdlcBin: fileURLToPath(new URL("../bin.js", import.meta.url)), ...(webDir ? { webDir } : {}), engine: opts.engine === true, env: io.env, log: (line) => io.stderr(`${line}\n`) });
-  const webhooks = io.env["GITHUB_WEBHOOK_SECRET"] ? `  webhooks: ${server.url}/api/webhooks/github` : "";
+  const hosts = [...new Set(server.products.map((p) => p.store.currentRepo?.config.codeHost ?? "local"))];
+  const codeHost = hosts.some((h) => h !== "local") ? `  codeHost: ${hosts.join(", ")}` : "";
+  const webhooks = [io.env["GITHUB_WEBHOOK_SECRET"] ? `${server.url}/api/webhooks/github` : "", io.env["SDLC_GITLAB_WEBHOOK_SECRET"] ? `${server.url}/api/webhooks/gitlab` : ""].filter(Boolean).map((u) => `  webhooks: ${u}`).join("");
   const auth = server.auth ? `  auth: oidc via ${server.auth.provider.issuer}${io.env["SDLC_OIDC_CLIENT_SECRET"] ? "" : " (public client, PKCE)"}` : "";
   const github = server.products.some((p) => p.committer) ? `  github: app (commits on behalf of the signed-in person)` : "";
   const products = server.products.length > 1 ? `  products: ${server.products.map((p) => p.name).join(", ")}` : "";
-  io.stdout(`${server.url}${webDir ? "" : "  (API only — build @sdlc/web to serve the console)"}${opts.engine ? "  engine: on" : ""}${products}${auth}${github}${webhooks}\n`);
+  io.stdout(`${server.url}${webDir ? "" : "  (API only — build @sdlc/web to serve the console)"}${opts.engine ? "  engine: on" : ""}${products}${codeHost}${auth}${github}${webhooks}\n`);
   return server;
 }

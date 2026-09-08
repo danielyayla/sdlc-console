@@ -27,7 +27,7 @@ import { CliError, table, type Io } from "./io.js";
 
 export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
 
-  sdlc init [--product <name>] [--intent-home <path>] [--sdlc-bin <command>]
+  sdlc init [--product <name>] [--intent-home <path>] [--sdlc-bin <command>] [--code-host local|github|gitlab]   (gitlab writes .gitlab-ci.yml instead of the GitHub workflows)
   sdlc validate [--ref <ref>] [--working]
   sdlc change new --title <t> [--kind feature|fix] [--risk routine|high] [--origin idea|ticket:REF|…] [--intent <file|->]
   sdlc change list [--stage n]
@@ -57,7 +57,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc freeze dismiss <CHG> --file p --reason r         (dismiss the test-freeze auto-finding blocking the merge)
   sdlc run <CHG>                                        (per-change run: verification + intersecting evals; green opens the PR)
   sdlc serve --engine                                   (launch sessions and runs automatically on transitions)
-  sdlc sync                                             (GitHub mode: open artifact PRs, record merges done on GitHub, refresh the records PR)
+  sdlc sync                                             (GitHub/GitLab mode: open artifact PRs/MRs, record merges done on the host, refresh the records PR)
   sdlc evals run [--trigger manual|schedule|config-pr] [--ref r]   (run every active case; commits evals/runs/RUN-NNNN.json; raises retire/broken-check triage)
   sdlc evals gate [--run RUN-id]                        (config-change gate: exit 1 below threshold, regressed cases with before/after)
   sdlc evals harvest <CHG>                              (post-merge "Add as eval": draft case for the platform owner)
@@ -68,6 +68,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc record retry <CHG> <artifact>                     (run the outstanding write-back now — "write-back failed · retry")
   sdlc record status <CHG>                               (mode, synced time and write-back per artifact)
   POST /api/webhooks/github                             (GitHub mode: signed deliveries under GITHUB_WEBHOOK_SECRET; polling stays on as the fallback)
+  POST /api/webhooks/gitlab                             (GitLab mode: token-verified deliveries under SDLC_GITLAB_WEBHOOK_SECRET; same fallback)
   POST /api/webhooks/claude-security | claude-tag       (maintain intake: X-Hub-Signature-256 over the raw body under SDLC_CLAUDE_SECURITY_WEBHOOK_SECRET / SDLC_CLAUDE_TAG_WEBHOOK_SECRET; idempotent per deliveryId)
 
 Every command accepts --json and, in a monorepo, --product <name> (or SDLC_PRODUCT / SDLC_HOME) to address one product. Mutating commands refuse when SDLC_ACTOR_TYPE=agent.
@@ -112,6 +113,7 @@ const OPTIONS = {
   window: { type: "string" },
   refresh: { type: "boolean" },
   "sdlc-bin": { type: "string" },
+  "code-host": { type: "string" },
   repo: { type: "string", multiple: true },
   format: { type: "string" },
   out: { type: "string" },
@@ -144,7 +146,9 @@ export async function main(argv: string[], io: Io): Promise<number> {
   try {
     switch (cmd) {
       case "init": {
-        const r = await init(io, { ...(values.product ? { product: values.product } : {}), ...(values["intent-home"] ? { intentHome: values["intent-home"] } : {}), ...(values["sdlc-bin"] ? { sdlcBin: values["sdlc-bin"] } : {}) });
+        const codeHost = values["code-host"];
+        if (codeHost !== undefined && codeHost !== "local" && codeHost !== "github" && codeHost !== "gitlab") throw new CliError("--code-host must be local, github or gitlab");
+        const r = await init(io, { ...(values.product ? { product: values.product } : {}), ...(values["intent-home"] ? { intentHome: values["intent-home"] } : {}), ...(values["sdlc-bin"] ? { sdlcBin: values["sdlc-bin"] } : {}), ...(codeHost ? { codeHost } : {}) });
         emit(io, json, r, () => [...r.created.map((c) => `created  ${c}`), ...r.skipped.map((s) => `kept     ${s}`), ...(r.hooksSnippet ? ["", ".claude/settings.json exists — add these hooks to it:", r.hooksSnippet] : [])].join("\n"));
         return 0;
       }

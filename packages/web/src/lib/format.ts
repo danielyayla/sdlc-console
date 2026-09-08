@@ -6,6 +6,21 @@ export const ARTIFACT_FILES = ["intent.md", "spec.md", "plan.md", "evals", "pr.y
 
 export type Role = "po" | "eng";
 
+/** `config.codeHost`: no host, GitHub (pull requests) or GitLab (merge requests). */
+export type CodeHost = "local" | "github" | "gitlab";
+
+/** "PR #7" on GitHub (and for a local record), "MR !7" on GitLab; without a number, the bare "PR" / "MR". */
+export function prLabel(codeHost: CodeHost | undefined, number?: number | undefined): string {
+  const mr = codeHost === "gitlab";
+  if (number === undefined) return mr ? "MR" : "PR";
+  return mr ? `MR !${number}` : `PR #${number}`;
+}
+
+/** "Pull request" / "Merge request" for panel headings. */
+export function prNoun(codeHost: CodeHost | undefined): string {
+  return codeHost === "gitlab" ? "Merge request" : "Pull request";
+}
+
 /** A trace link when the server has `OTEL_TRACE_URL_TEMPLATE` and the row carries a trace id (3.3); null otherwise. */
 export function traceUrl(template: string | null | undefined, traceId: string | null | undefined): string | null {
   if (!template || !traceId) return null;

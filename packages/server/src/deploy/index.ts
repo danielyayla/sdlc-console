@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { commitWritePlan, newUlid, readTree, type PrCheck } from "@sdlc/adapter-git";
-import { gitHubCodeHostFrom } from "@sdlc/adapter-github";
+import { hostedCodeHostFrom } from "../engine/codehost.js";
 import { ROLLBACK_CHECK_NAME, deriveChange, environmentByName, finishDeployment, loadRepo, recordRehearsal, recordSessionDeploys, rollbackRehearsedCheck, startDeployment, validateWritePlan, type ChangeView, type Repo, type ResolvedEnvironment, type SessionDeployItem } from "@sdlc/core";
 import { DEFAULT_AGENT_ID, readSessionDeploys } from "@sdlc/mcp";
 import type { Deployment, RollbackRehearsal } from "@sdlc/schemas";
@@ -137,10 +137,10 @@ export function rollbackCheckFor(view: ChangeView, repo: Repo): PrCheck {
  * record (the committed deploy.yaml is the truth the gate reads).
  */
 export async function publishRollbackCheck(root: string, repo: Repo, view: ChangeView, deps: DeployDeps = {}): Promise<string[]> {
-  if (repo.config.codeHost !== "github") return [];
-  const host = gitHubCodeHostFrom(deps.env ?? process.env);
+  if (repo.config.codeHost === "local") return [];
+  const host = hostedCodeHostFrom(repo.config.codeHost, deps.env ?? process.env);
   if (!host) {
-    deps.log?.(`${view.id}: config.codeHost is github but no token or App is set; ${ROLLBACK_CHECK_NAME} not published`);
+    deps.log?.(`${view.id}: config.codeHost is ${repo.config.codeHost} but no token or App is set; ${ROLLBACK_CHECK_NAME} not published`);
     return [];
   }
   const check = rollbackCheckFor(view, repo);

@@ -179,4 +179,6 @@ ${install}      - name: Production gate check
 `;
 }
 
+export * from "./gitlab-ci.js";
+
 export const WORKFLOW_FILES = { evals: ".github/workflows/sdlc-evals.yml", validate: ".github/workflows/sdlc-validate.yml", detect: ".github/workflows/sdlc-detect.yml", productionGate: ".github/workflows/sdlc-production-gate.yml" } as const;

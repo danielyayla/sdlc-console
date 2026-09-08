@@ -69,8 +69,8 @@ export async function loopCommand(ctx: CliContext, id: string, opts: LoopOptions
       trailers: { "SDLC-Actor": `human:${who.id}` },
       actor: { type: "human", id: who.id },
     };
-    if (repo.config.codeHost === "github") {
-      // the incident is an artifact PR (2.2): it goes on sdlc/<CHG>/incident, the engine (or sdlc sync) opens the PR, merging it closes the loop
+    if (repo.config.codeHost !== "local") {
+      // the incident is an artifact PR / MR (2.2): it goes on sdlc/<CHG>/incident, the engine (or sdlc sync) opens the PR, merging it closes the loop
       const report = validateWritePlan(repo, plan);
       if (report.blocking) throw new CliError("write-plan rejected by validation", 1, report.diagnostics.filter((d) => d.blocking));
       const branch = `sdlc/${id}/incident`;
