@@ -227,6 +227,27 @@ async function stage6Fixture(dir: string): Promise<void> {
     expect(audit.out).toContain("— cycle 2 —");
   });
 
+  it("GitHub mode: change new is born on sdlc/<CHG>/intent; main is untouched and the intent PR is the Plan gate", async () => {
+    const dir = await freshRepo();
+    await initAndCommit(dir);
+    const cfg = join(dir, "sdlc/config.yaml");
+    writeFileSync(cfg, readFileSync(cfg, "utf8").replace("codeHost: local", "codeHost: github"));
+    await git(dir, ["commit", "-q", "-am", "sdlc(config): github mode"]);
+    const main = (await git(dir, ["rev-parse", "HEAD"])).trim();
+    const r = await sdlc(dir, ["change", "new", "--title", "Export", "--json"]);
+    expect(r.code).toBe(0);
+    const j = r.json<{ id: string; inReview?: string; view: { stage: number } }>();
+    expect(j.inReview).toBe(`sdlc/${j.id}/intent`);
+    expect(j.view.stage).toBe(1);
+    expect((await git(dir, ["rev-parse", "HEAD"])).trim()).toBe(main);
+    expect(await git(dir, ["show", `sdlc/${j.id}/intent:sdlc/changes/${j.id}/intent.md`])).toContain("artifact: intent");
+    const text = await sdlc(dir, ["change", "new", "--title", "Second"]);
+    expect(text.out).toContain("created on sdlc/");
+    expect(text.out).toContain("merging it is the Plan gate");
+    // ids do not collide across branch-only changes
+    expect(text.out).not.toContain(j.id);
+  });
+
   it("GitHub mode: loop --incident puts the incident on sdlc/<CHG>/incident for its PR and does not loop; main is untouched", async () => {
     const dir = await freshRepo();
     await stage6Fixture(dir);

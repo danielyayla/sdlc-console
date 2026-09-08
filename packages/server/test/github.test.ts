@@ -7,7 +7,7 @@ import { CodeHostError, git, initRepo, isAncestor, readTree } from "@sdlc/adapte
 import { deriveChange, loadRepo } from "@sdlc/core";
 import { PO, realizeSeedRepro, writeSeed } from "@sdlc/fixtures";
 import { appendFinding } from "@sdlc/mcp";
-import { ActionError, Engine, JobStore, SessionRegistry, StateStore, acceptGate, codeHostFor, launchSession, type Exec } from "../src/index.js";
+import { ActionError, Engine, JobStore, SessionRegistry, StateStore, acceptGate, codeHostFor, launchSession, newChange, type Exec } from "../src/index.js";
 import { startFakeGitHub, type FakeGitHub } from "../../adapters/github/test/fake-github.js";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/fake-claude.sh", import.meta.url));
@@ -301,6 +301,46 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     expect(await git(gh.bare, ["show", "refs/heads/main:sdlc/changes/CHG-0021/log.jsonl"])).toContain('"gate.sent_back"');
     expect((await viewOf(dir, "CHG-0022")).stage).toBe(3);
     void store;
+  }, 60_000);
+
+  it("a new change is born on sdlc/<CHG>/intent: the sync opens the intent PR, accepting gate 1 merges it and the change lands on main at stage 2", async () => {
+    const { dir, gh, env } = await githubSeed();
+    mapLogin(dir, PO, "priya-gh");
+    await git(dir, ["commit", "-q", "-am", "sdlc(config): map priya-gh"]);
+    await git(dir, ["push", "-q", "origin", "main"]);
+    const { engine } = harness(dir, env);
+    const po = new StateStore({ root: dir, identity: PO_ID });
+    await po.refresh();
+    const mainBefore = (await git(dir, ["rev-parse", "main"])).trim();
+    const created = await newChange(po, { title: "Nightly digest", kind: "feature", risk: "routine", origin: { type: "idea" }, intentBody: "# Intent: Nightly digest\n\n## Problem\nNo digest.\n\n## Proposed outcome\nA digest.\n\n## Affected users and systems\nMail.\n\n## Constraints\nNone.\n\n## Open questions\nNone.\n" });
+    const id = created.changeId ?? "";
+    expect(id).toMatch(/^CHG-\d{4}$/);
+    expect(created.toast).toContain(`created on sdlc/${id}/intent`);
+    // main did not move; the change is visible in the snapshot from its branch, waiting at gate 1
+    expect((await git(dir, ["rev-parse", "main"])).trim()).toBe(mainBefore);
+    expect(await gitRawShow(dir, `main:sdlc/changes/${id}/change.yaml`)).toBeNull();
+    let snap = await po.refresh(true);
+    expect(snap.branches.map((b) => b.branch)).toContain(`sdlc/${id}/intent`);
+    let v = snap.changes.find((c) => c.id === id);
+    expect(v?.stage).toBe(1);
+    expect(v?.gate?.s).toBe(1);
+    // the sync opens the intent PR
+    const sync = await engine.sync();
+    expect(sync?.opened).toMatchObject([{ changeId: id, artifact: 0, branch: `sdlc/${id}/intent` }]);
+    expect(gh.state.pulls[0]).toMatchObject({ head: `sdlc/${id}/intent`, base: "main", title: expect.stringContaining("intent.md for review") });
+    // accepting gate 1 merges the PR; the change now sits on main at stage 2
+    const g1 = await acceptGate(po, id, 1, env);
+    expect(g1.toast).toContain("merged");
+    expect(gh.state.pulls[0]).toMatchObject({ merged: true });
+    expect(await git(gh.bare, ["show", `refs/heads/main:sdlc/changes/${id}/intent.md`])).toContain("Nightly digest");
+    const originLog = await git(gh.bare, ["show", `refs/heads/main:sdlc/changes/${id}/log.jsonl`]);
+    expect(originLog).toContain('"gate":1');
+    expect(originLog).toContain('"source":"pr.merge"');
+    snap = await po.refresh(true);
+    v = snap.changes.find((c) => c.id === id);
+    expect(v?.stage).toBe(2);
+    expect(snap.branches).toEqual([]);
+    expect((await viewOf(dir, id)).stage).toBe(2);
   }, 60_000);
 
   it("a branch carrying ledger lines only (a session started or failed before proposing) opens no PR; the PR opens once the artifact is on it", async () => {
