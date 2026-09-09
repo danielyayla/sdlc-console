@@ -219,6 +219,7 @@ describe("Config (spec §4)", () => {
     expect(html).toContain('class="value tabular green-text">100%</div>');
     expect(html).toContain("threshold 90%");
     expect(html).toContain("CASE-0003");
+    expect(html).toContain('class="btn text mono filter active" aria-pressed="true">all</button>');
     expect(html).toContain("draft · checks missing");
     expect(html).toContain("Run suite");
     expect(html).toContain(">budget</div><div class=\"value tabular \">n/a</div>");

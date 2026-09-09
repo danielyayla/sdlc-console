@@ -125,8 +125,8 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
               {ev.strip.map((r) => <span key={r.id} className={`bar-lit ${VERDICT_TONE[r.verdict] ?? "off"}`} title={`${r.id} · ${r.trigger} · ${r.verdict} ${Math.round(r.passRate * 100)}% · ${r.model} · ${r.changes.join(", ")}`} />)}
               {runs.length === 0 ? <span className="mono faint">no runs yet</span> : null}
             </div>
-            <div className="filters">
-              {(["all", "active", "draft", "retired"] as const).map((f) => <button key={f} className={`tab${statusFilter === f ? " active" : ""}`} onClick={() => setStatusFilter(f)}>{f}</button>)}
+            <div className="filters" role="group" aria-label="status filter">
+              {(["all", "active", "draft", "retired"] as const).map((f) => <button key={f} className={`btn text mono filter${statusFilter === f ? " active" : ""}`} aria-pressed={statusFilter === f} onClick={() => setStatusFilter(f)}>{f}</button>)}
             </div>
             {filtered.length === 0 ? <div className="empty mono">Nothing here</div> : null}
             {filtered.map((c) => (
