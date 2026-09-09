@@ -54,13 +54,21 @@ export function riskLabel(risk: ChangeView["risk"]): string {
   return risk === "high" ? "high risk" : "routine";
 }
 
-/** Stepper dot colour per spec §4 (Change detail). */
-export function dotClass(state: DocState, isCurrent: boolean, agent: boolean, isPlanDraft: boolean): string {
-  if (state === "committed" || state === "stale") return "dot green";
-  if (state === "pending-review") return "dot amber";
-  if (isPlanDraft) return "dot orange pulse";
-  if (isCurrent && agent) return "dot orange pulse";
-  return "dot inactive";
+/** Stepper bar per stage (rule 6): a 2px line of light in the stage's state colour; an absent stage is unlit. */
+export function barClass(state: DocState, isCurrent: boolean, agent: boolean, isPlanDraft: boolean): string {
+  if (state === "committed" || state === "stale") return "bar-lit green";
+  if (state === "pending-review") return "bar-lit amber";
+  if (isPlanDraft || (isCurrent && agent)) return "bar-lit agent pulse";
+  return "bar-lit off";
+}
+
+/** Stepper caption: the state as a word; a plan draft names its revision. */
+export function barCaption(state: DocState, isCurrent: boolean, agent: boolean, isPlanDraft: boolean, planRev: number): string {
+  if (isPlanDraft) return `draft rev ${planRev}`;
+  if (state === "committed" || state === "stale") return "committed";
+  if (state === "pending-review") return "in review";
+  if (state === "draft" || (isCurrent && agent)) return "in progress";
+  return "";
 }
 
 /** Viewer header state text. */

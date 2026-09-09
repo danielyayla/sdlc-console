@@ -1,7 +1,7 @@
 import type { ChangeView } from "@sdlc/core";
 import { useEffect, useState } from "react";
 import { fetchArtifact, type Artifact } from "../api";
-import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, dotClass, ownsGate, prLabel, prNoun, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
+import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, barCaption, barClass, ownsGate, prLabel, prNoun, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
 import { formOpen, type FormState } from "../state";
 import { InlineReason } from "./InlineReason";
 import { HarnessChips } from "./Sessions";
@@ -104,29 +104,25 @@ export function ChangeDetail(p: ChangeDetailProps) {
   return (
     <div className="detail">
       <button className="back" onClick={p.onBack}>← Pipeline</button>
-      <div className="detail-title">
-        <span className="id">{view.id}</span>
-        <h1>{view.title}</h1>
-        <span className="chip">{String(view.stage).padStart(2, "0")} · {STAGE_NAMES[view.stage - 1]}</span>
+      <div className="detail-head">
+        <span>{view.id} · {STAGE_NAMES[view.stage - 1]}</span>
         <span className={`chip${view.risk === "high" ? " amber" : ""}`}>{riskLabel(view.risk)}</span>
         {view.cycle > 1 ? <span className="chip">cycle {view.cycle}</span> : null}
         {!view.valid ? <span className="chip red">validation error</span> : null}
         {p.exportHref ? <a className="chip" href={p.exportHref} download={`${view.id}-export.json`} title="compliance export: change, every cycle, the ledger verbatim, gate decisions with their commits, PRs, runs and findings — JSON with a sha256 content hash">Export</a> : null}
       </div>
+      <h1 className="detail-title">{view.title}</h1>
 
       <div className="stepper" role="tablist" aria-label="artifacts">
         {STAGE_INDEX.map((i) => {
           const d = view.docs[i as 0 | 1 | 2 | 3 | 4 | 5];
           const isCurrent = view.stage - 1 === i;
           const isPlanDraft = i === 2 && view.planState === "draft";
-          const cls = dotClass(d.state, isCurrent, view.agent, isPlanDraft);
           return (
             <span key={i} style={{ display: "contents" }}>
-              {i > 0 ? <span className="arrow">→</span> : null}
               <button className={`step${selected === i ? " selected" : ""}`} role="tab" aria-selected={selected === i} onClick={() => p.onSelectArt(i)}>
-                <span className={cls} />
-                <span className="name">{ARTIFACT_NAMES[i]}</span>
-                <span className="caption">{isPlanDraft ? `draft rev ${view.planRev}` : d.state === "absent" ? "future" : d.state === "pending-review" ? "in review" : d.state}</span>
+                <span className={barClass(d.state, isCurrent, view.agent, isPlanDraft)} />
+                <span className="label"><span className="name">{ARTIFACT_NAMES[i]}</span><span className="caption">{barCaption(d.state, isCurrent, view.agent, isPlanDraft, view.planRev)}</span></span>
               </button>
             </span>
           );

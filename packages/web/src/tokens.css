@@ -170,16 +170,15 @@ a:hover { color: var(--accent-hover); }
 .owner { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; margin-left: auto; }
 
 /* detail */
-.detail { max-width: 1120px; }
+.detail { max-width: 1200px; margin: 0 auto; }
 .back { background: transparent; border: 0; color: var(--text-muted); cursor: pointer; padding: 0; margin-bottom: 10px; }
-.detail-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.detail-title h1 { font-size: 22px; margin: 0; color: var(--text-primary); font-weight: 600; }
-.stepper { display: flex; align-items: center; gap: 6px; margin: 16px 0; flex-wrap: wrap; }
-.step { background: transparent; border: 0; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: var(--radius-control); }
-.step:hover, .step.selected { background: var(--bg-hover); }
-.step .name { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); }
-.step .caption { font-size: 11px; color: var(--text-faint); }
-.arrow { color: var(--text-faintest); }
+.detail-head { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-muted); }
+.detail-title { font-size: var(--text-primary-size); line-height: 1.2; margin: 6px 0 32px; color: var(--text-primary); font-weight: 500; }
+.stepper { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s-3); margin: 0 0 var(--s-6); }
+.step { background: transparent; border: 0; padding: 0; cursor: pointer; text-align: left; color: inherit; display: block; }
+.step .bar-lit { display: block; }
+.step .label { margin-top: 10px; display: flex; justify-content: space-between; gap: var(--s-2); font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-faint); }
+.step.selected .name { color: var(--text-primary); }
 .body { display: grid; grid-template-columns: 1fr 330px; gap: 14px; }
 .viewer { background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-panel); }
 .viewer-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); }
