@@ -24,8 +24,9 @@ describe("Pipeline (spec §4)", () => {
     expect(html).toContain("Merge PR");
     expect(html).toContain("TECH LEAD");
     expect(html).toContain('<span class="agent-text pulse">agent</span>');
-    expect(html).toContain('class="card edge-lit amber"');
-    expect(html).toContain('class="card edge-lit agent pulse"');
+    expect(html).toContain('class="pcard edge-lit amber owned"');
+    expect(html).toContain('class="pcard edge-lit agent pulse"');
+    expect(html).not.toContain('class="card');
     expect(html).not.toContain("gate-strip");
     expect(html).toContain("Evals red — agent fixing");
     expect(html).not.toContain("Nothing here");

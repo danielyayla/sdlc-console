@@ -141,12 +141,10 @@ a:hover { color: var(--accent-hover); }
 .column-num { font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-muted); }
 .column-count { color: var(--text-faint); font-weight: 400; margin-left: auto; font-family: var(--font-mono); font-size: var(--text-data); }
 .empty { color: var(--text-faintest); font-family: var(--font-mono); font-size: var(--text-data); padding: 10px 0; }
-.card { display: block; background: var(--bg-raised); border: 0; border-radius: var(--radius-card); padding: 12px 14px; margin-bottom: 2px; cursor: pointer; text-align: left; width: 100%; color: inherit; transition: background 0.12s; }
-.card.edge-lit { padding-left: 16px; }
-.card:hover { background: var(--bg-hover); }
-.card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.card-title { color: var(--text-primary); font-weight: 500; margin: 6px 0 2px; text-wrap: pretty; }
-.card-status { color: var(--text-muted); }
+.pcard { display: block; width: 100%; text-align: left; color: inherit; cursor: pointer; background: transparent; border: 0; border-radius: 0; padding: 12px 14px 12px 16px; margin-bottom: 8px; transition: background 0.12s; }
+.pcard.owned { background: var(--bg-panel); }
+.pcard:hover { background: var(--bg-raised); }
+.ptitle { color: var(--text-primary); font-weight: 500; line-height: 1.35; margin: 4px 0; }
 .gate-line { margin-top: 8px; }
 .env-strip { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 12px; }
 

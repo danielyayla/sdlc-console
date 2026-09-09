@@ -46,18 +46,20 @@ export function Pipeline({ changes, role, now, onSelect }: PipelineProps) {
             {cards.length === 0 ? <div className="empty">Nothing here</div> : null}
             {cards.map((c) => {
               const production = c.deploy.productionGate;
-              const edge = !c.valid ? "red" : c.gate || production?.open ? "amber" : c.agent ? "agent pulse" : null;
+              const mine = owned(c, role);
+              // amber with glow when the decision is this role's; unlit when it is another role's; orange pulse while an agent works
+              const edge = mine ? "amber" : hasOpenGate(c) ? "off" : c.agent ? "agent pulse" : "off";
               const showEnvs = (stage >= 5 || c.deploy.environments.some((e) => e.status !== "not-deployed")) && c.deploy.environments.length > 0;
               return (
-                <button className={`card${edge ? ` edge-lit ${edge}` : ""}`} key={c.id} onClick={() => onSelect(c.id)}>
-                  <div className="card-head mono">
+                <button className={`pcard edge-lit ${edge}${mine ? " owned" : ""}`} key={c.id} onClick={() => onSelect(c.id)}>
+                  <div className="pline mono">
                     <span className="muted">{c.id}</span>
                     {c.agent ? <span className="agent-text pulse">agent</span> : null}
                     {c.risk === "high" ? <span className="amber-text">{riskLabel(c.risk)}</span> : null}
                     {!c.valid ? <span className="red-text">invalid</span> : null}
                   </div>
-                  <div className="card-title">{c.title}</div>
-                  <div className="card-status">{c.status}</div>
+                  <div className="ptitle">{c.title}</div>
+                  <div className="pline muted">{c.status}</div>
                   {c.gate ? (
                     <div className="gate-line mono amber-text">{c.gate.label} · {gateOwnerLabel(c)} · {waitingFor(c.gate.since, now)}</div>
                   ) : production?.open ? (
