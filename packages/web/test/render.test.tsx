@@ -152,6 +152,7 @@ describe("Loop with detection snapshots (3.4)", () => {
 describe("Loop, Security, Metrics (spec §4)", () => {
   it("Loop shows the bands table, the tier footer and both triage items (lit by tier) with their actions", () => {
     const html = render({ ...initialState("po"), view: "loop" });
+    expect(html).toContain("2 signals in the triage queue.");
     expect(html).toContain("p95_latency_ms");
     // the seed's bands declare no source: the row says so instead of pretending to measure (3.4)
     expect(html).toContain("no source · add `source:` to bands.yaml");

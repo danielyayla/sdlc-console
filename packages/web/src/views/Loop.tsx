@@ -22,7 +22,7 @@ function fmt(n: number | null, unit: string | null): string {
   return unit ? `${s} ${unit}` : s;
 }
 
-/** Loop view (spec §4.6, FR-60/61): the Bands table over bands.yaml + detection snapshots, then the triage queue. */
+/** Loop view (spec §4.6, FR-60/61): the triage queue is the primary object, then the bands over bands.yaml + detection snapshots. */
 export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form, onForm }: LoopProps) {
   const close = () => onForm(null);
   const open = snapshot.triage.filter((t) => t.data.status === "open");
@@ -34,10 +34,34 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form,
   const runbooks = snapshot.bands?.runbooks ?? [];
   return (
     <div className="loop">
-      <div className="view-head">
-        <h1 className="primary">Loop</h1>
-        <span className="mono faint">bands.yaml · rolling {snapshot.bands?.baselineWindow ?? "30d"} baseline · Western Electric rules</span>
+      <div className="primary">{open.length === 0 ? "Queue clear — the loop is feeding itself." : open.length === 1 ? "1 signal in the triage queue." : `${open.length} signals in the triage queue.`}</div>
+      <div className="items">
+      {open.map((t) => {
+        const job = jobFor(t.data.job ?? null);
+        const runs = (snapshot.runbookRuns ?? []).filter((r) => r.triage === t.data.id);
+        return (
+          <article className={`item edge-lit ${t.data.tier === "incident" ? "red" : "amber"}`} key={t.data.id}>
+            <div className="item-meta mono">
+              <span className="muted">{t.data.id}</span>
+              <span className={t.data.tier === "incident" ? "red-text" : "amber-text"}>{t.data.tier}</span>
+              <span>{t.data.src}</span>
+              {t.data.job ? <span title={t.data.job}>{job ? `${job.kind} ${job.state}` : "job"}{job?.sessionId ? ` · ${job.sessionId}` : t.data.session ? ` · ${t.data.session}` : ""}</span> : null}
+              {t.data.channel ? <span title={`message ${t.data.channel.messageId}`}>{t.data.channel.author} · <a href={t.data.channel.permalink} target="_blank" rel="noreferrer">message</a>{t.data.channel.postedAt ? ` · ${t.data.channel.postedAt}` : ""}</span> : null}
+              {t.data.channel?.tags?.map((tag) => <span className="faint" key={tag}>{tag}</span>)}
+            </div>
+            <div className="item-title">{t.data.title}</div>
+            <pre className="evidence">{t.data.evidence}</pre>
+            {runs.length > 0 ? <div className="item-line mono">runbooks: {runs.map((r) => `${r.id} ${r.runbook} (exit ${r.exitCode})`).join(" · ")}</div> : null}
+            <div className="actions">
+              <button className="btn primary" onClick={() => onAccept(t.data.id)}>Accept → Plan</button>
+              {formOpen(form, "dismiss-triage", t.data.id) ? null : <button className="btn text" onClick={() => onForm({ kind: "dismiss-triage", id: t.data.id })}>Dismiss · tune band</button>}
+            </div>
+            {formOpen(form, "dismiss-triage", t.data.id) ? <InlineReason placeholder="" submitLabel="Dismiss · tune band" fields={[{ key: "reason", placeholder: `Why ${t.data.id} is dismissed — required` }, { key: "tune", placeholder: "Tune the band? — optional note", required: false }]} onCancel={close} onSubmit={(v) => { close(); onDismiss(t.data.id, v["reason"] ?? "", v["tune"] ?? ""); }} /> : null}
+          </article>
+        );
+      })}
       </div>
+      <div className="mono faint">bands.yaml · rolling {snapshot.bands?.baselineWindow ?? "30d"} baseline · Western Electric rules</div>
       <table className="bands">
         <thead>
           <tr><th>Metric</th><th>Baseline</th><th>Current</th><th>σ</th><th>Tier</th><th>Action</th><th>Status</th></tr>
@@ -72,35 +96,6 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form,
         {" "}detection {snapshot.bands?.detectEvery ? `every ${snapshot.bands.detectEvery}` : "every 15m"} · last snapshot {latest ?? "never"}
         {runbooks.length > 0 ? ` · runbooks: ${runbooks.map((r) => (typeof r === "string" ? `${r} (no command)` : r.id)).join(", ")}` : ""}
         {onDetect ? <> · <button className="btn text" onClick={onDetect} title="run the detection script now">Run detection</button></> : null}
-      </div>
-
-      <h2 className="section-head"><span className="secondary">Triage queue</span><span>{open.length} open · accept → a new change in Plan</span></h2>
-      {open.length === 0 ? <div className="empty">Queue clear — the loop is feeding itself</div> : null}
-      <div className="items">
-      {open.map((t) => {
-        const job = jobFor(t.data.job ?? null);
-        const runs = (snapshot.runbookRuns ?? []).filter((r) => r.triage === t.data.id);
-        return (
-          <article className={`item edge-lit ${t.data.tier === "incident" ? "red" : "amber"}`} key={t.data.id}>
-            <div className="item-meta mono">
-              <span className="muted">{t.data.id}</span>
-              <span className={t.data.tier === "incident" ? "red-text" : "amber-text"}>{t.data.tier}</span>
-              <span>{t.data.src}</span>
-              {t.data.job ? <span title={t.data.job}>{job ? `${job.kind} ${job.state}` : "job"}{job?.sessionId ? ` · ${job.sessionId}` : t.data.session ? ` · ${t.data.session}` : ""}</span> : null}
-              {t.data.channel ? <span title={`message ${t.data.channel.messageId}`}>{t.data.channel.author} · <a href={t.data.channel.permalink} target="_blank" rel="noreferrer">message</a>{t.data.channel.postedAt ? ` · ${t.data.channel.postedAt}` : ""}</span> : null}
-              {t.data.channel?.tags?.map((tag) => <span className="faint" key={tag}>{tag}</span>)}
-            </div>
-            <div className="item-title">{t.data.title}</div>
-            <pre className="evidence">{t.data.evidence}</pre>
-            {runs.length > 0 ? <div className="item-line mono">runbooks: {runs.map((r) => `${r.id} ${r.runbook} (exit ${r.exitCode})`).join(" · ")}</div> : null}
-            <div className="actions">
-              <button className="btn primary" onClick={() => onAccept(t.data.id)}>Accept → Plan</button>
-              {formOpen(form, "dismiss-triage", t.data.id) ? null : <button className="btn text" onClick={() => onForm({ kind: "dismiss-triage", id: t.data.id })}>Dismiss · tune band</button>}
-            </div>
-            {formOpen(form, "dismiss-triage", t.data.id) ? <InlineReason placeholder="" submitLabel="Dismiss · tune band" fields={[{ key: "reason", placeholder: `Why ${t.data.id} is dismissed — required` }, { key: "tune", placeholder: "Tune the band? — optional note", required: false }]} onCancel={close} onSubmit={(v) => { close(); onDismiss(t.data.id, v["reason"] ?? "", v["tune"] ?? ""); }} /> : null}
-          </article>
-        );
-      })}
       </div>
     </div>
   );
