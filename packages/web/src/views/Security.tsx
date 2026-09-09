@@ -78,7 +78,7 @@ export function Security({ snapshot, onPatch, onEscalate, onDismiss, form, onFor
         );
       })}
       </div>
-      <div className="footer mono">Fixes reach production only through PR review and branch protection; the proposing agent cannot approve its own fix; deterministic checks stay in CI.</div>
+      <div className="foot-line mono">fixes reach production only through the PR gate · the proposing agent cannot approve its own fix</div>
     </div>
   );
 }

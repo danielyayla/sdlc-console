@@ -182,6 +182,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("Dismiss with reason");
     expect((html.match(/Wider than one patch/g) ?? []).length).toBe(2);
     expect(html).toContain("the proposing agent cannot approve its own fix");
+    expect(html).not.toContain('class="footer');
   });
   it("the first new finding is the only primary row", () => {
     const html = render({ ...initialState("eng"), view: "security" });
