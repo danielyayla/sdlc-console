@@ -48,6 +48,7 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form,
               {t.data.job ? <span title={t.data.job}>{job ? `${job.kind} ${job.state}` : "job"}{job?.sessionId ? ` · ${job.sessionId}` : t.data.session ? ` · ${t.data.session}` : ""}</span> : null}
               {t.data.channel ? <span title={`message ${t.data.channel.messageId}`}>{t.data.channel.author} · <a href={t.data.channel.permalink} target="_blank" rel="noreferrer">message</a>{t.data.channel.postedAt ? ` · ${t.data.channel.postedAt}` : ""}</span> : null}
               {t.data.channel?.tags?.map((tag) => <span className="faint" key={tag}>{tag}</span>)}
+              <span className="when">{t.data.createdAt}</span>
             </div>
             <div className="item-title">{t.data.title}</div>
             <pre className="evidence">{t.data.evidence}</pre>

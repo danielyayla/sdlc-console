@@ -234,10 +234,12 @@ a:hover { color: var(--accent-hover); }
 .item { background: var(--bg-panel); padding: 20px 24px 20px 28px; }
 .item.dismissed { opacity: 0.5; }
 .item-meta { display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-faint); }
+.item-meta .when { margin-left: auto; }
 .item-title { color: var(--text-primary); font-weight: 500; margin: 8px 0 4px; text-wrap: pretty; }
+.loop .item-title { font-size: var(--text-primary-size); line-height: 1.2; }
 .item-title a { color: inherit; text-decoration: underline; text-decoration-color: var(--text-faint); }
 .item-line { color: var(--text-muted); margin-top: 4px; }
-.item .evidence { margin: 10px 0 0; padding: 10px 12px; background: var(--bg-raised); font-family: var(--font-mono); font-size: var(--text-data); line-height: 1.6; white-space: pre-wrap; color: var(--text-muted); max-height: 220px; overflow: auto; }
+.item .evidence { margin: 12px 0 0; padding: 0; background: transparent; font-family: var(--font-mono); font-size: var(--text-data); line-height: 1.6; white-space: pre-wrap; color: var(--text-muted); max-height: 220px; overflow: auto; }
 .item .actions { display: flex; gap: 20px; align-items: center; margin-top: 16px; }
 .item .actions .btn.primary { height: 36px; }
 .item .inline-reason { margin-top: 12px; }

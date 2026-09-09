@@ -166,6 +166,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("Accept → Plan");
     expect(html).toContain("Dismiss · tune band");
     expect(html).toContain('class="item edge-lit amber"');
+    expect(html).toContain('class="when">2026-'); // the item's createdAt verbatim, right-aligned
     expect(html).not.toContain("Queue clear");
   });
   it("Security shows severity as the item's lit edge and word, statuses, actions only while new, and the governance footer", () => {
