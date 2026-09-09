@@ -145,11 +145,13 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain('class="item edge-lit amber"');
     expect(html).not.toContain("Queue clear");
   });
-  it("Security shows severity chips, statuses, actions only while new, and the governance footer", () => {
+  it("Security shows severity as the item's lit edge and word, statuses, actions only while new, and the governance footer", () => {
     const html = render({ ...initialState("eng"), view: "security" });
     expect(html).toContain("SEC-0118");
     expect(html).toContain("SEC-0120");
     expect(html).toContain("patch in PR gate");
+    expect(html).toContain('class="item edge-lit red"');
+    expect(html).not.toContain('class="chip');
     expect(html).toContain("Patch → PR gate");
     expect(html).toContain("Wider than one patch → intent.md");
     expect(html).toContain("Dismiss with reason");
