@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { auditCommand, renderAudit } from "./commands/audit.js";
 import { exportCommand } from "./commands/export.js";
+import { detectCommand, renderDetection } from "./commands/detect.js";
 import { metricsReport, renderMetrics } from "./commands/metrics.js";
 import { changeList, changeNew, changeShow, summarize } from "./commands/change.js";
 import { acceptCommand, parseGate, sendBackCommand } from "./commands/gate.js";
@@ -34,6 +35,7 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc loop <CHG> [--incident <file>]
   sdlc audit <CHG>
   sdlc export <CHG> [--format json|md] [--out <file>] [--ref r]   (compliance export: change, cycles, ledger verbatim, gate decisions with commits, PRs, runs, findings; sha256 content hash)
+  sdlc detect                                           (bands.yaml sources once → .sdlc-state/snapshots; exit 2 at ≥2σ, 1 on a failed source; the engine's schedule raises the jobs)
   sdlc metrics [--stage n] [--window 30d] [--refresh]   (per-stage leading/lagging over git, ledger, PR metadata, CI, incident records; --refresh fetches GitHub facts)
   sdlc serve [--port n] [--host addr] [--role po|eng] [--repo <path>]…   (--repo: serve more repositories; config.products lists monorepo products)
   sdlc triage accept|dismiss <TRI> [--reason <text>] [--tune <note>]
@@ -314,7 +316,7 @@ export async function main(argv: string[], io: Io): Promise<number> {
         throw new CliError("usage: sdlc evals run|gate|harvest|trigger");
       }
       case "metrics": {
-        const r = await metricsReport(await repoContext(io, json, values.product), { stage: typeof values.stage === "string" ? values.stage : undefined, window: typeof values.window === "string" ? values.window : undefined, refresh: values.refresh === true });
+        const r = await metricsReport(await repoContext(io, json, values.product), { stage: typeof values.stage === "string" ? values.stage : undefined, window: typeof values.window === "string" ? values.window : undefined, refresh: values.refresh === true, ...(io.now ? { now: io.now } : {}) });
         emit(io, json, r, () => renderMetrics(r));
         return 0;
       }
@@ -325,13 +327,19 @@ export async function main(argv: string[], io: Io): Promise<number> {
         emit(io, json, r, () => renderAudit(r));
         return r.clean ? 0 : 1;
       }
+      case "detect": {
+        // the detection script: reads bands.yaml, runs its sources, writes cache snapshots; commits nothing, so any actor may run it
+        const r = await detectCommand(await repoContext(io, json, values.product));
+        emit(io, json, r.pass, () => renderDetection(r.pass));
+        return r.exitCode;
+      }
       case "export": {
         // read-only: grants nothing, so it runs for anyone (an agent included) — the document is what git already says
         const ctx = await repoContext(io, json, values.product);
         if (!sub) throw new CliError("usage: sdlc export <CHG> [--format json|md] [--out <file>]");
         const format = values.format ?? "json";
         if (format !== "json" && format !== "md") throw new CliError("--format must be json or md");
-        const r = await exportCommand(ctx, sub, { format, ...(values.ref ? { ref: values.ref } : {}), ...(values.out ? { out: values.out } : {}) });
+        const r = await exportCommand(ctx, sub, { format, ...(values.ref ? { ref: values.ref } : {}), ...(values.out ? { out: values.out } : {}), ...(io.now ? { now: io.now } : {}) });
         if (r.out) emit(io, json, { file: r.out, contentHash: r.doc.contentHash.value, events: r.doc.events.length, cycles: r.doc.cycles.length }, () => `wrote ${r.out} · ${r.doc.cycles.length} cycle(s) · ${r.doc.events.length} events · sha256 ${r.doc.contentHash.value}`);
         else io.stdout(json && format === "md" ? `${JSON.stringify(r.doc, null, 2)}\n` : r.text);
         return 0;

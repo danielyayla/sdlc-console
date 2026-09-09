@@ -1,14 +1,15 @@
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { blobSha, commitWritePlan, currentBranch, defaultBranch, git, homeFor, isRepo, newUlid, readTree, readTreeWithBase } from "@sdlc/adapter-git";
-import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, normalizeReason, proposalForReason, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
+import { STAGES, awaitingArtifact, check, deriveAll, deriveChange, eventsNamed, lastEvent, loadRepo, logPath, normalizeReason, proposalForReason, routesOf, runbookById, runbookListed, type ChangeFiles, type ChangeView, type Repo, type WritePlan } from "@sdlc/core";
 import { appendHookEvent } from "@sdlc/hooks";
 import { changeId as changeIdSchema, compileGlobs, parseArtifact, parsePlan, roundResult, severity, stringifyFrontMatter, stringifyJson, type Diagnostic, type Event, type EventName, type EventOf } from "@sdlc/schemas";
 import { z } from "zod";
 import { buildContext } from "./context-bundle.js";
 import { agentIdentity, sessionIdFrom } from "./identity.js";
-import { appendFinding, appendRound, clearWaiting, dirtyHash, loopState, readFindings, readReproDraft, readRounds, setWaiting, writeProposalDraft, writeReproDraft, type StoredFinding, type StoredRound } from "./sessions.js";
+import { appendFinding, appendRound, appendRunbookRun, clearWaiting, dirtyHash, loopState, readFindings, readReproDraft, readRounds, readRunbookRuns, setWaiting, writeDiagnosisDraft, writeProposalDraft, writeReproDraft, type StoredFinding, type StoredRound } from "./sessions.js";
 
 export interface ServerOptions {
   cwd: string;
@@ -43,7 +44,19 @@ class Refusal extends Error {
   }
 }
 
-/** The twelve agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
+/** Runbook commands run with this budget; the output is kept verbatim whatever the exit. */
+const RUNBOOK_TIMEOUT_MS = 10 * 60_000;
+
+function shell(cmd: string, cwd: string, env: Record<string, string | undefined>): Promise<{ exitCode: number; output: string }> {
+  return new Promise((resolve) => {
+    execFile("sh", ["-c", cmd], { cwd, timeout: RUNBOOK_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, env: { ...env, CI: "1", FORCE_COLOR: "0" } }, (error, stdout, stderr) => {
+      const code = error && typeof (error as { code?: unknown }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
+      resolve({ exitCode: code, output: `${stdout}${stderr ? `\n${stderr}` : ""}` });
+    });
+  });
+}
+
+/** The fourteen agent-facing tools (blueprint §9.3). No accept, merge, approve, freeze-lift or repro-confirm exists here. */
 export function createSdlcServer(opts: ServerOptions): McpServer {
   const env = opts.env ?? process.env;
   const now = () => (opts.now?.() ?? new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -371,8 +384,57 @@ export function createSdlcServer(opts: ServerOptions): McpServer {
       }),
   );
 
+  server.registerTool(
+    "report_diagnosis",
+    {
+      description: "Band diagnose/propose sessions (3.4): report the diagnosis of a bands.yaml breach in intent format (title, problem, proposed outcome, affected users and systems, optional constraints and open questions). Kept beside the session and written onto the breach's triage item by the system when the session ends; a human accepts it into a change or dismisses it.",
+      inputSchema: { metric: z.string().min(1), title: z.string().min(1), problem: z.string().min(1), proposedOutcome: z.string().min(1), affected: z.string().min(1), constraints: z.string().optional(), openQuestions: z.string().optional(), sessionId: z.string().optional() },
+    },
+    (args) =>
+      guard(async () => {
+        const l = await load();
+        const band = l.repo.bands?.metrics.find((m) => m.metric === args.metric);
+        if (!band) throw new Refusal(`${args.metric} is not a band in bands.yaml (${l.repo.bands?.metrics.map((m) => m.metric).join(", ") || "none"})`);
+        const expected = env["SDLC_BAND"];
+        if (expected && expected !== args.metric) throw new Refusal(`this session diagnoses ${expected}, not ${args.metric}`);
+        const session = sessionIdFrom(env, args.sessionId);
+        const title = args.title.trim().replace(/\s+/g, " ");
+        writeDiagnosisDraft(l.root, session, { metric: args.metric, title, problem: args.problem, proposedOutcome: args.proposedOutcome, affected: args.affected, ...(args.constraints ? { constraints: args.constraints } : {}), ...(args.openQuestions ? { openQuestions: args.openQuestions } : {}), ts: now() });
+        return ok({ metric: args.metric, title, session, note: `written onto the triage item for metric:${args.metric} when the session ends; a human accepts or dismisses it` });
+      }),
+  );
+
+  server.registerTool(
+    "run_runbook",
+    {
+      description: "3σ propose sessions only (3.4): run one pre-approved runbook from the bands.yaml allowlist by id. The command comes from the allowlist, never from the caller; it must be a `runbook:<id>` route of the breached band's 3σ tier. The output is recorded verbatim as sdlc/loop/runbooks/RBK-NNNN.json when the session ends. Ids not on the list are refused; there is no other way to run a command through this server.",
+      inputSchema: { id: z.string().min(1), sessionId: z.string().optional() },
+    },
+    (args) =>
+      guard(async () => {
+        const l = await load();
+        const metric = env["SDLC_BAND"];
+        const tier = env["SDLC_BAND_TIER"];
+        if (!metric || tier !== "3") throw new Refusal(`runbooks run only inside a 3σ propose session launched by the console for a breached band${metric ? ` (this session is at ${tier ?? "?"}σ)` : ""}`);
+        const band = l.repo.bands?.metrics.find((m) => m.metric === metric);
+        if (!band) throw new Refusal(`${metric} is not a band in bands.yaml`);
+        const routes = routesOf(band);
+        if (!routes.runbooks.includes(args.id)) throw new Refusal(`runbook:${args.id} is not a 3σ route of ${metric} (routes: ${band.tiers["3sigma"].routes.join(", ") || "none"})`);
+        if (!runbookListed(l.repo.bands, args.id)) throw new Refusal(`${args.id} is not on the runbook allowlist in bands.yaml (${(l.repo.bands?.runbooks ?? []).map((r) => (typeof r === "string" ? r : r.id)).join(", ") || "empty"})`);
+        const runbook = runbookById(l.repo.bands, args.id);
+        if (!runbook) throw new Refusal(`${args.id} is listed without a command in bands.yaml; the console runs only commands the allowlist spells out`);
+        const session = sessionIdFrom(env, args.sessionId);
+        if (readRunbookRuns(l.root, session).some((r) => r.runbook === args.id)) throw new Refusal(`${args.id} already ran in this session; a runbook runs once per proposal`);
+        const startedAt = now();
+        const r = await shell(runbook.command, l.root, env);
+        const run = { runbook: args.id, command: runbook.command, metric, startedAt, finishedAt: now(), exitCode: r.exitCode, output: r.output };
+        appendRunbookRun(l.root, session, run);
+        return ok({ ...run, note: "recorded as sdlc/loop/runbooks/RBK-NNNN.json on the triage item when the session ends" });
+      }),
+  );
+
   void eventsNamed;
   return server;
 }
 
-export const AGENT_TOOL_NAMES = ["list_work", "get_change", "get_context", "propose_artifact", "submit_plan_revision", "report_repro", "report_round", "report_done", "report_finding", "propose_claude_md_line", "request_input", "log_note"] as const;
+export const AGENT_TOOL_NAMES = ["list_work", "get_change", "get_context", "propose_artifact", "submit_plan_revision", "report_repro", "report_round", "report_done", "report_finding", "propose_claude_md_line", "request_input", "log_note", "report_diagnosis", "run_runbook"] as const;

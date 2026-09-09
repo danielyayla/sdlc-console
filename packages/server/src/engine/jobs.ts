@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 import { noopTracer, type Span, type SpanContext, type Tracer } from "../otel.js";
 
-export type JobKind = "design-pass" | "plan-session" | "build-session" | "per-change-run" | "open-pr" | "resume-session" | "review" | "review-mirror" | "evals-run" | "claude-md-proposal" | "proposal-mirror" | "record-writeback";
+export type JobKind = "design-pass" | "plan-session" | "build-session" | "per-change-run" | "open-pr" | "resume-session" | "review" | "review-mirror" | "evals-run" | "claude-md-proposal" | "proposal-mirror" | "record-writeback" | "diagnose" | "propose" | "band-record";
 export type JobState = "queued" | "running" | "done" | "failed" | "skipped";
 
 export interface Job {

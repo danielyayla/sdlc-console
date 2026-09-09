@@ -78,6 +78,9 @@ importers:
       '@sdlc/core':
         specifier: workspace:*
         version: link:../core
+      '@sdlc/detect':
+        specifier: workspace:*
+        version: link:../detect
       '@sdlc/hooks':
         specifier: workspace:*
         version: link:../hooks
@@ -93,6 +96,15 @@ importers:
 
   packages/core:
     dependencies:
+      '@sdlc/schemas':
+        specifier: workspace:*
+        version: link:../schemas
+
+  packages/detect:
+    dependencies:
+      '@sdlc/core':
+        specifier: workspace:*
+        version: link:../core
       '@sdlc/schemas':
         specifier: workspace:*
         version: link:../schemas
@@ -169,6 +181,9 @@ importers:
       '@sdlc/core':
         specifier: workspace:*
         version: link:../core
+      '@sdlc/detect':
+        specifier: workspace:*
+        version: link:../detect
       '@sdlc/hooks':
         specifier: workspace:*
         version: link:../hooks

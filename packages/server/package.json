@@ -18,11 +18,12 @@
     "@sdlc/adapter-git": "workspace:*",
     "@sdlc/adapter-github": "workspace:*",
     "@sdlc/core": "workspace:*",
+    "@sdlc/detect": "workspace:*",
+    "@sdlc/hooks": "workspace:*",
+    "@sdlc/mcp": "workspace:*",
     "@sdlc/schemas": "workspace:*",
     "better-sqlite3": "^13.0.3",
-    "ws": "^8.21.3",
-    "@sdlc/mcp": "workspace:*",
-    "@sdlc/hooks": "workspace:*"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

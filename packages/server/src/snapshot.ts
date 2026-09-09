@@ -2,6 +2,7 @@ import type { ArtifactBranch } from "@sdlc/adapter-git";
 import { collectSources, type CollectedSources, type MetricSourcesStatus } from "./metrics/index.js";
 import {
   badges,
+  bandStatus,
   computeMetrics,
   deriveAll,
   proposalViews,
@@ -15,13 +16,15 @@ import {
   gateQueues,
   validateTree,
   type StageMetrics,
+  type BandStatus,
+  type MetricSnapshots,
   type Badges,
   type ChangeView,
   type Repo,
   type ResolvedConfig,
   type RuleDiagnostic,
 } from "@sdlc/core";
-import type { Bands, EvalCase, EvalRun, Finding, HookRow, ParsedAgent, ParsedClaudeMd, ParsedSkill, Proposal, Triage } from "@sdlc/schemas";
+import type { Bands, EvalCase, EvalRun, Finding, HookRow, ParsedAgent, ParsedClaudeMd, ParsedSkill, Proposal, RunbookRun, Triage } from "@sdlc/schemas";
 import { sessionCapacity, type Capacity } from "./sessions/capacity.js";
 
 export interface Identity {
@@ -83,6 +86,10 @@ export interface Snapshot {
   skillStatus: SkillStatus[];
   agents: ParsedAgent[];
   bands: Bands | null;
+  /** Bands table rows (FR-60, 3.4): current, σ, tier and status per band from the detection snapshots, with the open triage items they raised. */
+  bandStatus: BandStatus[];
+  /** Runbook invocation records under `sdlc/loop/runbooks/` (3.4). */
+  runbookRuns: RunbookRun[];
   metrics: StageMetrics[];
   /** Where the metrics' external feeds come from and how fresh they are (FR-70). */
   metricSources: MetricSourcesStatus;
@@ -90,7 +97,7 @@ export interface Snapshot {
 }
 
 /** The full derived state the UI renders; recomputed on every refresh (P13). */
-export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionRecord[], revision: number, now = new Date(), facts?: CollectedSources): Snapshot {
+export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionRecord[], revision: number, now = new Date(), facts?: CollectedSources, snapshots: MetricSnapshots = {}): Snapshot {
   const all = deriveAll(repo);
   const collected = facts ?? collectSources(repo, null);
   const ids = (q: { yours: ChangeView[]; other: ChangeView[] }): RoleQueues => ({ yours: q.yours.map((c) => c.id), other: q.other.map((c) => c.id) });
@@ -121,6 +128,8 @@ export function buildSnapshot(repo: Repo, identity: Identity, sessions: SessionR
     skillStatus: skillStatus(repo),
     agents: repo.agents,
     bands: repo.bands,
+    bandStatus: bandStatus(repo.bands, snapshots, repo.triage.map((t) => t.data)),
+    runbookRuns: repo.runbookRuns,
     metrics: computeMetrics(repo, all.changes, { now: now.toISOString(), sources: collected.sources }),
     metricSources: collected.status,
     validation: { blocking: validation.blocking, diagnostics: validation.diagnostics },

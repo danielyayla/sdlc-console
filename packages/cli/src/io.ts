@@ -5,6 +5,8 @@ export interface Io {
   stdin: () => Promise<string>;
   env: Record<string, string | undefined>;
   cwd: string;
+  /** Clock for commands that stamp a time (export's `exportedAt`, metrics' window); tests inject one, the bin leaves it unset. */
+  now?: () => Date;
 }
 
 export class CliError extends Error {

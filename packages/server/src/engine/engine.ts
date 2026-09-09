@@ -1,4 +1,7 @@
-import { deriveChange, loadRepo, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, reasonKey, validateWritePlan, writebacksInState, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
+import { DEFAULT_DETECT_EVERY, deriveChange, loadRepo, openBreachItem, parseInterval, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, raiseBandBreaches, reasonKey, validateWritePlan, writebacksInState, type BandBreach, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
+import { readSnapshots, runDetection, type DetectionPass } from "@sdlc/detect";
+import { launchBandSession, recordBandSession } from "../maintain/index.js";
+import { SYSTEM_IDENTITY } from "./codehost.js";
 import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
 import { readReproDraft } from "@sdlc/mcp";
 import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
@@ -42,6 +45,17 @@ export interface EngineOptions {
   writebackRetryMs?: number;
   /** OTel tracer (3.3) for the sessions and runs the engine starts; the job spans live in the JobStore. */
   tracer?: Tracer;
+  /** Delay before the first scheduled detection pass after `startDetection()` (default 5 s); later passes follow `bands.detectEvery`. */
+  detectDelayMs?: number;
+}
+
+/** What one detection pass did (3.4): the pass itself, the triage items it raised and the jobs it claimed. */
+export interface DetectOutcome {
+  pass: DetectionPass | null;
+  raised: { id: string; metric: string; job: string }[];
+  jobs: Job[];
+  /** Why nothing ran, when nothing ran. */
+  skipped: string | null;
 }
 
 /** What the engine did with a verified webhook delivery — one line, recorded with the delivery. */
@@ -70,6 +84,8 @@ export class Engine {
   /** Last attempt per write-back job key (epoch ms) — the retry gap is wall-clock, not the injected `now`. */
   private readonly writebackTried = new Map<string, number>();
   private readonly unsubscribe: () => void;
+  private detectTimer: NodeJS.Timeout | null = null;
+  private lastDetect = 0;
 
   constructor(private readonly opts: EngineOptions) {
     this.unsubscribe = opts.store.subscribe(() => void this.tick());
@@ -86,6 +102,143 @@ export class Engine {
   close(): void {
     this.closed = true;
     this.unsubscribe();
+    if (this.detectTimer) clearTimeout(this.detectTimer);
+    this.detectTimer = null;
+  }
+
+  /** Last detection pass (epoch ms), 0 when none ran in this process. */
+  get lastDetectAt(): number {
+    return this.lastDetect;
+  }
+
+  /** The detection interval `bands.yaml` asks for (`detectEvery`, default 15m), in ms. */
+  detectInterval(): number {
+    return parseInterval(this.opts.store.currentRepo?.bands?.detectEvery) ?? parseInterval(DEFAULT_DETECT_EVERY) ?? 900_000;
+  }
+
+  /**
+   * `sdlc serve --engine`: run detection on the schedule `bands.yaml`
+   * declares — a first pass shortly after start, then every `detectEvery`.
+   * Timers never keep the process alive; `close()` stops them.
+   */
+  startDetection(): void {
+    if (this.closed) return;
+    const schedule = (delay: number) => {
+      if (this.closed) return;
+      this.detectTimer = setTimeout(() => {
+        void this.detect()
+          .catch((e: unknown) => this.log(`detect: ${(e as Error).message}`))
+          .finally(() => schedule(this.detectInterval()));
+      }, delay);
+      this.detectTimer.unref();
+    };
+    schedule(this.opts.detectDelayMs ?? 5_000);
+  }
+
+  /**
+   * One detection pass (build-order 3.4; blueprint Stage 06 "System"): the
+   * deterministic script measures every band and writes the snapshots; then
+   * the tiers become work. 1σ is logged. 2σ and 3σ raise a triage item
+   * (sdlc-bot commit, the job key on the item) and claim a diagnose /
+   * propose job whose headless session's output lands on that item. One
+   * item per metric while it is open, one job per `(band, tier, snapshot)`,
+   * so a repeated pass never double-launches. No human starts any of it.
+   */
+  async detect(): Promise<DetectOutcome> {
+    await this.opts.store.refresh();
+    const repo = this.opts.store.currentRepo;
+    if (!repo) return { pass: null, raised: [], jobs: [], skipped: "repository not loaded" };
+    if (!repo.bands) return { pass: null, raised: [], jobs: [], skipped: "no bands.yaml" };
+    const pass = await runDetection({ home: this.opts.store.root, bands: repo.bands, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}) });
+    this.lastDetect = Date.now();
+    // the table reads the snapshots; the pass moved them
+    this.opts.store.rebuild();
+    const breaches: BandBreach[] = [];
+    for (const r of pass.results) {
+      const tier = r.snapshot.tier ?? 0;
+      const where = `${r.band.metric} = ${r.snapshot.current ?? "no data"} vs ${r.band.baseline} (σ ${r.snapshot.sigma ?? "?"})`;
+      if (r.snapshot.current === null) {
+        this.log(`[detect] ${r.band.metric}: source failed (exit ${r.snapshot.source.exitCode}); no data since ${r.snapshot.ts}`);
+        continue;
+      }
+      if (tier === 1) this.log(`[detect] ${r.band.metric} 1σ: ${where} — logged`);
+      if (tier < 2) continue;
+      const open = openBreachItem(repo, r.band.metric);
+      if (open) {
+        this.log(`[detect] ${r.band.metric} ${tier}σ: ${where} — ${open.id} is open${open.job ? ` (${open.job})` : ""}; nothing new raised`);
+        continue;
+      }
+      const live = this.opts.registry.list().find((s) => s.band?.metric === r.band.metric && (s.status === "running" || s.status === "waiting"));
+      if (live) {
+        this.log(`[detect] ${r.band.metric} ${tier}σ: ${where} — session ${live.id} still running; nothing new raised`);
+        continue;
+      }
+      breaches.push({ band: r.band, snapshot: r.snapshot, job: `band:${r.band.metric}:${tier}σ:${r.snapshot.ts}` });
+    }
+    if (breaches.length === 0) return { pass, raised: [], jobs: [], skipped: null };
+    // the claim comes first: two processes on one cache (3.2) cannot both raise the same breach
+    const claimed = breaches.filter((b) => this.opts.jobs.claim({ key: b.job, kind: b.snapshot.tier === 3 ? "propose" : "diagnose", changeId: "", cycle: 0, stage: 6 }, this.now()) !== null);
+    if (claimed.length === 0) return { pass, raised: [], jobs: [], skipped: "breaches already claimed" };
+    const raised = raiseBandBreaches(repo, claimed, { now: this.now() });
+    if (!raised.ok) {
+      for (const b of claimed) this.opts.jobs.update(b.job, { state: "failed", error: raised.diagnostics.map((d) => d.message).join("; ") }, this.now());
+      return { pass, raised: [], jobs: claimed.map((b) => this.opts.jobs.get(b.job)).filter((j): j is Job => j !== null), skipped: null };
+    }
+    const report = validateWritePlan(repo, raised.plan);
+    if (report.blocking) {
+      const why = `triage items rejected by validation: ${report.diagnostics.filter((d) => d.blocking).map((d) => d.message).join("; ")}`;
+      for (const b of claimed) this.opts.jobs.update(b.job, { state: "failed", error: why }, this.now());
+      throw new Error(why);
+    }
+    const commit = await commitWritePlan(this.opts.store.root, raised.plan, { identity: SYSTEM_IDENTITY, ...(this.opts.store.committer ? { committer: this.opts.store.committer } : {}) });
+    this.log(`[detect] ${raised.raised?.map((r) => `${r.id} ${r.metric}`).join(", ") ?? ""} raised (${commit.slice(0, 7)})`);
+    await this.opts.store.refresh(true);
+    const history = readSnapshots(this.opts.store.root);
+    for (const b of claimed) {
+      const item = raised.raised?.find((r) => r.metric === b.band.metric);
+      const tier = b.snapshot.tier === 3 ? 3 : 2;
+      if (!item) continue;
+      if (!this.opts.autoLaunch) {
+        this.opts.jobs.update(b.job, { state: "skipped", note: `${item.id} raised; the ${tier === 3 ? "propose" : "diagnose"} session needs sdlc serve --engine` }, this.now());
+        continue;
+      }
+      try {
+        const status = this.opts.store.current?.bandStatus.find((x) => x.metric === b.band.metric);
+        const r = await launchBandSession(
+          { band: b.band, snapshot: b.snapshot, tier, triageId: item.id, job: b.job, status: status ?? { metric: b.band.metric, baseline: b.band.baseline, unit: b.band.unit ?? null, source: b.band.source ?? null, current: b.snapshot.current, sigma: b.snapshot.sigma, tier: b.snapshot.tier, breached: true, action: tier === 3 ? "propose" : "diagnose", ts: b.snapshot.ts, samples: 0, status: "", triage: [item.id], job: b.job }, history: history[b.band.metric] ?? [] },
+          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
+        );
+        this.opts.jobs.update(b.job, { sessionId: r.session.id, state: "running", note: `${item.id} raised · ${r.session.kind} session on ${r.session.branch}` }, this.now());
+        this.log(`[detect] ${b.band.metric} ${tier}σ → ${item.id}, ${r.session.kind} session ${r.session.id}`);
+      } catch (e) {
+        this.opts.jobs.update(b.job, { state: "failed", error: (e as Error).message, note: `${item.id} raised` }, this.now());
+        this.log(`[detect] ${b.band.metric}: ${tier === 3 ? "propose" : "diagnose"} session failed: ${(e as Error).message}`);
+      }
+    }
+    this.opts.store.rebuild();
+    return { pass, raised: raised.raised ?? [], jobs: claimed.map((b) => this.opts.jobs.get(b.job)).filter((j): j is Job => j !== null), skipped: null };
+  }
+
+  /** A band session finished (3.4): its diagnosis, runbook records and proposal branch go onto the triage item, once per session. */
+  async recordBandForSession(session: StoredSession): Promise<Job | null> {
+    await this.opts.store.refresh(true);
+    const repo = this.opts.store.currentRepo;
+    if (!repo || !session.band) return null;
+    const key = `band-record:${session.id}`;
+    const job = this.opts.jobs.claim({ key, kind: "band-record", changeId: "", cycle: 0, stage: 6 }, this.now());
+    if (!job) return null;
+    try {
+      const outcome = await recordBandSession({ root: this.opts.store.root, session, ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), log: (l) => this.log(l) }, repo);
+      this.opts.jobs.update(key, { state: outcome.commit ? "done" : "skipped", note: outcome.note }, this.now());
+      this.log(`[detect] ${outcome.note}`);
+      this.opts.registry.patch(session.id, { reviewed: true });
+      await this.opts.store.refresh(true);
+    } catch (e) {
+      this.opts.jobs.update(key, { state: "failed", error: (e as Error).message }, this.now());
+      this.log(`[detect] ${session.band.triageId}: session output not recorded: ${(e as Error).message}`);
+      this.opts.store.rebuild();
+    }
+    return this.opts.jobs.get(key);
   }
 
   /** One pass over the current snapshot; coalesces overlapping calls. */
@@ -505,6 +658,10 @@ export class Engine {
         const downgraded = session.status === "awaiting_engineer";
         this.opts.jobs.update(job.key, { state: session.status === "done" || downgraded ? "done" : "failed", ...(downgraded ? { note: "downgraded to SUPERVISED — the engineer continues" } : {}), ...(session.error ? { error: session.error } : {}) }, this.now());
       }
+    }
+    if (session.band) {
+      await this.recordBandForSession(session);
+      return;
     }
     if (session.kind === "review" && session.status === "done") {
       await this.mirrorForSession(session);

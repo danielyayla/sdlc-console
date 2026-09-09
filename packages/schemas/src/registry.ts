@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { bands } from "./bands.js";
+import { bands, metricSnapshot, runbookRun } from "./bands.js";
 import { change } from "./change.js";
 import { config } from "./config.js";
 import { deploy } from "./deploy.js";
@@ -39,6 +39,8 @@ export const registry = {
   "plan-frontmatter": planFrontMatter,
   "incident-frontmatter": incidentFrontMatter,
   bands,
+  "metric-snapshot": metricSnapshot,
+  "runbook-run": runbookRun,
   "change-export": changeExport,
 } as const;
 

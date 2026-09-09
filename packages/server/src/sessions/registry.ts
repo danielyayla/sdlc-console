@@ -48,6 +48,8 @@ export interface StoredSession extends SessionRecord {
   /** The OTel trace of this session's span (3.3); null without an exporter. Resumes join the same trace. */
   traceId?: string | null;
   spanId?: string | null;
+  /** A band diagnose/propose session (3.4): no change, the breached metric and its triage item instead; `changeId` is "". */
+  band?: { metric: string; tier: 2 | 3; snapshotTs: string; triageId: string; job: string } | null;
 }
 
 interface Row {

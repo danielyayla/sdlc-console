@@ -153,3 +153,65 @@ export function writeProposalDraft(root: string, session: string, draft: Proposa
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
 }
+
+/** The diagnosis a band diagnose/propose session reported (3.4, PB-S6 step 5 intent format): kept beside the session; the engine writes it onto the triage item when the session ends. */
+export interface DiagnosisDraft {
+  metric: string;
+  title: string;
+  problem: string;
+  proposedOutcome: string;
+  affected: string;
+  constraints?: string;
+  openQuestions?: string;
+  ts: string;
+}
+
+export function diagnosisFile(root: string, session: string): string {
+  return join(root, ".sdlc-state", "sessions", session, "diagnosis.json");
+}
+
+export function readDiagnosisDraft(root: string, session: string): DiagnosisDraft | null {
+  const file = diagnosisFile(root, session);
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as DiagnosisDraft;
+  } catch {
+    return null;
+  }
+}
+
+export function writeDiagnosisDraft(root: string, session: string, draft: DiagnosisDraft): void {
+  const file = diagnosisFile(root, session);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(draft, null, 2)}\n`, "utf8");
+}
+
+/** One runbook invocation a propose session made through `run_runbook`: the allowlisted command and its output verbatim. The engine commits it as `sdlc/loop/runbooks/RBK-NNNN.json`. */
+export interface RunbookRunDraft {
+  runbook: string;
+  command: string;
+  metric: string;
+  startedAt: string;
+  finishedAt: string;
+  exitCode: number;
+  output: string;
+}
+
+export function runbooksFile(root: string, session: string): string {
+  return join(root, ".sdlc-state", "sessions", session, "runbooks.jsonl");
+}
+
+export function readRunbookRuns(root: string, session: string): RunbookRunDraft[] {
+  const file = runbooksFile(root, session);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== "")
+    .map((l) => JSON.parse(l) as RunbookRunDraft);
+}
+
+export function appendRunbookRun(root: string, session: string, run: RunbookRunDraft): void {
+  const file = runbooksFile(root, session);
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${JSON.stringify(run)}\n`, "utf8");
+}

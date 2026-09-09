@@ -1,0 +1,23 @@
+{
+  "name": "@sdlc/detect",
+  "version": "0.0.0",
+  "private": true,
+  "description": "sdlc-detect: the deterministic detection script — runs the metric sources in bands.yaml, computes σ tiers, writes the snapshots the Bands table reads.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "sdlc-detect": "./dist/bin.js"
+  },
+  "dependencies": {
+    "@sdlc/core": "workspace:*",
+    "@sdlc/schemas": "workspace:*"
+  }
+}

@@ -13,10 +13,13 @@ afterEach(() => {
   for (const c of cleanups.splice(0)) c();
 });
 
+/** One clock for every command in a test: `exportedAt` is part of the hashed content, so two exports must share it to hash the same. */
+const NOW = () => new Date("2026-09-08T12:00:00Z");
+
 function makeIo(dir: string, env: Record<string, string> = {}): { io: Io; out: string[]; err: string[] } {
   const out: string[] = [];
   const err: string[] = [];
-  const io: Io = { stdout: (t) => out.push(t), stderr: (t) => err.push(t), stdin: () => Promise.resolve(""), env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "", ...env }, cwd: dir };
+  const io: Io = { stdout: (t) => out.push(t), stderr: (t) => err.push(t), stdin: () => Promise.resolve(""), env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "", ...env }, cwd: dir, now: NOW };
   return { io, out, err };
 }
 
@@ -51,6 +54,7 @@ describe("sdlc export <CHG> (3.3)", () => {
     expect(doc.kind).toBe("change-export");
     expect(verifyChangeExport(doc)).toBe(true);
     expect(doc.exportedBy).toEqual({ id: PO, name: "Priya Owens" });
+    expect(doc.exportedAt).toBe("2026-09-08T12:00:00Z");
     expect(doc.ref).toBe(head);
     const decision = doc.cycles[0]?.decisions.find((d) => d.gate === 1);
     expect(decision).toMatchObject({ decision: "accepted", by: { id: PO, role: "po" }, source: "cli", commit: head });

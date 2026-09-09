@@ -323,6 +323,15 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         return;
       }
     }
+    if (method === "POST" && parts[1] === "detect" && parts.length === 2) {
+      // a detection pass now (3.4): the script, the snapshots, and whatever the tiers raise — the same pass the engine schedules
+      if (!o.engine) throw new ActionError(409, "detection runs through the engine (start the server with sdlcBin); `sdlc detect` runs the script alone");
+      const r = await o.engine.detect();
+      const measured = r.pass?.results.length ?? 0;
+      const toast = r.skipped && !r.pass ? `detection skipped: ${r.skipped}` : `detection: ${measured} band${measured === 1 ? "" : "s"} measured${r.raised.length > 0 ? ` · ${r.raised.map((x) => `${x.id} (${x.metric})`).join(", ")} raised` : ""}${r.jobs.length > 0 ? ` · ${r.jobs.map((j) => `${j.kind} ${j.state}`).join(", ")}` : ""}`;
+      json(res, 200, { ok: true, pass: r.pass, raised: r.raised, jobs: r.jobs, skipped: r.skipped, toast, revision: store.current?.revision ?? 0 });
+      return;
+    }
     if (method === "GET" && parts[1] === "health") {
       json(res, 200, { ok: true, revision: store.current?.revision ?? 0 });
       return;

@@ -1,6 +1,6 @@
 import type { CollectedSources } from "./metrics/index.js";
 import { blobSha, commitWritePlan, GitError, headSha, newUlid, readTreeWithBranches, type ArtifactBranch, type GitIdentity } from "@sdlc/adapter-git";
-import { loadRepo, rolesOf, validateWritePlan, type Repo, type TransitionContext, type TransitionResult, type Tree } from "@sdlc/core";
+import { loadRepo, rolesOf, validateWritePlan, type MetricSnapshots, type Repo, type TransitionContext, type TransitionResult, type Tree } from "@sdlc/core";
 import type { Diagnostic } from "@sdlc/schemas";
 import type { SnapshotCache } from "./cache.js";
 import { buildSnapshot, type Identity, type SessionRecord, type Snapshot } from "./snapshot.js";
@@ -34,6 +34,8 @@ export interface StoreOptions {
   now?: () => Date;
   /** External facts for the metrics (GitHub cache overlay); defaults to the git mirror alone. */
   facts?: (repo: Repo) => CollectedSources;
+  /** Detection snapshots (3.4) the Bands table reads, from the product's `.sdlc-state/snapshots/`; none by default. */
+  snapshots?: () => MetricSnapshots;
 }
 
 /**
@@ -148,7 +150,7 @@ export class StateStore {
     const s = this.s;
     if (!s.repo) throw new Error("store not loaded");
     s.revision += 1;
-    s.snapshot = { ...buildSnapshot(s.repo, this.identity(), this.opts.sessions?.(s.repo) ?? [], s.revision, this.opts.now?.() ?? new Date(), this.opts.facts?.(s.repo)), branches: s.branches };
+    s.snapshot = { ...buildSnapshot(s.repo, this.identity(), this.opts.sessions?.(s.repo) ?? [], s.revision, this.opts.now?.() ?? new Date(), this.opts.facts?.(s.repo), this.opts.snapshots?.() ?? {}), branches: s.branches };
     if (s.lastHead) this.opts.cache?.put(s.lastHead, s.snapshot);
     for (const fn of s.listeners) fn(s.snapshot);
     return s.snapshot;

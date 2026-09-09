@@ -155,6 +155,11 @@ a { color: inherit; }
 .bands th { text-align: left; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); background: var(--bg-raised); padding: 8px 10px; }
 .bands td { padding: 8px 10px; border-top: 1px solid var(--border-subtle); font-size: 13px; }
 .bands td.num { font-variant-numeric: tabular-nums; }
+.bands tr.breached td { background: var(--amber-tint-strong); }
+.bands tr.warned td { background: var(--amber-tint); }
+.bands td .chip { margin-left: 6px; }
+.loop .footer .btn { margin-left: 10px; }
+.tcard .evidence { margin: 6px 0 0; padding: 6px 8px; font-family: var(--font-mono); font-size: 10px; white-space: pre-wrap; border: 1px solid var(--border-default); border-radius: var(--radius-chip); color: var(--text-muted); max-height: 220px; overflow: auto; }
 .muted { color: var(--text-muted); }
 .footer { color: var(--text-faint); font-size: 12px; margin: 10px 0 22px; }
 .subhead { font-size: 12px; margin-bottom: 14px; }
