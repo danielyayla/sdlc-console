@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0004
+title: "Core derivation (build-order 0.4)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T10:34:37Z
+origin:
+  type: idea
+  ref: build-order 0.4
+record: null
+cycle: 1
+repro: null
+closed: null

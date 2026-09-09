@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0014
+title: "MCP server for agents (1.5)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T11:36:50Z
+origin:
+  type: idea
+  ref: build-order 1.5
+record: null
+cycle: 1
+repro: null
+closed: null

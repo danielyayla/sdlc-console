@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0019
+title: "Artifact PRs as gates in GitHub mode (2.2)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T14:48:59Z
+origin:
+  type: idea
+  ref: build-order 2.2
+record: null
+cycle: 1
+repro: null
+closed: null

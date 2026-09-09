@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0011
+title: "Web — top bar, Pipeline, Change detail, Gates, tokens (1.2)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T11:15:27Z
+origin:
+  type: idea
+  ref: build-order 1.2
+record: null
+cycle: 1
+repro: null
+closed: null

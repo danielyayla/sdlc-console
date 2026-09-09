@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0012
+title: "Web — Loop, Security, Metrics from git + ledger (1.3)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T11:21:20Z
+origin:
+  type: idea
+  ref: build-order 1.3
+record: null
+cycle: 1
+repro: null
+closed: null

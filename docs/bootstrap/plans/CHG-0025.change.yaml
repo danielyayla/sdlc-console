@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0025
+title: "CLAUDE.md repeat-mistake proposals, skills pass % and backed-by (2.8)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T18:31:17Z
+origin:
+  type: idea
+  ref: build-order 2.8
+record: null
+cycle: 1
+repro: null
+closed: null
