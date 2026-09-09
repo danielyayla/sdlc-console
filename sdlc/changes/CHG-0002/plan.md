@@ -3,11 +3,11 @@ id: CHG-0002
 artifact: plan
 cycle: 1
 spec_sha: 5e2d8fd2ea518578dcdb1c3bcce8c5f64bd525b6
-rev: 1
+rev: 2
 accepted_by: null
 accepted_at: null
-acceptance_line: ""
-context_manifest: sha256:af43633ed8639296f2bd3232468e82019e14bcfa67d6a5729fb1790e29b2994f
+acceptance_line: From one commit, `SDLC_CHANGE=CHG-0001 SDLC_SESSION=sess-launcher pnpm test` and `env -u SDLC_CHANGE -u SDLC_SESSION pnpm test` both exit 0; packages/hooks/test/hooks.test.ts has 10 passing `it`s (9 unchanged + 1 new) and exactly 1 `runHook(` occurrence; `git diff main --stat` lists that file only.
+context_manifest: sha256:6f0ed3f6368d8babb42349140d5bade3083f3c7626bc6416da50aecae20e234e
 schema: 1
 ---
 # Plan: hooks tests fail inside a launched session — scrub the launcher env (from spec.md 5e2d8fd2)
@@ -47,11 +47,11 @@ packages/hooks/test/hooks.test.ts
      return out;
    }
    /** Every hook call in this file goes through here; `opts.env` may override the scrub (used by the CHG-0002 regression test). */
-   const hook = (name: HookName, input: HookInput, opts: RunHookOptions = {}) => runHook(name, input, { env: scrubbed(), ...opts });
+   const hook = (name: HookName, input: HookInput, opts: RunHookOptions = {}) => runHook(name, input, { ...opts, env: opts.env ?? scrubbed() });
    ```
-   The keys are deleted, not set to `""` (R3): `changeIdFrom` tests the value with a regex, so `""` would also be harmless today, but `parseHookInput` trims and falls through on `""` only by accident of its current code; deletion is the only form that is correct against every reader.
+   The wrapper is the spec's D3 with the spread order swapped: `tsconfig.base.json` sets `exactOptionalPropertyTypes`, and spreading an options object whose `env` may be absent over a definite `env` can type `env` as possibly `undefined`, which that flag rejects for an optional property. Writing `env: opts.env ?? scrubbed()` last keeps `env` definite and is semantically identical (an explicit `opts.env` wins, otherwise the scrub). `NodeJS.ProcessEnv` resolves because the base tsconfig has `types: ["node"]`. The keys are deleted, not set to `""` (R3). Today both readers happen to treat `""` as absent (`changeIdFrom` regex-tests the value, `parseHookInput` trims and falls through), but deletion is the only form that is correct against every future reader, and it is what the spec requires.
 
-4. **Rewrite the 25 call sites.** Replace every `await runHook(` with `await hook(` in the file (lines 41, 44, 53, 61, 65, 66, 70, 71, 81, 88, 92, 105, 116, 120, 126, 158, 162, 163, 164, 169, 170, 171, 172, 175, 182). Arguments stay byte-identical, including the `{ exec }` third argument on lines 105, 116, 120 and 126, which the wrapper spreads after `env` so `exec` still reaches `verifyBeforeDone`. After this step the only `runHook(` in the file is inside the wrapper on the line added in step 3. Check with:
+4. **Rewrite the 25 call sites.** Replace every `await runHook(` with `await hook(` in the file (lines 41, 44, 53, 61, 65, 66, 70, 71, 81, 88, 92, 105, 116, 120, 126, 158, 162, 163, 164, 169, 170, 171, 172, 175, 182). Arguments stay byte-identical, including the `{ exec }` third argument on lines 105, 116, 120 and 126, which the wrapper spreads so `exec` still reaches `verifyBeforeDone`. After this step the only `runHook(` in the file is inside the wrapper on the line added in step 3. Check with:
    ```
    grep -n "runHook(" packages/hooks/test/hooks.test.ts
    ```
@@ -77,7 +77,7 @@ packages/hooks/test/hooks.test.ts
    SDLC_CHANGE=CHG-0001 SDLC_SESSION=sess-launcher pnpm test
    env -u SDLC_CHANGE -u SDLC_SESSION pnpm test
    ```
-   Both must exit 0 with the same pass count, one higher than `main`'s count for the file. Then `pnpm build` and `pnpm lint` (zero warnings; the new `LAUNCHER_VARS` const and the wrapper are both used, so no unused-var lint).
+   Both must exit 0 with the same pass count, one higher than `main`'s count for the file. Then `pnpm build` (the hooks tsconfig includes `test`, so `tsc -b` type-checks the edited file) and `pnpm lint` (zero warnings; `LAUNCHER_VARS`, `scrubbed` and `hook` are all used, so no unused-var finding).
 
 8. **Commit once**, on the task branch, with exactly:
    ```
@@ -93,6 +93,7 @@ packages/hooks/test/hooks.test.ts
 - **`SDLC_HOME` is not scrubbed** (spec C4). Gate 2 was accepted by PR merge with no recorded decision on widening `LAUNCHER_VARS`, so this plan follows the intent and the spec's D2 as written: two variables. This repository is a single product and never sets `SDLC_HOME`, so the tests are green here. If the PO wants the third variable, the build adds the string `"SDLC_HOME"` to `LAUNCHER_VARS` in step 3 and nothing else in this plan moves; the plan-sync file list is unchanged either way.
 - **The build session's worktree is uninstalled** (spec C7). Step 0 handles it for this change; the launcher-side fix is a separate change. If step 0 is skipped, the Stop hook records `command not found` rounds and R6 cannot be shown, even though the code is right.
 - **`kind: feature` must stay** (spec C2). Under `kind: fix` with a committed repro, test-freeze would block every edit to `packages/**/test/**` including the very file this change edits. change.yaml says `feature` and `repro: null` today; the build must not change either.
+- **`exactOptionalPropertyTypes`.** The spec's D3 spread order (`{ env: scrubbed(), ...opts }`) may fail `tsc -b` under that flag. Step 3 uses the order that is definitely well-typed; if the build finds the spec's order also compiles, either is acceptable, but the plan's form is the one to commit so the two match.
 - **Vitest pool isolation.** The new test builds its env from a spread of `process.env` rather than mutating it, so it cannot leak into sibling tests whichever pool Vitest uses. Nothing in the plan calls `vi.stubEnv`.
 - **Spec line references drift.** Line numbers in this plan are against `main` at spec acceptance (`hooks.test.ts` is 186 lines, 25 `runHook(` calls). If the file has moved, the grep in step 4 and the count of 25 are the invariants, not the line numbers.
 
