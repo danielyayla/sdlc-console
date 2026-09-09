@@ -34,7 +34,7 @@ describe("Change detail · Export (3.3)", () => {
     const html = render({ ...initialState("po"), view: "detail", sel: "CHG-0012" });
     expect(html).toContain('href="/api/changes/CHG-0012/export"');
     expect(html).toContain('download="CHG-0012-export.json"');
-    expect(html).toContain(">Export<");
+    expect(html).toContain(">Export ledger<");
   });
 });
 

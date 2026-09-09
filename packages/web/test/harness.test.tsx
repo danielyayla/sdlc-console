@@ -19,7 +19,7 @@ const snapshot = buildSnapshot(repo, { id: PO, name: "Priya Owens", roles: ["po"
 const render = (state = initialState("po"), snap = snapshot) => renderToString(<App snapshot={snap} initial={state} now={now} live={false} />).replace(/<!-- -->/g, "");
 
 describe("degraded-guarantee display (3.8)", () => {
-  it("the session card shows one chip per unmet guarantee, the harness id and the stand-in verdict; Claude Code sessions show nothing extra", () => {
+  it("the session row names the harness and each unmet guarantee as words, plus the stand-in verdict; Claude Code sessions show nothing extra", () => {
     const html = render({ ...initialState("eng"), view: "sessions" });
     expect(html).toContain(">harness codex<");
     expect(html).toContain("verify-before-done — no Stop hook — done is unverified unless the last recorded round is green with output<");
@@ -31,23 +31,25 @@ describe("degraded-guarantee display (3.8)", () => {
     expect(html).not.toContain("harness claude-code");
   });
 
-  it("the change detail lists the change's sessions with the same chips", () => {
+  it("the change detail lists the change's sessions as the first History rows with the same words", () => {
     const html = render({ ...initialState("eng"), view: "detail", sel: "CHG-0018" });
-    expect(html).toContain('<div class="eyebrow">Sessions</div>');
+    expect(html).toContain('aria-label="history"');
+    expect(html.indexOf("sess-0018-repro")).toBeLessThan(html.indexOf("committed intent.md"));
     expect(html).toContain("sess-0018-repro</span> · build · SUPERVISED · done-unverified — verify-before-done: round 2 has test red — completion blocked");
     expect(html).toContain(">harness codex<");
     expect(html).toContain("tool-allowlist — no tool allowlist");
-    // a change without sessions has no panel
-    expect(render({ ...initialState("po"), view: "detail", sel: "CHG-0012" })).not.toContain('<div class="eyebrow">Sessions</div>');
+    // a change without sessions has no session rows
+    expect(render({ ...initialState("po"), view: "detail", sel: "CHG-0012" })).not.toContain('<span class="mono">sess-');
   });
 
-  it("the Config view shows the harness table: Claude Code by default, and each configured entry with what it cannot honour", () => {
+  it("the Config view says one sentence when the only harness is Claude Code with nothing degraded, and shows the table for each configured entry with what it cannot honour", () => {
     const html = render({ ...initialState("po"), view: "config" });
-    expect(html).toContain(">Harness · what runs the sessions and which guarantees it cannot honour<");
-    expect(html).toContain("every managed guarantee honoured");
+    expect(html).not.toContain(">Harness · what runs the sessions and which guarantees it cannot honour<");
+    expect(html).toContain("harness claude-code · every managed guarantee honoured");
     const configured = { ...repo, config: resolveConfig({ ...(repo.rawConfig as Record<string, unknown>), harness: [{ kind: "command", id: "codex", command: "codex", args: ["exec", "--mcp-config", "{mcpConfig}", "{prompt}"], jobs: ["build"] }, { kind: "claude-code" }] } as never) };
     const snap = buildSnapshot(configured as never, { id: PO, name: "Priya Owens", roles: ["po", "eng"] }, [], 1, now);
     const html2 = render({ ...initialState("po"), view: "config" }, snap);
+    expect(html2).toContain(">Harness · what runs the sessions and which guarantees it cannot honour<");
     expect(html2).toContain(">codex<");
     expect(html2).toContain("codex exec --mcp-config {mcpConfig} {prompt}");
     expect(html2).toContain("<td>build</td>");

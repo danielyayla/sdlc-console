@@ -25,56 +25,62 @@ describe("Pipeline (spec §4)", () => {
     expect(html).toContain("⌁ agent");
     expect(html).toContain("Evals red — agent fixing");
     expect(html).not.toContain("Nothing here");
-    // badges for po: gates 3, loop 2, security 2; hidden at 0 is exercised by eng below
-    expect(html).toContain('class="badge">3<');
+    // counts for po: gates 3, loop 2, security 2 — mono numerals, not badges; hidden at 0 is exercised by eng below
+    expect(html).toContain('class="count">3<');
+    expect(html).not.toContain("badge");
   });
 });
 
 describe("Change detail (spec §4)", () => {
-  it("shows the stepper, viewer header, the gate panel with Accept for the owning role", () => {
+  it("shows the stepper, viewer header, the Decision section with the accept verb for the owning role", () => {
     const html = render({ ...initialState("po"), view: "detail", sel: "CHG-0022" });
     expect(html).toContain("Multi-currency invoice totals");
-    expect(html).toContain("← Pipeline");
+    expect(html).toContain('<button class="btn text mono">Pipeline</button> · CHG-0022 · Plan');
     expect(html).toContain("intent.md");
-    expect(html).toContain("Human gate");
-    expect(html).toContain("Accept intent.md");
-    expect(html).toContain(">Accept<");
-    expect(html).toContain("Send back");
+    expect(html).toContain("Decision · waiting");
+    expect(html).toContain("Owned by the product owner");
+    expect(html).toContain('class="btn primary">Accept intent.md</button>');
+    expect(html).toContain("Send back with feedback");
     expect(html).toContain("pending review · authoritative");
     expect(html).toContain("committed intent.md");
     const absent = render({ ...initialState("po"), view: "detail", sel: "CHG-0023" });
     expect(absent).toContain("Not committed yet — this artifact is produced when the stage runs.");
     expect(absent).toContain("not committed");
   });
-  it("(e) the same change viewed as the engineer shows the waiting notice instead of Accept", () => {
+  it("(e) the same change viewed as the engineer shows the waiting notice with Switch role instead of Accept", () => {
     const html = render({ ...initialState("eng"), view: "detail", sel: "CHG-0022" });
-    expect(html).toContain("Waiting on the product owner — switch role in the top bar to act.");
-    expect(html).not.toContain(">Accept<");
+    expect(html).toContain("Waiting on the product owner.");
+    expect(html).toContain(">Switch role</button>");
+    expect(html).not.toContain('class="btn primary"');
   });
   it("(g) high-risk plan shows the tech-lead notice and no Accept, with Send back for the engineer", () => {
     const html = render({ ...initialState("eng"), view: "detail", sel: "CHG-0019" });
     expect(html).toContain("Accept plan.md · tech lead");
-    expect(html).toContain("Waiting on tech lead — approval happens via PR review on plan.md.");
-    expect(html).not.toContain(">Accept<");
-    expect(html).toContain("Send back");
+    expect(html).toContain("Approval happens via PR review on plan.md");
+    expect(html).not.toContain('class="btn primary"');
+    expect(html).toContain("Send back with feedback");
     expect(html).toContain("draft rev 3");
   });
-  it("shows the no-gate panel with the agent status and the auto-mode rationale", () => {
+  it("shows the no-decision section with the agent status, and the auto-mode terms and repro as Evidence rows", () => {
     const html = render({ ...initialState("eng"), view: "detail", sel: "CHG-0018" });
-    expect(html).toContain("No gate open");
+    expect(html).toContain("No decision open");
     expect(html).toContain("Evals red — agent fixing");
-    expect(html).toContain("The next human gate opens when the artifact is committed.");
-    expect(html).toContain("Auto mode");
+    expect(html).toContain("The next decision opens when the artifact is committed.");
+    expect(html).toContain("auto mode · ");
     // 2.6: the design mock is named beside the rationale; CLAUDE.md has no Visual: line
-    expect(html).toContain("mock export-dialog.svg · no visual tool in CLAUDE.md");
+    expect(html).toContain("mock export-dialog.svg");
+    expect(html).toContain("no visual tool in CLAUDE.md");
     // 2.7: the fix shows its committed repro test and the freeze; only an engineer can lift it once
-    expect(html).toContain("Repro first · freeze active");
+    expect(html).toContain("repro test frozen");
     expect(html).toContain("test/export/zero-total.test.ts");
     expect(html).toContain("e4a6f2d");
     expect(html).toContain("expected 4 rows, received 3");
     expect(html).toContain("Lift freeze once");
+    // the session's blocked test edits are an Evidence row
+    expect(html).toContain("test edit attempts");
+    expect(html).toContain("1 blocked by test-freeze");
     const po = render({ ...initialState("po"), view: "detail", sel: "CHG-0018" });
-    expect(po).toContain("Repro first · freeze active");
+    expect(po).toContain("repro test frozen");
     expect(po).not.toContain("Lift freeze once");
   });
 });
@@ -89,7 +95,7 @@ describe("Gates (acceptance e)", () => {
     expect(eng).toContain("Yours · engineer");
     expect(eng.indexOf("CHG-0020")).toBeLessThan(eng.indexOf("Other role"));
     expect(eng.indexOf("CHG-0022")).toBeGreaterThan(eng.indexOf("Other role"));
-    expect(eng).toContain('class="badge">2<');
+    expect(eng).toContain('class="count">2<');
   });
 });
 
@@ -163,27 +169,36 @@ describe("Loop, Security, Metrics (spec §4)", () => {
 });
 
 describe("Sessions (spec §4)", () => {
-  it("renders the header counts, four seed cards with mode chips, waiting-on-you, rationale and the footer callout", () => {
+  it("renders the header counts, four seed rows with mode words, waiting-on-you and rationale", () => {
     const html = render({ ...initialState("eng"), view: "sessions" });
     expect(html).toContain("2 active · review backlog 2 · ceiling 4"); // running + waiting; the done plan (CHG-0019 at stage 3) and design (CHG-0021 at stage 2) sessions await their gates
     expect(html).toContain("CHG-0018/export-fix");
-    expect(html).toContain("PLAN MODE");
-    expect(html).toContain("HEADLESS");
+    expect(html).toContain(">plan mode</span>");
+    expect(html).toContain(">headless</span>");
     expect(html).toContain("waiting on you: plan.md rev 2 marked final");
-    expect(html).toContain("test edit attempts: 1");
+    expect(html).toContain('<span class="red-text">test edits 1</span>');
     expect(html).toContain("New session");
-    expect(html).toContain("Sessions run Claude Code headless in a worktree per task");
+    // the explanatory footer is documentation, not a control (removals log)
+    expect(html).not.toContain("Sessions run Claude Code headless in a worktree per task");
   });
-  it("renders the visual rounds strip from the session's screenshot rounds and offers Downgrade only on running AUTO/HEADLESS cards", () => {
-    const html = render({ ...initialState("eng"), view: "sessions" });
+  it("renders the visual rounds as coloured words from the session's screenshot rounds and offers Downgrade only on running AUTO/HEADLESS rows", () => {
+    const html = render({ ...initialState("eng"), view: "sessions", session: "sess-0018-repro" });
     expect(html).toContain('aria-label="visual rounds"');
     expect(html).toContain("round 1 · 14.2%");
     expect(html).toContain("round 2 · 3.1%");
-    expect(html).toContain("chip red");
-    expect(html).toContain("chip amber");
+    expect(html).toContain("btn text red-text");
+    expect(html).toContain("btn text amber-text");
     // the seed's running session is SUPERVISED and the AUTO/HEADLESS ones are done: nothing to downgrade
-    expect(html).not.toContain("Downgrade to SUPERVISED");
-    expect(html).toContain("AUTO can be taken away, never granted");
+    expect(html).not.toContain("Downgrade to supervised");
+    // the running row shows Stop / Take over only once selected; the row waiting on you shows Add guidance unselected (usability exception)
+    const unselected = render({ ...initialState("eng"), view: "sessions" });
+    expect(unselected).not.toContain(">Stop</button>");
+    expect(unselected).not.toContain('aria-label="visual rounds"');
+    expect(unselected).toContain(">Add guidance</button>");
+    expect(unselected).toContain('class="srow edge-lit amber primary-row"');
+    expect(html).toContain('class="srow edge-lit agent pulse selected"');
+    expect(html).toContain(">Stop</button>");
+    expect(html).toContain(">Take over</button>");
   });
 });
 
@@ -197,26 +212,29 @@ describe("Config (spec §4)", () => {
     expect(html).toContain("marketing@veri.example");
     expect(html).toContain("plan-sync");
     expect(html).toContain("verify-before-done");
-    expect(html).toContain("Managed hooks are deployed by the platform team");
-    expect(html).toContain("intent: repo");
+    expect(html).toContain("managed · engineers cannot switch them off");
+    expect(html).toContain("intent · repo");
     expect(html).toContain("PRP-0007");
     expect(html).toContain("Never filter invoice rows by truthiness");
-    expect(html).toContain("under-sized (&lt; 20)");
-    expect(html).toContain("pass 100% · threshold 90%");
+    expect(html).toContain("under-sized · &lt; 20");
+    expect(html).toContain('class="value tabular green-text">100%</div>');
+    expect(html).toContain("threshold 90%");
     expect(html).toContain("CASE-0003");
+    expect(html).toContain('class="btn text mono filter active" aria-pressed="true">all</button>');
     expect(html).toContain("draft · checks missing");
     expect(html).toContain("Run suite");
-    expect(html).toContain("budget n/a");
+    expect(html).toContain(">budget</div><div class=\"value tabular \">n/a</div>");
     expect(html).toContain("config PRs pass on RUN-0001");
     expect(html).toContain("RUN-0001 · schedule · pass 100%");
   });
 
-  it("2.8: repeat signal with its proposal, proposal Accept for eng only, pending/merged chips, skills version · backed-by · pass % · findings citing", () => {
+  it("2.8: a repeat signal is the seen N× on its proposal, proposal Accept for eng only, pending/merged chips, skills version · backed-by · pass % · findings citing", () => {
     const eng = render({ ...initialState("eng"), view: "config" });
-    expect(eng).toContain("Repeat mistakes");
-    expect(eng).toContain("commit touches files outside plan.md&#x27;s file list");
+    // the Repeat-mistakes section is gone: the signal shows as "seen N×" on the proposal that answers it
+    expect(eng).not.toContain("Repeat mistakes");
+    expect(eng).toContain("commit touches files outside plan.md&#x27;s file list"); // the reason stays on the proposal card
     expect(eng).toContain("from CHG-0017, CHG-0018");
-    expect(eng).toContain("PRP-0008 open");
+    expect(eng).toContain("PRP-0008");
     expect(eng).toContain("seen 2×");
     expect(eng).toContain("Accept · open PR");
     expect(eng).not.toContain("no proposal yet");
@@ -225,11 +243,15 @@ describe("Config (spec §4)", () => {
     expect(eng).toContain("plan-sync</span>");
     expect(eng).toContain("100%</span>");
     expect(eng).toContain("1 trigger test · RUN-0001");
-    expect(eng).toContain("Findings citing");
+    expect(eng).toContain("findings citing");
     expect(eng).toContain("threshold 80%");
+    // proposals come first and are the primary object; the product owner reads them and is offered the role switch
+    expect(eng.indexOf("PRP-0007")).toBeLessThan(eng.indexOf('aria-label="evals"'));
+    expect(eng).toContain('class="proposal edge-lit amber"');
     const po = render({ ...initialState("po"), view: "config" });
-    expect(po).toContain('title="eng or platform accepts a proposal"');
-    expect(po).toMatch(/<button class="btn primary" disabled="" title="eng or platform accepts a proposal"/);
+    expect(po).toContain("The engineer or platform decides.");
+    expect(po).toContain(">Switch role</button>");
+    expect(po).not.toContain("Accept · open PR");
   });
 
   it("a merged change shows the case it was harvested into (2.5)", () => {
@@ -245,12 +267,13 @@ describe("Records mode (2.9, FR-16, spec 5A.6)", () => {
     const html = render({ ...initialState("eng"), view: "detail", sel: "CHG-0012", art: 5 });
     expect(html).toContain("copy of servicenow INC0041207 · synced 2026-09-02 07:31");
     expect(html).toContain('href="https://servicenow.example/incident/INC0041207"');
-    expect(html).toContain("Record · servicenow INC0041207");
+    expect(html).toContain("record · ");
+    expect(html).toContain("servicenow INC0041207</a>");
     expect(html).toContain("incident.md · external");
     expect(html).not.toContain("write-back failed");
     const config = render({ ...initialState("eng"), view: "config" });
-    expect(config).toContain("incident: external");
-    expect(config).toContain("connector: records");
+    expect(config).toContain('<span class="amber-text">incident · external</span>');
+    expect(config).toContain("connector records");
     // a repo-mode artifact keeps the plain header
     const intent = render({ ...initialState("po"), view: "detail", sel: "CHG-0022" });
     expect(intent).toContain("pending review · authoritative");
@@ -265,13 +288,13 @@ describe("product switcher (3.2)", () => {
     expect(two).toContain('aria-label="product"');
     expect(two).toContain('<option value="invoicing" title="/r" selected="">invoicing</option>');
     expect(two).toContain('<option value="billing" title="/r/apps/billing">billing</option>');
-    expect(two).not.toContain("/ invoicing / SDLC console");
+    expect(two).not.toContain("Veri</span><span> / invoicing</span>");
     const one = renderWith(1);
     expect(one).not.toContain('aria-label="product"');
-    expect(one).toContain("/ invoicing / SDLC console");
+    expect(one).toContain("Veri</span><span> / invoicing</span>");
     const none = render();
     expect(none).not.toContain('aria-label="product"');
-    expect(none).toContain("/ repo / SDLC console");
+    expect(none).toContain("Veri</span><span> / repo</span>");
   });
   it("the selected product is the one in UIState; switching keeps the tab, drops the selection and leaves the detail view", async () => {
     const { reduce } = await import("../src/state");
@@ -349,7 +372,6 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
 
   it("the detail lists the seed's environments; a stage-6 change with a pre-3.6 production record reads deployed", () => {
     const html = render({ ...initialState("po"), view: "detail", sel: "CHG-0012" });
-    expect(html).toContain("Environments");
     expect(html).toContain("preview");
     expect(html).toContain("not deployed");
     expect(html).toContain("production");
@@ -360,9 +382,11 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(board).toContain("· staging");
   });
 
-  it("after the merge the production gate panel waits on the rehearsal with Deploy disabled, and queues for the engineer; after a rehearsed rollback the evidence shows verbatim and Deploy is live", () => {
+  it("after the merge the production gate is the Decision and waits on the rehearsal with Deploy disabled, and queues for the engineer; after a rehearsed rollback the evidence shows verbatim and Deploy is live", () => {
     const merged = renderTree(mergedTree(), { ...initialState("eng"), view: "detail", sel: "CHG-0017" });
-    expect(merged.html).toContain("Production gate · production");
+    expect(merged.html).toContain("Decision · waiting");
+    expect(merged.html).toContain('class="primary">Deploy c2e4d0b to production</div>');
+    expect(merged.html).toContain("Owned by the engineer");
     expect(merged.html).toContain("sdlc/rollback-rehearsed");
     expect(merged.html).toContain("no rollback rehearsal recorded");
     expect(merged.html).toMatch(/<button class="btn primary" disabled="" title="sdlc\/rollback-rehearsed is pending[^"]*">Deploy to production<\/button>/);
@@ -372,7 +396,7 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(gates.html).toContain("Deploy to production");
     expect(gates.html).toContain("rollback rehearsal pending");
     const po = renderTree(mergedTree(), { ...initialState("po"), view: "detail", sel: "CHG-0017" });
-    expect(po.html).toContain("Waiting on the engineer — switch role in the top bar to act.");
+    expect(po.html).toContain("Waiting on the engineer.");
 
     const ready = renderTree(rehearsedTree(), { ...initialState("eng"), view: "detail", sel: "CHG-0017" });
     expect(ready.html).toContain("rollback staging to previous release\nrelease 1 live");

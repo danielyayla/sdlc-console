@@ -2,7 +2,7 @@ import type { Snapshot } from "@sdlc/server";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { act, exportHref, fetchJobs, fetchProducts, subscribe, type Artifact, type JobRow, type ProductInfo } from "./api";
 import type { Role } from "./lib/format";
-import { initialState, reduce, type UIState } from "./state";
+import { initialState, reduce, type FormState, type UIState } from "./state";
 import { ChangeDetail, type ReproDraftView, type SessionLine } from "./views/ChangeDetail";
 import { Config } from "./views/Config";
 import { Gates } from "./views/Gates";
@@ -21,8 +21,6 @@ export interface AppProps {
   now?: Date;
   loadArtifact?: (id: string, index: number) => Promise<Artifact>;
   live?: boolean;
-  /** Injected prompt for tests; defaults to window.prompt. */
-  promptImpl?: (text: string) => string | null;
   /** Injected product list for server-side rendering; the browser fetches `/api/products`. */
   products?: ProductInfo[];
   /** Injected for server-side rendering (3.3): the job queue and the trace URL template the browser fetches. */
@@ -35,7 +33,7 @@ export interface AppProps {
 function sessionLinesOf(snapshot: Snapshot, changeId: string): SessionLine[] {
   return snapshot.sessions
     .filter((s) => s.changeId === changeId)
-    .map((s) => ({ id: s.id, kind: typeof s["kind"] === "string" ? s["kind"] : "build", mode: s.mode, status: s.status, startedAt: s.startedAt, harness: (s["harness"] as SessionLine["harness"] | undefined) ?? null, standIn: (s["standIn"] as SessionLine["standIn"] | undefined) ?? null }));
+    .map((s) => ({ id: s.id, kind: typeof s["kind"] === "string" ? s["kind"] : "build", mode: s.mode, status: s.status, startedAt: s.startedAt, harness: (s["harness"] as SessionLine["harness"] | undefined) ?? null, standIn: (s["standIn"] as SessionLine["standIn"] | undefined) ?? null, testEditAttempts: typeof s["testEditAttempts"] === "number" ? s["testEditAttempts"] : 0 }));
 }
 
 function reproDraftOf(snapshot: Snapshot, changeId: string): ReproDraftView | null {
@@ -47,7 +45,7 @@ function reproDraftOf(snapshot: Snapshot, changeId: string): ReproDraftView | nu
   return null;
 }
 
-export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true, promptImpl, products: injectedProducts = [], jobs: injectedJobs = [], traceUrlTemplate: injectedTemplate = null }: AppProps) {
+export function App({ snapshot: injected = null, initial, now = new Date(), loadArtifact, live = true, products: injectedProducts = [], jobs: injectedJobs = [], traceUrlTemplate: injectedTemplate = null }: AppProps) {
   const [state, dispatch] = useReducer(reduce, initial ?? initialState());
   const [snapshot, setSnapshot] = useState<Snapshot | null>(injected);
   const [connected, setConnected] = useState(injected !== null);
@@ -99,6 +97,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
     return () => clearTimeout(t);
   }, [state.toast]);
 
+  const onForm = (form: FormState) => dispatch(form ? { type: "form.open", ...form } : { type: "form.close" });
   const run = async (path: string, body: unknown) => {
     const r = await act(path, body, state.product);
     if ("ok" in r) {
@@ -115,6 +114,11 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
   const current = products.find((p) => (state.product ? p.name === state.product : p.primary)) ?? null;
   const repoLabel = current?.name ?? state.product ?? (snapshot?.config.present ? "repo" : "repo");
   const artifactLoader = loadArtifact ?? ((id: string, index: number) => import("./api").then((m) => m.fetchArtifact(id, index, state.product)));
+
+  // the other role the identity holds (local mode holds every role): the Decision section offers "Switch role"
+  const otherRole: Role = state.role === "po" ? "eng" : "po";
+  const held = snapshot?.identity.roles ?? [];
+  const canSwitchRole = held.length === 0 || held.includes(otherRole);
 
   let body;
   if (!snapshot) body = <div className="connecting">connecting to sdlc serve…</div>;
@@ -143,7 +147,9 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         exportHref={exportHref(selected.id, state.product)}
         onDeploy={(env) => void run(`/changes/${selected.id}/deploy`, { env })}
         onRehearse={(env) => void run(`/changes/${selected.id}/rehearse-rollback`, { env })}
-        {...(promptImpl ? { prompt: promptImpl } : {})}
+        form={state.form}
+        onForm={onForm}
+        {...(canSwitchRole ? { onSwitchRole: () => dispatch({ type: "role", role: otherRole }) } : {})}
       />
     );
   else if (state.view === "gates") body = <Gates changes={changes} queues={snapshot.queues[state.role]} role={state.role} now={now} onSelect={(id) => dispatch({ type: "select", id })} />;
@@ -154,13 +160,16 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onStart={(input) => void run("/sessions", input)}
         onAction={(id, action, body) => void run(`/sessions/${id}/${action}`, body ?? {})}
         onSelect={(id) => dispatch({ type: "select", id })}
+        selected={state.session}
+        onSelectSession={(id) => dispatch({ type: "session", id })}
         jobs={jobs}
         traceUrlTemplate={traceUrlTemplate}
         now={now}
-        {...(promptImpl ? { prompt: promptImpl } : {})}
+        form={state.form}
+        onForm={onForm}
       />
     );
-  else if (state.view === "config") body = <Config snapshot={snapshot} role={state.role} onAcceptProposal={(id) => void run(`/proposals/${id}/accept`, {})} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} onRunSuite={() => void run("/evals/run", {})} {...(promptImpl ? { prompt: promptImpl } : {})} />;
+  else if (state.view === "config") body = <Config snapshot={snapshot} role={state.role} onAcceptProposal={(id) => void run(`/proposals/${id}/accept`, {})} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} onRunSuite={() => void run("/evals/run", {})} form={state.form} onForm={onForm} {...(canSwitchRole ? { onSwitchRole: () => dispatch({ type: "role", role: otherRole }) } : {})} />;
   else if (state.view === "loop")
     body = (
       <Loop
@@ -169,7 +178,8 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onAccept={(id) => void run(`/triage/${id}/accept`, {})}
         onDismiss={(id, reason, tune) => void run(`/triage/${id}/dismiss`, { reason, bandTune: tune })}
         onDetect={current?.engine ? () => void run("/detect", {}) : undefined}
-        {...(promptImpl ? { prompt: promptImpl } : {})}
+        form={state.form}
+        onForm={onForm}
       />
     );
   else if (state.view === "security")
@@ -179,7 +189,8 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onPatch={(id) => void run(`/findings/${id}/patch`, {})}
         onEscalate={(id) => void run(`/findings/${id}/escalate`, {})}
         onDismiss={(id, reason) => void run(`/findings/${id}/dismiss`, { reason })}
-        {...(promptImpl ? { prompt: promptImpl } : {})}
+        form={state.form}
+        onForm={onForm}
       />
     );
   else if (state.view === "metrics") body = <Metrics metrics={snapshot.metrics} sources={snapshot.metricSources} />;
