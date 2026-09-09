@@ -40,6 +40,9 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
   const records = snapshot.config.records;
   const skillThreshold = Math.round(snapshot.config.thresholds.skillPassThreshold * 100);
   const canDecide = role === "eng";
+  // the harness table only earns its place when a guarantee is degraded; otherwise one sentence says so
+  const harnessIds = snapshot.config.harnesses.length === 0 ? ["claude-code"] : snapshot.config.harnesses.map((h) => h.id);
+  const harnessHealthy = snapshot.config.harnesses.every((h) => h.degraded.length === 0);
   const openProposals = snapshot.proposalViews.filter((p) => p.status === "open").length;
   // the status line: four figures, amber when the figure is a warning, green when it passes, neutral otherwise
   const figures: { label: string; value: string; note: string; tone: "amber-text" | "green-text" | "" }[] = [
@@ -140,8 +143,10 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
           </tbody>
         </table>
         <div className="footer">Managed hooks are deployed by the platform team — engineers cannot switch them off.</div>
+        {harnessHealthy ? <div className="footer mono">harness {harnessIds.join(", ")} · every managed guarantee honoured</div> : null}
       </section>
 
+      {harnessHealthy ? null : (
       <section className="panel">
         <div className="eyebrow">Harness · what runs the sessions and which guarantees it cannot honour</div>
         <table className="bands">
@@ -160,6 +165,7 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
         </table>
         <div className="footer">Hooks not run by the harness are checked by the console where a real check exists (done at exit, plan-sync and test-freeze on the per-change run); production-gate has no in-process stand-in.</div>
       </section>
+      )}
 
       <section className="panel">
         <div className="eyebrow">Records · source of truth per artifact</div>

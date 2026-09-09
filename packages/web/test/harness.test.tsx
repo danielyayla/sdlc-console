@@ -42,13 +42,14 @@ describe("degraded-guarantee display (3.8)", () => {
     expect(render({ ...initialState("po"), view: "detail", sel: "CHG-0012" })).not.toContain('<span class="mono">sess-');
   });
 
-  it("the Config view shows the harness table: Claude Code by default, and each configured entry with what it cannot honour", () => {
+  it("the Config view says one sentence when the only harness is Claude Code with nothing degraded, and shows the table for each configured entry with what it cannot honour", () => {
     const html = render({ ...initialState("po"), view: "config" });
-    expect(html).toContain(">Harness · what runs the sessions and which guarantees it cannot honour<");
-    expect(html).toContain("every managed guarantee honoured");
+    expect(html).not.toContain(">Harness · what runs the sessions and which guarantees it cannot honour<");
+    expect(html).toContain("harness claude-code · every managed guarantee honoured");
     const configured = { ...repo, config: resolveConfig({ ...(repo.rawConfig as Record<string, unknown>), harness: [{ kind: "command", id: "codex", command: "codex", args: ["exec", "--mcp-config", "{mcpConfig}", "{prompt}"], jobs: ["build"] }, { kind: "claude-code" }] } as never) };
     const snap = buildSnapshot(configured as never, { id: PO, name: "Priya Owens", roles: ["po", "eng"] }, [], 1, now);
     const html2 = render({ ...initialState("po"), view: "config" }, snap);
+    expect(html2).toContain(">Harness · what runs the sessions and which guarantees it cannot honour<");
     expect(html2).toContain(">codex<");
     expect(html2).toContain("codex exec --mcp-config {mcpConfig} {prompt}");
     expect(html2).toContain("<td>build</td>");
