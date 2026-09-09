@@ -366,6 +366,9 @@ describe("maintain intake in the views (3.5)", () => {
     expect(html).toContain("3 findings need a route."); // the seed's two plus SEC-0121; SEC-0122 is resolved
     expect(html).toContain("last run 2026-09-08T06:04:12Z");
     expect(html).toContain("resolved by scanner · 2026-09-10T06:02:55Z");
+    // the edge colour follows severity; the glow (and the `new` class that lights it) only while the finding still needs a route
+    expect(html).toContain('class="item edge-lit amber new"');
+    expect(html).toContain('class="item edge-lit amber dismissed"');
     // actions: the three seed findings have one `new` (SEC-0118) plus SEC-0121; SEC-0122 is resolved and shows none
     expect((html.match(/Wider than one patch/g) ?? []).length).toBe(3);
   });
