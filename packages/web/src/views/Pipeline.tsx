@@ -1,8 +1,9 @@
 import type { ChangeView } from "@sdlc/core";
-import { ARTIFACT_NAMES, STAGE_NAMES, gateOwnerLabel, riskLabel, waitingFor } from "../lib/format";
+import { ARTIFACT_NAMES, OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, gateOwnerLabel, riskLabel, waitingFor, type Role } from "../lib/format";
 
 export interface PipelineProps {
   changes: ChangeView[];
+  role: Role;
   now: Date;
   onSelect: (id: string) => void;
 }
@@ -10,9 +11,27 @@ export interface PipelineProps {
 const ENV_GLYPH: Record<string, string> = { succeeded: "✓", failed: "✗" };
 const ENV_TONE: Record<string, string> = { succeeded: "green-text", failed: "red-text", running: "amber-text" };
 
+/** The same predicate as core's `gateQueues`: the artifact gate's owner, else the open production gate's owner roles. */
+export function owned(c: ChangeView, role: Role): boolean {
+  return c.valid && (c.gate ? c.gate.ownerRole === role : c.deploy.productionGate?.open === true && c.deploy.productionGate.ownerRoles.includes(role));
+}
+
+export function hasOpenGate(c: ChangeView): boolean {
+  return c.valid && (c.gate !== null || c.deploy.productionGate?.open === true);
+}
+
 /** Six planes, one card per change; a card's left edge is its state (amber gate waiting, orange agent working, red invalid) and every label is a word (rule 6). */
-export function Pipeline({ changes, now, onSelect }: PipelineProps) {
+export function Pipeline({ changes, role, now, onSelect }: PipelineProps) {
+  const inFlight = changes.filter((c) => !c.closed);
+  const n = inFlight.filter((c) => owned(c, role)).length;
+  const a = inFlight.filter((c) => c.agent).length;
+  const o = inFlight.filter((c) => hasOpenGate(c) && !owned(c, role)).length;
   return (
+    <>
+      <div className="pipeline-head">
+        <div className="primary">{n === 0 ? `Nothing waits on the ${ROLE_LABEL[role]}.` : n === 1 ? `1 decision waits on the ${ROLE_LABEL[role]}.` : `${n} decisions wait on the ${ROLE_LABEL[role]}.`}</div>
+        <div className="mono faint">{inFlight.length} changes in flight · {a} agents working · {o} waiting on {OTHER_ROLES[role]}</div>
+      </div>
     <div className="pipeline">
       {STAGE_NAMES.map((name, i) => {
         const stage = i + 1;
@@ -61,5 +80,6 @@ export function Pipeline({ changes, now, onSelect }: PipelineProps) {
         );
       })}
     </div>
+    </>
   );
 }

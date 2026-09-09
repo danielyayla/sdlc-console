@@ -22,6 +22,8 @@ export function traceUrl(template: string | null | undefined, traceId: string | 
   return template.includes("{traceId}") ? template.split("{traceId}").join(traceId) : `${template}${traceId}`;
 }
 export const ROLE_LABEL: Record<Role, string> = { po: "product owner", eng: "engineer" };
+/** The roles a decision can wait on other than this one, as the headline sub-line words them. */
+export const OTHER_ROLES: Record<Role, string> = { po: "the engineer or tech lead", eng: "the product owner or tech lead" };
 
 /** "2h ago", "3d ago", "just now" — relative to `now` for testability. */
 export function relativeTime(iso: string, now: Date = new Date()): string {

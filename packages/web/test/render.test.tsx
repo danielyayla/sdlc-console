@@ -31,6 +31,10 @@ describe("Pipeline (spec §4)", () => {
     // counts for po: gates 3, loop 2, security 2 — mono numerals, not badges; hidden at 0 is exercised by eng below
     expect(html).toContain('class="count">3<');
     expect(html).not.toContain("badge");
+    // the headline is the decision count for the role, the sub-line the flight numbers
+    expect(html).toContain("decisions wait on the product owner.");
+    expect(html).toContain("changes in flight ·");
+    expect(render(initialState("eng"))).toContain("decisions wait on the engineer.");
   });
 });
 

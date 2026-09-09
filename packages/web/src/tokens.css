@@ -131,6 +131,8 @@ a:hover { color: var(--accent-hover); }
 .banner.red { color: var(--red); }
 
 /* pipeline */
+.pipeline-head { margin-bottom: var(--s-6); }
+.pipeline-head .mono { margin-top: 6px; }
 .pipeline { display: grid; grid-template-columns: repeat(6, minmax(200px, 1fr)); gap: var(--s-3); min-width: 1280px; }
 .column { background: var(--bg-panel); padding: 14px 12px; min-height: 200px; }
 .column-head { display: flex; align-items: baseline; gap: 8px; color: var(--text-primary); font-weight: 500; }
