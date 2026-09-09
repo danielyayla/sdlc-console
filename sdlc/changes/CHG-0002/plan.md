@@ -4,8 +4,8 @@ artifact: plan
 cycle: 1
 spec_sha: 5e2d8fd2ea518578dcdb1c3bcce8c5f64bd525b6
 rev: 2
-accepted_by: null
-accepted_at: null
+accepted_by: dkapper01@gmail.com
+accepted_at: 2026-09-09T18:39:29Z
 acceptance_line: From one commit, `SDLC_CHANGE=CHG-0001 SDLC_SESSION=sess-launcher pnpm test` and `env -u SDLC_CHANGE -u SDLC_SESSION pnpm test` both exit 0; packages/hooks/test/hooks.test.ts has 10 passing `it`s (9 unchanged + 1 new) and exactly 1 `runHook(` occurrence; `git diff main --stat` lists that file only.
 context_manifest: sha256:6f0ed3f6368d8babb42349140d5bade3083f3c7626bc6416da50aecae20e234e
 schema: 1
