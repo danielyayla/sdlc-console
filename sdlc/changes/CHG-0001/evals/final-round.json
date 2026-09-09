@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "n": 1,
+  "ts": "2026-09-09T14:52:20Z",
+  "results": [
+    {
+      "name": "build",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "vite v8.2.2 building client environment for production...\ntransforming...\n✓ 32 modules transformed.\nrendering chunks...\ncomputing gzip size...\ndist/index.html                   0.39 kB │ gzip:  0.26 kB\ndist/assets/index-DFFh7CAL.css   19.21 kB │ gzip:  4.17 kB\ndist/assets/index-DEZTZRJd.js   262.87 kB │ gzip: 80.78 kB\n\n[INEFFECTIVE_DYNAMIC_IMPORT] src/api.ts is dynamically imported by src/app.tsx but also statically imported by src/app.tsx, src/views/ChangeDetail.tsx, dynamic import will not move module into another chunk.\n\n✓ built in 104ms"
+    },
+    {
+      "name": "test",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "> sdlc-console@ test /Users/danielkapper/Projects/sdlc-console/.sdlc-state/worktrees/CHG-0001__packages-web-src-views\n> vitest run\n\n RUN  v4.1.11 /Users/danielkapper/Projects/sdlc-console/.sdlc-state/worktrees/CHG-0001__packages-web-src-views\n\n Test Files  81 passed (81)\n      Tests  552 passed (552)\n   Start at  17:51:06\n   Duration  58.14s (transform 8.10s, setup 0ms, import 83.37s, tests 352.88s, environment 5ms)\n\n(run as `env -u SDLC_CHANGE -u SDLC_SESSION pnpm test`: with the launcher's SDLC_CHANGE set, packages/hooks/test/hooks.test.ts resolves its throwaway CHG-0018 worktree as CHG-0001 and 6 hook tests exit 0 instead of 2 — environment, not code)"
+    },
+    {
+      "name": "lint",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "> sdlc-console@ lint /Users/danielkapper/Projects/sdlc-console/.sdlc-state/worktrees/CHG-0001__packages-web-src-views\n> eslint . --max-warnings 0\n"
+    }
+  ]
+}

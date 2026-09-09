@@ -23,28 +23,36 @@ export function Security({ snapshot, onPatch, onEscalate, onDismiss, form, onFor
   const scans = findings.map((f) => f.run).filter((r): r is NonNullable<typeof r> => r !== undefined && r.at !== undefined);
   const latestScan = scans.length > 0 ? scans.reduce((a, b) => ((b.at ?? "") > (a.at ?? "") ? b : a)) : null;
   const latestRun = latestScan?.at ?? null;
+  const source = (latestScan && findings.find((f) => f.run === latestScan)?.source) || "recurring scans";
+  const n = findings.filter((f) => f.status === "new" && f.resolved === undefined).length;
+  // the first finding still needing a route is the primary object (rule 2); the rest are plain rows
+  const primaryId = findings.find((f) => f.status === "new" && f.resolved === undefined)?.id;
   return (
     <div className="security">
-      <div className="view-head">
-        <h1 className="primary">Security</h1>
-        <span className="mono faint">
-          recurring scans · {repos} repo{repos === 1 ? "" : "s"} · last run {latestRun ? <>{latestRun}{latestScan?.url ? <> · <a href={latestScan.url} target="_blank" rel="noreferrer">{latestScan.id}</a></> : ` · ${latestScan?.id ?? ""}`}</> : "n/a · scanner not connected — POST /api/webhooks/claude-security or import a CSV/MD export"} · {validated} validated
-        </span>
+      <div className="primary">{n === 0 ? "No new findings." : n === 1 ? "1 finding needs a route." : `${n} findings need a route.`}</div>
+      <div className="mono faint view-sub">
+        {latestRun ? (
+          <>{source} · {repos} repo{repos === 1 ? "" : "s"} · last run {latestRun} · {latestScan?.url ? <a href={latestScan.url} target="_blank" rel="noreferrer">{latestScan.id}</a> : latestScan?.id ?? ""} · {validated} validated</>
+        ) : (
+          <>recurring scans · {repos} repo{repos === 1 ? "" : "s"} · last run n/a · scanner not connected — POST /api/webhooks/claude-security or import a CSV/MD export · {validated} validated</>
+        )}
       </div>
-      {findings.length === 0 ? <div className="empty">Nothing here</div> : null}
       <div className="items">
       {findings.map((f) => {
         const dismissed = f.status === "dismissed";
         const resolved = f.resolved !== undefined;
+        const isNew = f.status === "new" && !resolved;
         const where = f.location ? `${f.location.path}${f.location.startLine ? `:${f.location.startLine}${f.location.endLine && f.location.endLine !== f.location.startLine ? `-${f.location.endLine}` : ""}` : ""}` : null;
+        // the edge colour follows severity even once dismissed; the glow (step 16) and the panel follow status
+        const edge = f.sev === "high" ? "red" : f.sev === "medium" ? "amber" : "off";
         return (
-          <article className={`item edge-lit ${dismissed || resolved ? "off dismissed" : f.sev === "high" ? "red" : f.sev === "medium" ? "amber" : "off"}`} key={f.id}>
+          <article className={`item edge-lit ${edge}${isNew ? " new" : ""}${dismissed || resolved ? " dismissed" : ""}${f.id === primaryId ? " primary-row" : ""}`} key={f.id}>
             <div className="item-meta mono">
               <span className={f.sev === "high" ? "red-text" : f.sev === "medium" ? "amber-text" : "muted"}>{f.sev}</span>
               <span className="muted">{f.id}</span>
               {f.source ? <span title={f.scannerId}>{f.source}</span> : null}
               <span title="confidence">{f.validated ? "validated · " : ""}{f.conf.toFixed(2)}</span>
-              <span className={f.status === "new" ? "amber-text" : "muted"}>{STATUS_LABEL[f.status] ?? f.status}{f.escalatedTo ? ` ${f.escalatedTo}` : ""}</span>
+              <span className={`when ${f.status === "new" ? "amber-text" : "muted"}`}>{STATUS_LABEL[f.status] ?? f.status}{f.escalatedTo ? ` ${f.escalatedTo}` : ""}</span>
               {resolved ? <span className="green-text" title={`run ${f.resolved?.run ?? ""}`}>resolved by scanner · {f.resolved?.at ?? ""}</span> : null}
             </div>
             <div className="item-title">{f.url ? <a href={f.url} target="_blank" rel="noreferrer">{f.title}</a> : f.title}</div>
@@ -70,7 +78,7 @@ export function Security({ snapshot, onPatch, onEscalate, onDismiss, form, onFor
         );
       })}
       </div>
-      <div className="footer mono">Fixes reach production only through PR review and branch protection; the proposing agent cannot approve its own fix; deterministic checks stay in CI.</div>
+      <div className="foot-line mono">fixes reach production only through the PR gate · the proposing agent cannot approve its own fix</div>
     </div>
   );
 }
