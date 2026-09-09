@@ -1,6 +1,8 @@
 import type { Snapshot } from "@sdlc/server";
 import { useState } from "react";
 import { ONE_PAGE_WORDS } from "../lib/config-consts";
+import { formOpen, type FormState } from "../state";
+import { InlineReason } from "./InlineReason";
 
 export interface ConfigProps {
   snapshot: Snapshot;
@@ -11,12 +13,15 @@ export interface ConfigProps {
   onDismissProposal: (id: string, reason: string) => void;
   /** "Run suite": queues an eval suite run on the engine; the strip updates when the run commits. */
   onRunSuite: () => void;
-  prompt?: (text: string) => string | null;
+  /** The open inline reason form (rule 3): a dismissal reason is typed under its proposal. */
+  form: FormState;
+  onForm: (form: FormState) => void;
 }
 
 const ACTION_CLASS: Record<string, string> = { block: "red", ask: "amber", allow: "green" };
 
-export function Config({ snapshot, role = "po", onAcceptProposal, onDismissProposal, onRunSuite, prompt = (t) => window.prompt(t) }: ConfigProps) {
+export function Config({ snapshot, role = "po", onAcceptProposal, onDismissProposal, onRunSuite, form, onForm }: ConfigProps) {
+  const close = () => onForm(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "draft" | "retired">("all");
   const cm = snapshot.claudeMd;
   const diags = snapshot.validation.diagnostics;
@@ -170,9 +175,10 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
             {p.status === "open" ? (
               <div className="actions">
                 <button className="btn primary" disabled={!canDecide} title={canDecide ? "commit the line on a branch and open the PR for the code owners" : "eng or platform accepts a proposal"} onClick={() => onAcceptProposal(p.id)}>Accept · open PR</button>
-                <button className="btn" disabled={!canDecide} onClick={() => { const reason = prompt(`Dismiss ${p.id} — reason (required):`); if (reason && reason.trim() !== "") onDismissProposal(p.id, reason); }}>Dismiss</button>
+                <button className="btn" disabled={!canDecide} onClick={() => onForm({ kind: "dismiss-proposal", id: p.id })}>Dismiss</button>
               </div>
             ) : null}
+            {p.status === "open" && formOpen(form, "dismiss-proposal", p.id) ? <InlineReason placeholder="Why this line should not be added — required" submitLabel="Dismiss proposal" onCancel={close} onSubmit={(v) => { close(); onDismissProposal(p.id, v["reason"] ?? ""); }} /> : null}
           </div>
         ))}
       </section>

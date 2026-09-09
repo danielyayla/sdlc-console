@@ -2,6 +2,8 @@ import type { ChangeView } from "@sdlc/core";
 import { useEffect, useState } from "react";
 import { fetchArtifact, type Artifact } from "../api";
 import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, dotClass, ownsGate, prLabel, prNoun, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
+import { formOpen, type FormState } from "../state";
+import { InlineReason } from "./InlineReason";
 import { HarnessChips } from "./Sessions";
 
 export interface ChangeDetailProps {
@@ -28,7 +30,9 @@ export interface ChangeDetailProps {
   /** Records mode (FR-16): link the change to its external record; retry a failed write-back for one artifact. */
   onLinkRecord?: (system: string, id: string, url?: string) => void;
   onRetryWriteback?: (artifact: number) => void;
-  prompt?: (text: string) => string | null;
+  /** The open inline reason form (rule 3); every reason is typed under the row it belongs to. */
+  form: FormState;
+  onForm: (form: FormState) => void;
   /** Compliance export (3.3): the API URL the Export link downloads; absent when there is no server. */
   exportHref?: string;
   /** Deployment (3.6): deploy an environment / rehearse its rollback as the viewer; production is the gate's Deploy. */
@@ -64,10 +68,10 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const selected = p.art ?? view.stage - 1;
   const doc = view.docs[selected as 0 | 1 | 2 | 3 | 4 | 5];
   const [artifact, setArtifact] = useState<Artifact | null>(null);
-  const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const load = p.loadArtifact ?? fetchArtifact;
-  const prompt = p.prompt ?? ((text: string) => window.prompt(text));
+  const open = (kind: string, id?: string) => formOpen(p.form, kind, id);
+  const close = () => p.onForm(null);
   useEffect(() => {
     let alive = true;
     setArtifact(null);
@@ -90,6 +94,12 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const ownsProduction = production !== null && production.ownerRoles.includes(role);
   const environments = view.deploy.environments;
   const shortSha = (sha: string) => sha.slice(0, 7);
+  // "Send back with feedback" is a text link; the reason form opens under it (rule 3)
+  const sendBack = gate
+    ? open("sendback")
+      ? <InlineReason placeholder="Why it goes back — required" submitLabel="Send back" onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onSendBack(gate.s, v["reason"] ?? ""); }} />
+      : <button className="btn text" disabled={busy} onClick={() => p.onForm({ kind: "sendback" })}>Send back with feedback</button>
+    : null;
 
   return (
     <div className="detail">
@@ -162,19 +172,13 @@ export function ChangeDetail(p: ChangeDetailProps) {
                   {view.recordBlock ? <div className="waiting" role="note">{view.recordBlock}</div> : null}
                   <div className="actions">
                     <button className="btn primary" disabled={busy || !view.valid || view.recordBlock !== null} title={view.recordBlock ?? undefined} onClick={() => { setBusy(true); p.onAccept(gate.s); }}>{gate.acceptLabel}</button>
-                    <button className="btn" disabled={busy || feedback.trim() === ""} onClick={() => { setBusy(true); p.onSendBack(gate.s, feedback); }}>Send back</button>
                   </div>
-                  <textarea className="feedback" placeholder="Feedback (required to send back)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+                  {sendBack}
                 </>
               ) : (
                 <div className="waiting">Waiting on the {gate.ownerLabel} — switch role in the top bar to act.</div>
               )}
-              {techLead && role === "eng" ? (
-                <>
-                  <textarea className="feedback" placeholder="Feedback (required to send back)" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
-                  <div className="actions"><button className="btn" disabled={busy || feedback.trim() === ""} onClick={() => { setBusy(true); p.onSendBack(gate.s, feedback); }}>Send back</button></div>
-                </>
-              ) : null}
+              {techLead && role === "eng" ? sendBack : null}
             </div>
           ) : (
             <div className="panel">
@@ -196,7 +200,11 @@ export function ChangeDetail(p: ChangeDetailProps) {
                 ))}
               </ul>
               {!view.record && p.onLinkRecord && (role === "eng" || role === "po") ? (
-                <div className="actions"><button className="btn" disabled={busy} title="change.yaml.record; verified through the records connector when one is configured" onClick={() => { const system = prompt("Record system (e.g. jira, servicenow):"); if (!system || system.trim() === "") return; const id = prompt(`Record id in ${system.trim()}:`); if (!id || id.trim() === "") return; const url = prompt("Record URL (optional):"); setBusy(true); p.onLinkRecord?.(system.trim(), id.trim(), url && url.trim() !== "" ? url.trim() : undefined); }}>Link record</button></div>
+                open("link-record") ? (
+                  <InlineReason placeholder="" submitLabel="Link record" fields={[{ key: "system", placeholder: "Record system (e.g. jira, servicenow)" }, { key: "id", placeholder: "Record id" }, { key: "url", placeholder: "Record URL — optional", required: false }]} onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onLinkRecord?.(v["system"] ?? "", v["id"] ?? "", v["url"] ? v["url"] : undefined); }} />
+                ) : (
+                  <div className="actions"><button className="btn" disabled={busy} title="change.yaml.record; verified through the records connector when one is configured" onClick={() => p.onForm({ kind: "link-record" })}>Link record</button></div>
+                )
               ) : null}
             </div>
           ) : null}
@@ -208,9 +216,13 @@ export function ChangeDetail(p: ChangeDetailProps) {
                   <div className="who">repro test <span className="mono">{view.repro.testPath}</span> committed <span className="mono">{view.repro.sha?.slice(0, 7)}</span> · fails: {view.repro.failureReason}</div>
                   <div className="who">no edits under the test globs until merge{view.freezeLifts.length > 0 ? ` · lifted once for ${view.freezeLifts.map((l) => l.path).join(", ")}` : ""}</div>
                   {role === "eng" && view.stage <= 4 && p.onLiftFreeze ? (
-                    <div className="actions">
-                      <button className="btn" disabled={busy} title="one lift per file per change; logged on the ledger" onClick={() => { const path = prompt("Lift the test freeze for which file? (path)"); if (!path || path.trim() === "") return; const reason = prompt(`Reason for lifting the freeze on ${path.trim()} (required):`); if (!reason || reason.trim() === "") return; setBusy(true); p.onLiftFreeze?.(path.trim(), reason.trim()); }}>Lift freeze once</button>
-                    </div>
+                    open("lift-freeze") ? (
+                      <InlineReason placeholder="" submitLabel="Lift freeze" fields={[{ key: "path", placeholder: "Which file — one lift per file per change", ...(view.repro.testPath ? { initial: view.repro.testPath } : {}) }, { key: "reason", placeholder: "Why — required, logged on the ledger" }]} onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onLiftFreeze?.(v["path"] ?? "", v["reason"] ?? ""); }} />
+                    ) : (
+                      <div className="actions">
+                        <button className="btn" disabled={busy} title="one lift per file per change; logged on the ledger" onClick={() => p.onForm({ kind: "lift-freeze" })}>Lift freeze once</button>
+                      </div>
+                    )
                   ) : null}
                 </>
               ) : p.reproDraft ? (
@@ -221,9 +233,10 @@ export function ChangeDetail(p: ChangeDetailProps) {
                   {p.reproDraft.rejected ? <div className="chip amber">sent back: {p.reproDraft.rejected.reason} — the session rewrites the test</div> : role === "eng" ? (
                     <div className="actions">
                       <button className="btn primary" disabled={busy} title="commits the repro block and the proof verbatim; the test freeze begins" onClick={() => { setBusy(true); p.onReproConfirm?.(); }}>Fails for the right reason → commit</button>
-                      <button className="btn" disabled={busy} onClick={() => { const reason = prompt("Wrong failure — why? (required, goes to the session)"); if (!reason || reason.trim() === "") return; setBusy(true); p.onReproReject?.(reason.trim()); }}>Wrong failure — send back</button>
+                      <button className="btn" disabled={busy} onClick={() => p.onForm({ kind: "repro-reject" })}>Wrong failure — send back</button>
                     </div>
                   ) : <div className="waiting">The engineer decides whether this failure is the right one.</div>}
+                  {open("repro-reject") ? <InlineReason placeholder="Wrong failure — why? Goes to the session" submitLabel="Send back" onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onReproReject?.(v["reason"] ?? ""); }} /> : null}
                 </>
               ) : (
                 <div className="who">{view.reproRejection ? `last verdict: wrong failure — ${view.reproRejection.reason}` : "The build session writes the failing test first and reports it; you confirm it fails for the right reason before any code changes."}</div>
@@ -248,7 +261,13 @@ export function ChangeDetail(p: ChangeDetailProps) {
                       <span className="title">{f.title}</span>
                       <span className="when">{f.path}</span>
                       <pre className="detail">{f.detail}{f.dismissal ? `\ndismissed by ${f.dismissal.by}: ${f.dismissal.reason}` : ""}</pre>
-                      {!f.dismissal && role === "eng" && !view.pr?.mergedAt && p.onDismissAutoFinding ? <div className="actions"><button className="btn" disabled={busy} onClick={() => { const reason = prompt(`Dismiss the finding on ${f.path} — reason (required):`); if (!reason || reason.trim() === "") return; setBusy(true); p.onDismissAutoFinding?.(f.path, reason.trim()); }}>Dismiss with reason</button></div> : null}
+                      {!f.dismissal && role === "eng" && !view.pr?.mergedAt && p.onDismissAutoFinding ? (
+                        open("dismiss-finding", f.path) ? (
+                          <InlineReason placeholder={`Why the finding on ${f.path} does not block — required`} submitLabel="Dismiss" onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onDismissAutoFinding?.(f.path, v["reason"] ?? ""); }} />
+                        ) : (
+                          <div className="actions"><button className="btn" disabled={busy} onClick={() => p.onForm({ kind: "dismiss-finding", id: f.path })}>Dismiss with reason</button></div>
+                        )
+                      ) : null}
                     </li>
                   ))}
                 </ul>

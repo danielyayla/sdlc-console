@@ -1,16 +1,21 @@
 import type { Snapshot } from "@sdlc/server";
+import { formOpen, type FormState } from "../state";
+import { InlineReason } from "./InlineReason";
 
 export interface SecurityProps {
   snapshot: Snapshot;
   onPatch: (id: string) => void;
   onEscalate: (id: string) => void;
   onDismiss: (id: string, reason: string) => void;
-  prompt?: (text: string) => string | null;
+  /** The open inline reason form (rule 3): the dismissal reason is typed under the finding. */
+  form: FormState;
+  onForm: (form: FormState) => void;
 }
 
 const STATUS_LABEL: Record<string, string> = { new: "new", patch_pr: "patch in PR gate", escalated: "escalated → intent", dismissed: "dismissed" };
 
-export function Security({ snapshot, onPatch, onEscalate, onDismiss, prompt = (t) => window.prompt(t) }: SecurityProps) {
+export function Security({ snapshot, onPatch, onEscalate, onDismiss, form, onForm }: SecurityProps) {
+  const close = () => onForm(null);
   const findings = snapshot.findings;
   const validated = findings.filter((f) => f.validated).length;
   const repos = new Set(findings.map((f) => f.repo)).size;
@@ -53,17 +58,12 @@ export function Security({ snapshot, onPatch, onEscalate, onDismiss, prompt = (t
               <div className="actions">
                 <button className="btn primary" onClick={() => onPatch(f.id)}>Patch → PR gate</button>
                 <button className="btn" onClick={() => onEscalate(f.id)}>Wider than one patch → intent.md</button>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    const reason = prompt(`Dismiss ${f.id} — reason (required):`);
-                    if (reason && reason.trim() !== "") onDismiss(f.id, reason);
-                  }}
-                >
+                <button className="btn" onClick={() => onForm({ kind: "dismiss-finding", id: f.id })}>
                   Dismiss with reason
                 </button>
               </div>
             ) : null}
+            {f.status === "new" && !resolved && formOpen(form, "dismiss-finding", f.id) ? <InlineReason placeholder={`Why ${f.id} is dismissed — required`} submitLabel="Dismiss" onCancel={close} onSubmit={(v) => { close(); onDismiss(f.id, v["reason"] ?? ""); }} /> : null}
           </article>
         );
       })}

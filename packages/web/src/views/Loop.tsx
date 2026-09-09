@@ -1,5 +1,7 @@
 import type { Snapshot } from "@sdlc/server";
 import type { JobRow } from "../api";
+import { formOpen, type FormState } from "../state";
+import { InlineReason } from "./InlineReason";
 
 export interface LoopProps {
   snapshot: Snapshot;
@@ -9,7 +11,9 @@ export interface LoopProps {
   onDetect?: (() => void) | undefined;
   /** The job queue (cache), for the diagnose/propose jobs a breach raised. */
   jobs?: JobRow[];
-  prompt?: (text: string) => string | null;
+  /** The open inline reason form (rule 3): dismissal reason + band tune are typed under the item. */
+  form: FormState;
+  onForm: (form: FormState) => void;
 }
 
 function fmt(n: number | null, unit: string | null): string {
@@ -19,7 +23,8 @@ function fmt(n: number | null, unit: string | null): string {
 }
 
 /** Loop view (spec §4.6, FR-60/61): the Bands table over bands.yaml + detection snapshots, then the triage queue. */
-export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], prompt = (t) => window.prompt(t) }: LoopProps) {
+export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form, onForm }: LoopProps) {
+  const close = () => onForm(null);
   const open = snapshot.triage.filter((t) => t.data.status === "open");
   const bands = snapshot.bands?.metrics ?? [];
   const rows = snapshot.bandStatus ?? [];
@@ -85,18 +90,11 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], promp
             {runs.length > 0 ? <div className="card-status">runbooks: {runs.map((r) => `${r.id} ${r.runbook} (exit ${r.exitCode})`).join(" · ")}</div> : null}
             <div className="actions">
               <button className="btn primary" onClick={() => onAccept(t.data.id)}>Accept → Plan</button>
-              <button
-                className="btn"
-                onClick={() => {
-                  const reason = prompt(`Dismiss ${t.data.id} — reason (required):`);
-                  if (!reason || reason.trim() === "") return;
-                  const tune = prompt("Tune band? (optional note)") ?? "";
-                  onDismiss(t.data.id, reason, tune);
-                }}
-              >
+              <button className="btn" onClick={() => onForm({ kind: "dismiss-triage", id: t.data.id })}>
                 Dismiss · tune band
               </button>
             </div>
+            {formOpen(form, "dismiss-triage", t.data.id) ? <InlineReason placeholder="" submitLabel="Dismiss · tune band" fields={[{ key: "reason", placeholder: `Why ${t.data.id} is dismissed — required` }, { key: "tune", placeholder: "Tune the band? — optional note", required: false }]} onCancel={close} onSubmit={(v) => { close(); onDismiss(t.data.id, v["reason"] ?? "", v["tune"] ?? ""); }} /> : null}
           </article>
         );
       })}

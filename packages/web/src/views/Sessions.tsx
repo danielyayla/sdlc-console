@@ -3,6 +3,8 @@ import type { Snapshot } from "@sdlc/server";
 import { useState } from "react";
 import type { JobRow } from "../api";
 import { relativeTime, traceUrl } from "../lib/format";
+import { formOpen, type FormState } from "../state";
+import { InlineReason } from "./InlineReason";
 
 interface RoundCard {
   n: number;
@@ -55,7 +57,9 @@ export interface SessionsProps {
   onStart: (input: { changeId: string; kind?: string; target?: string; mode?: string }) => void;
   onAction: (id: string, action: "stop" | "takeover" | "raise-cap" | "message" | "downgrade", body?: Record<string, unknown>) => void;
   onSelect: (id: string) => void;
-  prompt?: (text: string) => string | null;
+  /** The open inline reason form (rule 3): guidance and downgrade reasons are typed under the row. */
+  form: FormState;
+  onForm: (form: FormState) => void;
   /** The product's job queue (jobs, per-change runs, suite runs); the server's `/api/jobs`. */
   jobs?: JobRow[];
   /** `OTEL_TRACE_URL_TEMPLATE` from the server (3.3): with it, rows carrying a trace id link out. */
@@ -79,7 +83,8 @@ function mockUrl(change: ChangeView | undefined): string | null {
 
 const JOB_CLASS: Record<string, string> = { done: "green", failed: "red", running: "amber", skipped: "gray", queued: "gray" };
 
-export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) => window.prompt(t), jobs = [], traceUrlTemplate = null, now = new Date() }: SessionsProps) {
+export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, jobs = [], traceUrlTemplate = null, now = new Date() }: SessionsProps) {
+  const close = () => onForm(null);
   const sessions = snapshot.sessions as unknown as SessionCard[];
   const cap = snapshot.capacity;
   const byId = new Map(snapshot.changes.map((c) => [c.id, c]));
@@ -186,13 +191,15 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, prompt = (t) =
                 {running ? <button className="btn" onClick={() => onAction(s.id, "stop")}>Stop</button> : null}
                 {running ? <button className="btn" onClick={() => onAction(s.id, "takeover")}>Take over</button> : null}
                 {live && autonomous ? (
-                  <button className="btn" title="AUTO → SUPERVISED: ends the headless harness, records the override, hands you the resume command" onClick={() => { const reason = prompt(`Downgrade ${s.id} to SUPERVISED — reason (optional):`); if (reason !== null) onAction(s.id, "downgrade", reason.trim() ? { reason: reason.trim() } : {}); }}>Downgrade to SUPERVISED</button>
+                  <button className="btn" title="AUTO → SUPERVISED: ends the headless harness, records the override, hands you the resume command" onClick={() => onForm({ kind: "downgrade", id: s.id })}>Downgrade to SUPERVISED</button>
                 ) : null}
                 {!running && s.status !== "awaiting_engineer" ? (
-                  <button className="btn" onClick={() => { const text = prompt(`Guidance for ${s.id}:`); if (text && text.trim() !== "") onAction(s.id, "message", { text }); }}>Add guidance</button>
+                  <button className="btn" onClick={() => onForm({ kind: "guidance", id: s.id })}>Add guidance</button>
                 ) : null}
                 {s.loop?.state === "stalled" ? <button className="btn" onClick={() => onAction(s.id, "raise-cap")}>Raise round cap once</button> : null}
               </div>
+              {formOpen(form, "downgrade", s.id) ? <InlineReason placeholder="Reason for AUTO → SUPERVISED — optional; the override is recorded" submitLabel="Downgrade" required={false} onCancel={close} onSubmit={(v) => { close(); onAction(s.id, "downgrade", v["reason"] ? { reason: v["reason"] } : {}); }} /> : null}
+              {formOpen(form, "guidance", s.id) ? <InlineReason placeholder={`Guidance for ${s.id} — goes to the session`} submitLabel="Send guidance" onCancel={close} onSubmit={(v) => { close(); onAction(s.id, "message", { text: v["reason"] ?? "" }); }} /> : null}
             </article>
           );
         })}
