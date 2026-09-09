@@ -100,14 +100,25 @@ describe("Change detail (spec §4)", () => {
 describe("Gates (acceptance e)", () => {
   it("swaps YOURS and OTHER when the role switches", () => {
     const po = render({ ...initialState("po"), view: "gates" });
-    expect(po).toContain("Yours · product owner");
+    expect(po).toContain("decisions wait on the product owner.");
     expect(po.indexOf("CHG-0022")).toBeLessThan(po.indexOf("Other role"));
     expect(po.indexOf("CHG-0020")).toBeGreaterThan(po.indexOf("Other role"));
     const eng = render({ ...initialState("eng"), view: "gates" });
-    expect(eng).toContain("Yours · engineer");
+    expect(eng).toContain("decisions wait on the engineer.");
     expect(eng.indexOf("CHG-0020")).toBeLessThan(eng.indexOf("Other role"));
     expect(eng.indexOf("CHG-0022")).toBeGreaterThan(eng.indexOf("Other role"));
     expect(eng).toContain('class="count">2<');
+  });
+  it("Pipeline and Gates headline numbers agree", () => {
+    const count = (html: string) => {
+      const m = /(\d+) decisions? waits? on the/.exec(html);
+      return m ? Number(m[1]) : 0;
+    };
+    for (const role of ["po", "eng"] as const) {
+      const board = count(render(initialState(role)));
+      expect(board).toBe(count(render({ ...initialState(role), view: "gates" })));
+      expect(board).toBe(role === "po" ? 3 : 2);
+    }
   });
 });
 

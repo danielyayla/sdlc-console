@@ -107,3 +107,13 @@ export function acceptVerb(view: ChangeView, codeHost?: CodeHost): string {
 export function ownsGate(view: ChangeView, role: Role): boolean {
   return view.gate !== null && view.gate.ownerRole === role;
 }
+
+/** The same predicate as core's `gateQueues` (queues.ts): the artifact gate's owner, else the open production gate's owner roles. Pipeline and Gates count with it so their headlines agree. */
+export function owned(c: ChangeView, role: Role): boolean {
+  return c.valid && (c.gate ? c.gate.ownerRole === role : c.deploy.productionGate?.open === true && c.deploy.productionGate.ownerRoles.includes(role));
+}
+
+/** An artifact gate or an open production gate on a valid change. */
+export function hasOpenGate(c: ChangeView): boolean {
+  return c.valid && (c.gate !== null || c.deploy.productionGate?.open === true);
+}

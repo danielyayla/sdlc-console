@@ -201,6 +201,7 @@ a:hover { color: var(--accent-hover); }
 
 /* gates */
 .gates { max-width: 820px; display: flex; flex-direction: column; gap: var(--s-6); }
+.gates .primary { margin-bottom: var(--s-6); }
 .gates h2 { margin: 0; font-weight: 400; }
 .row { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; column-gap: 14px; align-items: baseline; width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--border-subtle); padding: 12px 0 12px 16px; cursor: pointer; color: inherit; text-align: left; font: inherit; transition: background 0.12s; }
 .row:hover { background: var(--bg-panel); }

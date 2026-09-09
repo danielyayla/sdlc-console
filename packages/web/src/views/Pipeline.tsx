@@ -1,5 +1,5 @@
 import type { ChangeView } from "@sdlc/core";
-import { OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, waitingFor, type Role } from "../lib/format";
+import { OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, hasOpenGate, owned, waitingFor, type Role } from "../lib/format";
 
 /** The production gate's owner roles as lowercase words, the way core labels the artifact gates. */
 const ROLE_WORD: Record<string, string> = { po: "product owner", eng: "engineer", tech_lead: "tech lead" };
@@ -16,15 +16,6 @@ export interface PipelineProps {
 
 const ENV_GLYPH: Record<string, string> = { succeeded: "✓", failed: "✗" };
 const ENV_TONE: Record<string, string> = { succeeded: "green-text", failed: "red-text", running: "amber-text" };
-
-/** The same predicate as core's `gateQueues`: the artifact gate's owner, else the open production gate's owner roles. */
-export function owned(c: ChangeView, role: Role): boolean {
-  return c.valid && (c.gate ? c.gate.ownerRole === role : c.deploy.productionGate?.open === true && c.deploy.productionGate.ownerRoles.includes(role));
-}
-
-export function hasOpenGate(c: ChangeView): boolean {
-  return c.valid && (c.gate !== null || c.deploy.productionGate?.open === true);
-}
 
 /** Six planes, one card per change; a card's left edge is its state (amber gate waiting, orange agent working, red invalid) and every label is a word (rule 6). */
 export function Pipeline({ changes, role, now, onSelect }: PipelineProps) {
