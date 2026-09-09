@@ -1,5 +1,8 @@
 import type { ChangeView } from "@sdlc/core";
-import { ARTIFACT_NAMES, OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, gateOwnerLabel, riskLabel, waitingFor, type Role } from "../lib/format";
+import { OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, gateOwnerLabel, riskLabel, waitingFor, type Role } from "../lib/format";
+
+/** The artifact each column commits; the Maintain caption names the loop-back. */
+const STAGE_CAPTIONS = ["intent.md", "spec.md", "plan.md", "evals", "PR + findings", "incident → intent.md"] as const;
 
 export interface PipelineProps {
   changes: ChangeView[];
@@ -37,13 +40,9 @@ export function Pipeline({ changes, role, now, onSelect }: PipelineProps) {
         const stage = i + 1;
         const cards = changes.filter((c) => c.stage === stage && !c.closed);
         return (
-          <section className="column" key={stage} aria-label={`${stage} ${name}`}>
-            <div className="column-head">
-              <span className="column-num">{String(stage).padStart(2, "0")}</span>
-              <span>{name}</span>
-              <span className="column-count">{cards.length}</span>
-            </div>
-            <div className="column-caption">commits {ARTIFACT_NAMES[i]}</div>
+          <section className="pcol" key={stage} aria-label={`${stage} ${name}`}>
+            <div className="pcol-head mono"><span>{String(stage).padStart(2, "0")} {name}</span><span className="faint">{cards.length}</span></div>
+            <div className="pcol-caption mono faint">{STAGE_CAPTIONS[i]}</div>
             {cards.length === 0 ? <div className="empty">Nothing here</div> : null}
             {cards.map((c) => {
               const production = c.deploy.productionGate;

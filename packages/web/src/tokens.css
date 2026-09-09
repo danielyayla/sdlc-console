@@ -133,12 +133,13 @@ a:hover { color: var(--accent-hover); }
 /* pipeline */
 .pipeline-head { margin-bottom: var(--s-6); }
 .pipeline-head .mono { margin-top: 6px; }
-.pipeline { display: grid; grid-template-columns: repeat(6, minmax(200px, 1fr)); gap: var(--s-3); min-width: 1280px; }
-.column { background: var(--bg-panel); padding: 14px 12px; min-height: 200px; }
+.pipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s-5); }
+.pcol { border-top: 1px solid var(--border-subtle); padding-top: 10px; }
+.pcol-head { display: flex; justify-content: space-between; color: var(--text-secondary); }
+.pcol-caption { margin-bottom: 16px; }
 .column-head { display: flex; align-items: baseline; gap: 8px; color: var(--text-primary); font-weight: 500; }
 .column-num { font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-muted); }
 .column-count { color: var(--text-faint); font-weight: 400; margin-left: auto; font-family: var(--font-mono); font-size: var(--text-data); }
-.column-caption { color: var(--text-faint); font-family: var(--font-mono); font-size: var(--text-data); margin: 2px 0 12px; }
 .empty { color: var(--text-faintest); font-family: var(--font-mono); font-size: var(--text-data); padding: 10px 0; }
 .card { display: block; background: var(--bg-raised); border: 0; border-radius: var(--radius-card); padding: 12px 14px; margin-bottom: 2px; cursor: pointer; text-align: left; width: 100%; color: inherit; transition: background 0.12s; }
 .card.edge-lit { padding-left: 16px; }

@@ -18,7 +18,8 @@ describe("Pipeline (spec §4)", () => {
     const html = render();
     for (const name of ["01", "Plan", "02", "Design", "03", "Build", "04", "Test", "05", "Deploy", "06", "Maintain"]) expect(html).toContain(name);
     for (const id of ["CHG-0012", "CHG-0017", "CHG-0018", "CHG-0019", "CHG-0020", "CHG-0021", "CHG-0022", "CHG-0023"]) expect(html).toContain(id);
-    expect(html).toContain("commits intent.md");
+    expect(html).toContain("incident → intent.md");
+    expect(html).not.toContain('class="column');
     expect(html).toContain("Accept intent.md");
     expect(html).toContain("Merge PR");
     expect(html).toContain("TECH LEAD");
