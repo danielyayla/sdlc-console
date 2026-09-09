@@ -4,8 +4,8 @@ artifact: plan
 cycle: 1
 spec_sha: 37e1f123191b63108db8f61d4d8614825258d196
 rev: 2
-accepted_by: null
-accepted_at: null
+accepted_by: dkapper01@gmail.com
+accepted_at: 2026-09-09T13:48:42Z
 acceptance_line: pnpm build, pnpm test and pnpm lint are green; `grep -rnE '\.chip|"chip|chip[ "]' packages/web/src` prints nothing; render.test.tsx has the 5 named tests (owned card amber/off, single primary-row, dismiss needs a reason, headline numbers agree, removed strings) passing and none of the 21 removed strings; `git log --oneline main..HEAD` shows 24 commits touching only the 10 listed files.
 context_manifest: sha256:ca326616d0c8304ddb1860c824a1d8d375e0efadc963e171a8ba66e9aaceaa4e
 schema: 1
