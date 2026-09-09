@@ -1,5 +1,5 @@
 import type { ChangeView } from "@sdlc/core";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { fetchArtifact, type Artifact } from "../api";
 import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, barCaption, barClass, ownsGate, prLabel, prNoun, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
 import { formOpen, type FormState } from "../state";
@@ -63,6 +63,25 @@ export interface ReproDraftView {
 
 const STAGE_INDEX = [0, 1, 2, 3, 4, 5];
 
+const GLYPH_CLASS = { "✓": "ok", "✗": "bad", "!": "warn", "·": "none" } as const;
+
+/** One evidence row: a glyph in its state colour, a name, an optional verbatim detail, optional text actions, and the inline form that belongs to the row. */
+export function EvidenceRow({ glyph, name, detail, actions, form }: { glyph: keyof typeof GLYPH_CLASS; name: ReactNode; detail?: ReactNode; actions?: ReactNode; form?: ReactNode }) {
+  return (
+    <div className="erow">
+      <div className="egrid">
+        <span className={`glyph ${GLYPH_CLASS[glyph]}`}>{glyph}</span>
+        <span className="ebody">
+          <span className="ename">{name}</span>
+          {detail ? <span className="edetail">{detail}</span> : null}
+        </span>
+        {actions ? <span className="eactions">{actions}</span> : null}
+      </div>
+      {form ? <div className="eform">{form}</div> : null}
+    </div>
+  );
+}
+
 export function ChangeDetail(p: ChangeDetailProps) {
   const { view, role } = p;
   const selected = p.art ?? view.stage - 1;
@@ -101,6 +120,22 @@ export function ChangeDetail(p: ChangeDetailProps) {
       : <button className="btn text" disabled={busy} onClick={() => p.onForm({ kind: "sendback" })}>Send back with feedback</button>
     : null;
 
+  // Evidence: state rows the viewer-head chips used to carry — the artifact's PR, the record, a pending or failed write-back (rule 6: words, not chips)
+  const writeback = doc.record.writeback && doc.record.writeback.state !== "ok" ? doc.record.writeback : null;
+  const evidence: ReactNode[] = [];
+  if (selectedPr && !selectedPr.merged) evidence.push(<EvidenceRow key="artifact-pr" glyph="·" name={<><a href={selectedPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, selectedPr.number)}</a> · {ARTIFACT_FILES[selected]} in review</>} detail={selectedPr.branch} />);
+  if (view.record) evidence.push(<EvidenceRow key="record" glyph="·" name={<>record · {view.record.url ? <a href={view.record.url} target="_blank" rel="noreferrer">{view.record.system} {view.record.id}</a> : `${view.record.system} ${view.record.id}`}</>} />);
+  if (writeback)
+    evidence.push(
+      <EvidenceRow
+        key="writeback"
+        glyph={writeback.state === "failed" ? "✗" : "·"}
+        name={`write-back · ${doc.name}`}
+        detail={`${writeback.kind} ${writeback.sha.slice(0, 7)} · ${writeback.state === "failed" ? `failed${writeback.error ? `: ${writeback.error}` : ""}` : "pending"}`}
+        actions={writeback.state === "failed" && p.onRetryWriteback && (role === "eng" || role === "po") ? <button className="btn text" disabled={busy} onClick={() => { setBusy(true); p.onRetryWriteback?.(doc.index); }}>Retry</button> : null}
+      />,
+    );
+
   return (
     <div className="detail">
       <button className="back" onClick={p.onBack}>← Pipeline</button>
@@ -130,15 +165,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
         <section className="viewer" aria-label="artifact">
           <div className="viewer-head">
             <span className="file">{ARTIFACT_FILES[selected]}</span>
-            <span className="chip gray">{viewerState(doc, view)}</span>
-            {selectedPr && !selectedPr.merged ? <a className="chip" href={selectedPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, selectedPr.number)}</a> : null}
-            {view.record ? (view.record.url ? <a className="chip" href={view.record.url} target="_blank" rel="noreferrer" title="external record">{view.record.system} {view.record.id}</a> : <span className="chip" title="external record">{view.record.system} {view.record.id}</span>) : null}
-            {doc.record.writeback && doc.record.writeback.state !== "ok" ? (
-              <>
-                <span className="chip amber" title={doc.record.writeback.error ?? undefined}>{doc.record.writeback.state === "failed" ? "write-back failed · retry" : "write-back pending"}</span>
-                {doc.record.writeback.state === "failed" && p.onRetryWriteback && (role === "eng" || role === "po") ? <button className="btn" disabled={busy} onClick={() => { setBusy(true); p.onRetryWriteback?.(doc.index); }}>Retry</button> : null}
-              </>
-            ) : null}
+            <span className="state">{viewerState(doc, view)}</span>
           </div>
           {doc.state === "absent" ? (
             <pre className="viewer-body"><span className="viewer-empty">Not committed yet — this artifact is produced when the stage runs.</span></pre>
@@ -180,6 +207,12 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="who">{view.waitingOnYou ? `waiting on you: ${view.waitingOnYou}` : "The next human gate opens when the artifact is committed."}</div>
             </div>
           )}
+          {evidence.length > 0 ? (
+            <section className="rail-section" aria-label="evidence">
+              <div className="section-head">Evidence</div>
+              {evidence}
+            </section>
+          ) : null}
           {external.length > 0 ? (
             <div className="panel records">
               <div className="eyebrow">Record · {view.record ? `${view.record.system} ${view.record.id}` : "none linked"}</div>
