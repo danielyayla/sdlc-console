@@ -10,7 +10,8 @@ const NO_IO_MESSAGE =
 const nodeBuiltins = builtinModules.filter((name) => !name.startsWith("_"));
 
 export default defineConfig([
-  globalIgnores(["**/dist/**", "**/node_modules/**", "**/*.tsbuildinfo", "fixtures/seed/**"]),
+  // A change's design/ folder holds exports (a Claude Design page, its support script), not code that ships.
+  globalIgnores(["**/dist/**", "**/node_modules/**", "**/*.tsbuildinfo", "fixtures/seed/**", "sdlc/changes/*/design/**"]),
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
