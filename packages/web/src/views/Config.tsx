@@ -40,15 +40,31 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
   const records = snapshot.config.records;
   const skillThreshold = Math.round(snapshot.config.thresholds.skillPassThreshold * 100);
   const canDecide = role === "eng";
+  const openProposals = snapshot.proposalViews.filter((p) => p.status === "open").length;
+  // the status line: four figures, amber when the figure is a warning, green when it passes, neutral otherwise
+  const figures: { label: string; value: string; note: string; tone: "amber-text" | "green-text" | "" }[] = [
+    { label: "eval suite", value: `${ev.active} active`, note: `${underSized ? `under-sized · < ${suiteMin}` : `≥ ${suiteMin}`}${ev.draft > 0 ? ` · ${ev.draft} draft` : ""}`, tone: underSized ? "amber-text" : "" },
+    { label: "pass rate", value: passPct === null ? "n/a" : `${passPct}%`, note: `threshold ${Math.round(threshold * 100)}%${latest ? ` · ${latest.id}` : ""}${latest?.verdict === "incomplete" ? " · incomplete (stopped at the budget) — never a pass" : ""}`, tone: passPct === null ? "" : latest?.verdict === "pass" ? "green-text" : "amber-text" },
+    { label: "budget", value: budget.limit === null ? "n/a" : `${budget.used} / ${budget.limit}`, note: budget.limit === null ? "no budget set" : `${budget.remaining} left · ${budget.windowDays}d`, tone: budget.exhausted ? "amber-text" : "" },
+    { label: "repeat mistakes", value: String(snapshot.repeatSignals.length), note: `${openProposals} open proposal${openProposals === 1 ? "" : "s"}`, tone: snapshot.repeatSignals.length > 0 ? "amber-text" : "" },
+  ];
+  const modeLine = `${ev.mode}${ev.mode === "scheduled" ? ` · next run ${snapshot.config.evals.schedule ?? "per the CI schedule"} · config PRs not gated` : ev.gate.ok ? ` · config PRs pass on ${ev.gate.run?.id ?? "the current run"}` : ` · config PRs blocked: ${ev.gate.reason}`}`;
 
   return (
     <div className="config">
-      <div className={`banner${underSized || ev.mode === "scheduled" || (latest !== null && latest.verdict !== "pass") ? "" : " green"}`}>
-        <span className={`chip ${underSized ? "amber" : "green"}`}>suite {ev.active}{underSized ? ` · under-sized (< ${suiteMin})` : ""}{ev.draft > 0 ? ` · ${ev.draft} draft` : ""}</span>{" "}
-        <span className={`chip ${passPct === null ? "gray" : latest?.verdict === "pass" ? "green" : "amber"}`}>pass {passPct === null ? "n/a" : `${passPct}%`} · threshold {Math.round(threshold * 100)}%{latest?.verdict === "incomplete" ? " · incomplete (stopped at the budget) — never a pass" : ""}</span>{" "}
-        <span className={`chip ${ev.mode === "scheduled" ? "amber" : "gray"}`}>{ev.mode}{ev.mode === "scheduled" ? ` · next run ${snapshot.config.evals.schedule ?? "per the CI schedule"} · config PRs not gated` : ev.gate.ok ? ` · config PRs pass on ${ev.gate.run?.id ?? "the current run"}` : ` · config PRs blocked: ${ev.gate.reason}`}</span>{" "}
-        <span className={`chip ${budget.exhausted ? "amber" : "gray"}`}>budget {budget.limit === null ? "n/a" : `${budget.used} / ${budget.limit} used · ${budget.remaining} left (${budget.windowDays}d)`}</span>{" "}
-        <button className="btn" onClick={onRunSuite} disabled={budget.exhausted} title={budget.exhausted ? "budget exhausted for this window" : "run every active case on the engine and commit the run file"}>Run suite</button>
+      <div className="config-head">
+        <h1 className="primary">Config</h1>
+        <span className="mono faint">read from CLAUDE.md and .claude/** · never edited here</span>
+      </div>
+
+      <div className="figures" aria-label="status">
+        {figures.map((f) => (
+          <div className="figure" key={f.label}>
+            <div className="mono faint">{f.label}</div>
+            <div className={`value tabular ${f.tone}`}>{f.value}</div>
+            <div className="mono muted">{f.note}</div>
+          </div>
+        ))}
       </div>
 
       <section className="panel">
@@ -184,7 +200,7 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
       </section>
 
       <section className="panel">
-        <div className="eyebrow">Evals · {cases.length} cases · {runs.length} runs</div>
+        <div className="eyebrow section-head"><span className="secondary">Evals</span><span>{cases.length} cases · {runs.length} runs · {modeLine}</span><span className="spacer" /><button className="btn text" onClick={onRunSuite} disabled={budget.exhausted} title={budget.exhausted ? "budget exhausted for this window" : "run every active case on the engine and commit the run file"}>Run suite</button></div>
         <div className="strip">{ev.strip.map((r) => <span key={r.id} className={`dot ${r.verdict === "pass" ? "green" : r.verdict === "fail" ? "amber" : "inactive"}`} title={`${r.id} · ${r.trigger} · ${r.verdict} ${Math.round(r.passRate * 100)}% · ${r.model} · ${r.changes.join(", ")}`} />)}{runs.length === 0 ? <span className="muted">no runs yet</span> : null}</div>
         <div className="filters">
           {(["all", "active", "draft", "retired"] as const).map((f) => <button key={f} className={`tab${statusFilter === f ? " active" : ""}`} onClick={() => setStatusFilter(f)}>{f}</button>)}

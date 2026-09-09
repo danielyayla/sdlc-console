@@ -322,7 +322,14 @@ a:hover { color: var(--accent-hover); }
 .job .btn.text:hover { color: var(--text-primary); }
 
 /* config */
-.config { max-width: 1020px; display: flex; flex-direction: column; gap: 12px; }
+.config { max-width: 960px; display: flex; flex-direction: column; gap: 12px; }
+.config-head { display: flex; align-items: baseline; gap: 20px; }
+.config-head .primary { margin: 0; }
+.figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-5); margin: 20px 0 36px; }
+.figure { border-top: 1px solid var(--border-subtle); padding-top: 10px; }
+.figure .value { font-size: var(--text-primary-size); line-height: 1.2; color: var(--text-primary); margin-top: 4px; }
+.figure .value.amber-text { color: var(--amber); }
+.figure .value.green-text { color: var(--green); }
 .banner.green { border-color: var(--green); background: rgba(127, 175, 138, 0.08); }
 .warn { color: var(--amber); font-size: 12px; }
 .strip { display: flex; gap: 4px; margin: 6px 0; }

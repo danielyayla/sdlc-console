@@ -215,12 +215,13 @@ describe("Config (spec §4)", () => {
     expect(html).toContain("intent: repo");
     expect(html).toContain("PRP-0007");
     expect(html).toContain("Never filter invoice rows by truthiness");
-    expect(html).toContain("under-sized (&lt; 20)");
-    expect(html).toContain("pass 100% · threshold 90%");
+    expect(html).toContain("under-sized · &lt; 20");
+    expect(html).toContain('class="value tabular green-text">100%</div>');
+    expect(html).toContain("threshold 90%");
     expect(html).toContain("CASE-0003");
     expect(html).toContain("draft · checks missing");
     expect(html).toContain("Run suite");
-    expect(html).toContain("budget n/a");
+    expect(html).toContain(">budget</div><div class=\"value tabular \">n/a</div>");
     expect(html).toContain("config PRs pass on RUN-0001");
     expect(html).toContain("RUN-0001 · schedule · pass 100%");
   });
