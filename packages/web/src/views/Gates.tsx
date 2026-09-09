@@ -17,11 +17,13 @@ export function Gates({ changes, queues, role, now, onSelect }: GatesProps) {
   // the production gate (3.6) queues like the artifact gates: its row names the environment
   const rows = (ids: string[], yours: boolean) =>
     open(ids).map((c) => (
-      <button className={`row edge-lit ${yours ? "amber" : "off"}`} key={c.id} onClick={() => onSelect(c.id)}>
+      <button className={`grow edge-lit ${yours ? "amber" : "off"}`} key={c.id} onClick={() => onSelect(c.id)}>
         <span className="mono muted">{c.id}</span>
-        <span className="label">{c.gate ? c.gate.label : `Deploy to ${c.deploy.productionGate?.env ?? "production"}`}</span>
-        <span className="meta">{c.title} · {STAGE_NAMES[c.stage - 1]}{!c.gate && c.deploy.productionGate?.blocked ? " · rollback rehearsal pending" : ""}</span>
-        <span className="since mono">{c.gate ? waitingFor(c.gate.since, now) : c.deploy.productionGate?.since ? waitingFor(c.deploy.productionGate.since, now) : ""}</span>
+        <span className="gbody">
+          <span className="glabel">{c.gate ? c.gate.label : `Deploy to ${c.deploy.productionGate?.env ?? "production"}`}</span>
+          <span className="gmeta">{c.title} · {STAGE_NAMES[c.stage - 1]}{!c.gate && c.deploy.productionGate?.blocked ? " · rollback rehearsal pending" : ""}</span>
+        </span>
+        <span className="mono faint">{c.gate ? waitingFor(c.gate.since, now) : c.deploy.productionGate?.since ? waitingFor(c.deploy.productionGate.since, now) : ""}</span>
       </button>
     ));
   return (

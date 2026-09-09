@@ -101,6 +101,7 @@ describe("Gates (acceptance e)", () => {
   it("swaps YOURS and OTHER when the role switches", () => {
     const po = render({ ...initialState("po"), view: "gates" });
     expect(po).toContain("decisions wait on the product owner.");
+    expect(po).toContain('class="grow edge-lit amber"');
     expect(po.indexOf("CHG-0022")).toBeLessThan(po.indexOf("Other role"));
     expect(po.indexOf("CHG-0020")).toBeGreaterThan(po.indexOf("Other role"));
     const eng = render({ ...initialState("eng"), view: "gates" });
