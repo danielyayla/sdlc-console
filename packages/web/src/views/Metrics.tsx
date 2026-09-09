@@ -55,7 +55,7 @@ export function Metrics({ metrics, sources }: { metrics: StageMetrics[]; sources
               <div className="mrow" key={v.key}>
                 <div className="mvalue-row"><span className="mvalue tabular">{fmt(v)}</span><Trend v={v} /><span className="mkind mono">{kind}</span></div>
                 <div className="mname">{v.name}</div>
-                <div className="mono faint">{v.note} · {v.sources.join(" · ")}</div>
+                <div className="mono faint">{[v.note, ...v.sources].join(" · ")}</div>
               </div>
             ))}
           </section>
