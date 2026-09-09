@@ -33,7 +33,7 @@ export interface AppProps {
 function sessionLinesOf(snapshot: Snapshot, changeId: string): SessionLine[] {
   return snapshot.sessions
     .filter((s) => s.changeId === changeId)
-    .map((s) => ({ id: s.id, kind: typeof s["kind"] === "string" ? s["kind"] : "build", mode: s.mode, status: s.status, startedAt: s.startedAt, harness: (s["harness"] as SessionLine["harness"] | undefined) ?? null, standIn: (s["standIn"] as SessionLine["standIn"] | undefined) ?? null }));
+    .map((s) => ({ id: s.id, kind: typeof s["kind"] === "string" ? s["kind"] : "build", mode: s.mode, status: s.status, startedAt: s.startedAt, harness: (s["harness"] as SessionLine["harness"] | undefined) ?? null, standIn: (s["standIn"] as SessionLine["standIn"] | undefined) ?? null, testEditAttempts: typeof s["testEditAttempts"] === "number" ? s["testEditAttempts"] : 0 }));
 }
 
 function reproDraftOf(snapshot: Snapshot, changeId: string): ReproDraftView | null {
@@ -115,6 +115,11 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
   const repoLabel = current?.name ?? state.product ?? (snapshot?.config.present ? "repo" : "repo");
   const artifactLoader = loadArtifact ?? ((id: string, index: number) => import("./api").then((m) => m.fetchArtifact(id, index, state.product)));
 
+  // the other role the identity holds (local mode holds every role): the Decision section offers "Switch role"
+  const otherRole: Role = state.role === "po" ? "eng" : "po";
+  const held = snapshot?.identity.roles ?? [];
+  const canSwitchRole = held.length === 0 || held.includes(otherRole);
+
   let body;
   if (!snapshot) body = <div className="connecting">connecting to sdlc serve…</div>;
   else if (state.view === "detail" && selected)
@@ -144,6 +149,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onRehearse={(env) => void run(`/changes/${selected.id}/rehearse-rollback`, { env })}
         form={state.form}
         onForm={onForm}
+        {...(canSwitchRole ? { onSwitchRole: () => dispatch({ type: "role", role: otherRole }) } : {})}
       />
     );
   else if (state.view === "gates") body = <Gates changes={changes} queues={snapshot.queues[state.role]} role={state.role} now={now} onSelect={(id) => dispatch({ type: "select", id })} />;

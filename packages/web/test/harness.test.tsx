@@ -31,14 +31,15 @@ describe("degraded-guarantee display (3.8)", () => {
     expect(html).not.toContain("harness claude-code");
   });
 
-  it("the change detail lists the change's sessions with the same chips", () => {
+  it("the change detail lists the change's sessions as the first History rows with the same chips", () => {
     const html = render({ ...initialState("eng"), view: "detail", sel: "CHG-0018" });
-    expect(html).toContain('<div class="eyebrow">Sessions</div>');
+    expect(html).toContain('aria-label="history"');
+    expect(html.indexOf("sess-0018-repro")).toBeLessThan(html.indexOf("committed intent.md"));
     expect(html).toContain("sess-0018-repro</span> · build · SUPERVISED · done-unverified — verify-before-done: round 2 has test red — completion blocked");
     expect(html).toContain(">harness codex<");
     expect(html).toContain("tool-allowlist — no tool allowlist");
-    // a change without sessions has no panel
-    expect(render({ ...initialState("po"), view: "detail", sel: "CHG-0012" })).not.toContain('<div class="eyebrow">Sessions</div>');
+    // a change without sessions has no session rows
+    expect(render({ ...initialState("po"), view: "detail", sel: "CHG-0012" })).not.toContain('<span class="mono">sess-');
   });
 
   it("the Config view shows the harness table: Claude Code by default, and each configured entry with what it cannot honour", () => {

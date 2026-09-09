@@ -1,7 +1,7 @@
 import type { ChangeView } from "@sdlc/core";
 import { useEffect, useState, type ReactNode } from "react";
 import { fetchArtifact, type Artifact } from "../api";
-import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, barCaption, barClass, ownsGate, prLabel, prNoun, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
+import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, acceptVerb, barCaption, barClass, ownsGate, prLabel, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
 import { formOpen, type FormState } from "../state";
 import { InlineReason } from "./InlineReason";
 import { HarnessChips } from "./Sessions";
@@ -33,6 +33,8 @@ export interface ChangeDetailProps {
   /** The open inline reason form (rule 3); every reason is typed under the row it belongs to. */
   form: FormState;
   onForm: (form: FormState) => void;
+  /** "Switch role" in the Decision section when the gate is owned by the other role the identity holds; absent when it cannot. */
+  onSwitchRole?: () => void;
   /** Compliance export (3.3): the API URL the Export link downloads; absent when there is no server. */
   exportHref?: string;
   /** Deployment (3.6): deploy an environment / rehearse its rollback as the viewer; production is the gate's Deploy. */
@@ -50,6 +52,8 @@ export interface SessionLine {
   startedAt: string;
   harness: { id: string; degraded: { guarantee: string; reason: string }[] } | null;
   standIn: { guarantee: string; allowed: boolean; reason: string; rounds: number } | null;
+  /** Edits under the frozen test globs the hook blocked (2.7). */
+  testEditAttempts?: number;
 }
 
 export interface ReproDraftView {
@@ -64,9 +68,10 @@ export interface ReproDraftView {
 const STAGE_INDEX = [0, 1, 2, 3, 4, 5];
 
 const GLYPH_CLASS = { "✓": "ok", "✗": "bad", "!": "warn", "·": "none" } as const;
+type Glyph = keyof typeof GLYPH_CLASS;
 
 /** One evidence row: a glyph in its state colour, a name, an optional verbatim detail, optional text actions, and the inline form that belongs to the row. */
-export function EvidenceRow({ glyph, name, detail, actions, form }: { glyph: keyof typeof GLYPH_CLASS; name: ReactNode; detail?: ReactNode; actions?: ReactNode; form?: ReactNode }) {
+export function EvidenceRow({ glyph, name, detail, actions, form }: { glyph: Glyph; name: ReactNode; detail?: ReactNode; actions?: ReactNode; form?: ReactNode }) {
   return (
     <div className="erow">
       <div className="egrid">
@@ -81,6 +86,21 @@ export function EvidenceRow({ glyph, name, detail, actions, form }: { glyph: key
     </div>
   );
 }
+
+/** One history row: a 6px dot in the actor's colour, the line, the relative time. */
+function HistoryRow({ actor, pulse, text, when }: { actor: "agent" | "human" | "system"; pulse?: boolean; text: ReactNode; when: string }) {
+  return (
+    <div className="hrow">
+      <span className={`hdot ${actor}${pulse ? " pulse" : ""}`} />
+      <span className="htext">{text}</span>
+      <span className="hwhen">{when}</span>
+    </div>
+  );
+}
+
+const verdictGlyph = (v: string): Glyph => (v === "pass" ? "✓" : v === "fail" ? "✗" : "·");
+const envGlyph = (status: string): Glyph => (status === "succeeded" ? "✓" : status === "failed" ? "✗" : "·");
+const shortSha = (sha: string) => sha.slice(0, 7);
 
 export function ChangeDetail(p: ChangeDetailProps) {
   const { view, role } = p;
@@ -112,29 +132,217 @@ export function ChangeDetail(p: ChangeDetailProps) {
   const production = view.deploy.productionGate;
   const ownsProduction = production !== null && production.ownerRoles.includes(role);
   const environments = view.deploy.environments;
-  const shortSha = (sha: string) => sha.slice(0, 7);
+  const canAct = role === "eng" || role === "po";
+  const merged = view.stage === 6 || Boolean(view.pr?.mergedAt);
+
   // "Send back with feedback" is a text link; the reason form opens under it (rule 3)
   const sendBack = gate
     ? open("sendback")
       ? <InlineReason placeholder="Why it goes back — required" submitLabel="Send back" onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onSendBack(gate.s, v["reason"] ?? ""); }} />
       : <button className="btn text" disabled={busy} onClick={() => p.onForm({ kind: "sendback" })}>Send back with feedback</button>
     : null;
+  const switchRole = p.onSwitchRole ? <> <button className="btn text accent-text" onClick={p.onSwitchRole}>Switch role</button></> : null;
 
-  // Evidence: state rows the viewer-head chips used to carry — the artifact's PR, the record, a pending or failed write-back (rule 6: words, not chips)
-  const writeback = doc.record.writeback && doc.record.writeback.state !== "ok" ? doc.record.writeback : null;
+  // ---- Decision: the one open gate (rule 2), lit amber when it is yours ----
+  const decisionEdge = gate ? (owned ? "amber" : "off") : view.agent ? "agent pulse" : "off";
+  const decision = (
+    <section className={`rail-section decision edge-lit ${decisionEdge}`} aria-label="decision">
+      <div className="eyebrow">{gate ? `Decision · ${waitingFor(gate.since, p.now)}` : "No decision open"}</div>
+      <div className="primary">{gate ? gate.label : view.status}</div>
+      <div className="line">{gate ? `Owned by the ${gate.ownerLabel}` : view.waitingOnYou ? `Waiting on you: ${view.waitingOnYou}` : "The next decision opens when the artifact is committed."}</div>
+      {gate && reviewPr && !techLead ? <div className="line">In review as <a href={reviewPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, reviewPr.number)}</a> · merging it is the decision.</div> : null}
+      {gate && techLead ? <div className="line">Approval happens via {prLabel(p.codeHost)} review on plan.md{reviewPr ? <> · <a href={reviewPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, reviewPr.number)}</a></> : null}.</div> : null}
+      {gate && owned ? (
+        <div className="decide">
+          {view.recordBlock ? <div className="line amber-text" role="note">{view.recordBlock}</div> : null}
+          <button className="btn primary" disabled={busy || !view.valid || view.recordBlock !== null} title={view.recordBlock ?? undefined} onClick={() => { setBusy(true); p.onAccept(gate.s); }}>{acceptVerb(view, p.codeHost)}</button>
+          {sendBack}
+        </div>
+      ) : gate && !techLead ? (
+        <div className="line">Waiting on the {gate.ownerLabel}.{switchRole}</div>
+      ) : null}
+      {gate && techLead && role === "eng" ? <div className="decide">{sendBack}</div> : null}
+    </section>
+  );
+
+  // ---- Evidence: state rows, in the order the panels used to stack ----
   const evidence: ReactNode[] = [];
-  if (selectedPr && !selectedPr.merged) evidence.push(<EvidenceRow key="artifact-pr" glyph="·" name={<><a href={selectedPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, selectedPr.number)}</a> · {ARTIFACT_FILES[selected]} in review</>} detail={selectedPr.branch} />);
-  if (view.record) evidence.push(<EvidenceRow key="record" glyph="·" name={<>record · {view.record.url ? <a href={view.record.url} target="_blank" rel="noreferrer">{view.record.system} {view.record.id}</a> : `${view.record.system} ${view.record.id}`}</>} />);
-  if (writeback)
-    evidence.push(
-      <EvidenceRow
-        key="writeback"
-        glyph={writeback.state === "failed" ? "✗" : "·"}
-        name={`write-back · ${doc.name}`}
-        detail={`${writeback.kind} ${writeback.sha.slice(0, 7)} · ${writeback.state === "failed" ? `failed${writeback.error ? `: ${writeback.error}` : ""}` : "pending"}`}
-        actions={writeback.state === "failed" && p.onRetryWriteback && (role === "eng" || role === "po") ? <button className="btn text" disabled={busy} onClick={() => { setBusy(true); p.onRetryWriteback?.(doc.index); }}>Retry</button> : null}
-      />,
+  const row = (key: string, glyph: Glyph, name: ReactNode, detail?: ReactNode, actions?: ReactNode, form?: ReactNode) => evidence.push(<EvidenceRow key={key} glyph={glyph} name={name} detail={detail} actions={actions} form={form} />);
+
+  // 1 · auto-mode terms
+  if (view.planState !== "none") {
+    row("auto", "·", `auto mode · ${view.autoEligible.value ? "eligible" : "not eligible"}`);
+    for (const t of view.autoEligible.terms) row(`auto:${t.name}`, t.ok ? "✓" : "✗", t.name, t.detail);
+    if (view.visual.warning) row("visual", "!", "visual check", view.visual.warning);
+    if (view.visual.mock) row("mock", "·", `mock ${view.visual.mock.path.split("/").pop()}`, view.visual.tool ? `visual tool ${view.visual.tool}` : "no visual tool in CLAUDE.md");
+  }
+
+  // 2 · repro first (fix changes)
+  if (view.kind === "fix" && (view.stage === 3 || view.stage === 4 || view.repro)) {
+    const draft = p.reproDraft;
+    if (view.repro?.state === "committed") {
+      const lifts = view.freezeLifts.length > 0 ? ` · lifted once for ${view.freezeLifts.map((l) => l.path).join(", ")}` : "";
+      const canLift = role === "eng" && view.stage <= 4 && p.onLiftFreeze;
+      row(
+        "repro",
+        "✓",
+        "repro test frozen",
+        `${view.repro.testPath ?? ""} · ${shortSha(view.repro.sha ?? "")} · fails: ${view.repro.failureReason ?? ""} · no edits under the test globs until merge${lifts}`,
+        canLift && !open("lift-freeze") ? <button className="btn text" disabled={busy} title="one lift per file per change; logged on the ledger" onClick={() => p.onForm({ kind: "lift-freeze" })}>Lift freeze once</button> : null,
+        canLift && open("lift-freeze") ? <InlineReason placeholder="" submitLabel="Lift freeze" fields={[{ key: "path", placeholder: "Which file — one lift per file per change", ...(view.repro.testPath ? { initial: view.repro.testPath } : {}) }, { key: "reason", placeholder: "Why — required, logged on the ledger" }]} onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onLiftFreeze?.(v["path"] ?? "", v["reason"] ?? ""); }} /> : null,
+      );
+      const blocked = (p.sessions ?? []).reduce((n, s) => n + (s.testEditAttempts ?? 0), 0);
+      if (blocked > 0) row("test-edits", "✗", "test edit attempts", `${blocked} blocked by test-freeze`);
+    } else if (draft && draft.rejected) {
+      row("repro", "!", "repro test sent back", `${draft.testPath} · ${draft.rejected.reason} — the session rewrites the test`);
+    } else if (draft) {
+      row(
+        "repro",
+        "!",
+        "repro test reported",
+        <>{draft.testPath} · {shortSha(draft.sha)} (the test alone) · session {draft.session} · fails: {draft.failureReason}<pre>{draft.output}</pre></>,
+        role === "eng" ? <button className="btn text" disabled={busy} title="commits the repro block and the proof verbatim; the test freeze begins" onClick={() => { setBusy(true); p.onReproConfirm?.(); }}>Fails for the right reason → commit</button> : null,
+      );
+      row(
+        "repro-verdict",
+        "·",
+        role === "eng" ? "not the right failure?" : "the engineer decides whether this failure is the right one",
+        undefined,
+        role === "eng" && !open("repro-reject") ? <button className="btn text" disabled={busy} onClick={() => p.onForm({ kind: "repro-reject" })}>Wrong failure — send back</button> : null,
+        role === "eng" && open("repro-reject") ? <InlineReason placeholder="Wrong failure — why? Goes to the session" submitLabel="Send back" onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onReproReject?.(v["reason"] ?? ""); }} /> : null,
+      );
+    } else {
+      row("repro", "·", "repro first", view.reproRejection ? `last verdict: wrong failure — ${view.reproRejection.reason}` : "the build session writes the failing test first and reports it; you confirm it fails for the right reason before any code changes");
+    }
+  }
+
+  // 3 · pull request: checks, plan match, findings, review
+  if (view.pr) {
+    const pr = view.pr;
+    row("pr", "·", pr.url ? <a href={pr.url} target="_blank" rel="noreferrer">{prLabel(pr.provider, pr.number)} {pr.branch}</a> : pr.branch, `→ ${pr.baseBranch} · head ${shortSha(pr.headSha)}${pr.mergeSha ? ` · merged ${shortSha(pr.mergeSha)}` : ""} · ${pr.provider}`);
+    for (const c of pr.checks) row(`check:${c.name}`, verdictGlyph(c.verdict), c.name, c.summary ? `${c.verdict} · ${c.summary}` : c.verdict);
+    row("plan-matches", pr.planMatches === false ? "✗" : pr.planMatches === null ? "·" : "✓", "plan matches", pr.planMatches === null ? "unknown" : pr.planMatches ? "yes" : "reviewer judgment");
+    if (pr.findings) row("findings", pr.findings.high > 0 ? "!" : "·", "findings", `${pr.findings.high} high · ${pr.findings.medium} medium · ${pr.findings.low} low`);
+    for (const f of pr.autoFindings ?? []) {
+      const dismissable = !f.dismissal && role === "eng" && !pr.mergedAt && p.onDismissAutoFinding;
+      row(
+        `auto-finding:${f.rule}:${f.path}`,
+        f.dismissal ? "·" : "✗",
+        f.dismissal ? `${f.title} · dismissed` : `${f.title} · blocks merge`,
+        <>{f.path}<pre>{f.detail}{f.dismissal ? `\ndismissed by ${f.dismissal.by}: ${f.dismissal.reason}` : ""}</pre></>,
+        dismissable && !open("dismiss-finding", f.path) ? <button className="btn text" disabled={busy} onClick={() => p.onForm({ kind: "dismiss-finding", id: f.path })}>Dismiss</button> : null,
+        dismissable && open("dismiss-finding", f.path) ? <InlineReason placeholder={`Why the finding on ${f.path} does not block — required`} submitLabel="Dismiss" onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onDismissAutoFinding?.(f.path, v["reason"] ?? ""); }} /> : null,
+      );
+    }
+    if (pr.reviewers.length > 0) row("reviewers", "·", "reviewers", pr.reviewers.join(", "));
+    const reviewLine = pr.review
+      ? `review of ${shortSha(pr.review.headSha)} · session ${pr.review.session}${pr.review.afterMerge ? " · ended after the merge" : ""}${pr.review.headSha !== pr.headSha ? " · head moved since — review pending" : ""}`
+      : pr.mergedAt
+        ? "not reviewed by an agent"
+        : "review pending";
+    const n = view.findings.length;
+    row(
+      "review",
+      view.findings.some((f) => f.severity !== "low") ? "!" : "·",
+      `review · ${n} finding${n === 1 ? "" : "s"}`,
+      <>
+        {reviewLine}
+        {view.findings.map((f) => (
+          <span key={f.id} className="finding">
+            {f.severity} · {f.title}{f.path ? ` · ${f.path}` : ""}
+            {f.detail ? <pre>{f.detail}</pre> : null}
+          </span>
+        ))}
+      </>,
     );
+  }
+
+  // 4 · environments and the production gate
+  for (const e of environments) {
+    const last = e.rehearsals.at(-1);
+    const state = e.status === "not-deployed" ? `not deployed${e.kind === "production" ? " · gated after merge" : ""}` : `${e.status}${e.latest ? ` · ${shortSha(e.latest.sha)} · ${relativeTime(e.latest.finishedAt ?? e.latest.startedAt, p.now)}` : ""}${last ? ` · rollback rehearsed ${last.status}` : ""}`;
+    const detail = e.agentDeployable && e.latest ? (
+      <>
+        {state}
+        <span className="finding">{e.latest.command} → exit {e.latest.exitCode ?? "?"} · by {e.latest.actor.type === "agent" ? e.latest.actor.session ?? e.latest.actor.id : e.latest.actor.id}</span>
+        {e.latest.status !== "running" ? <pre>{e.latest.output || "(no output)"}</pre> : null}
+        {last ? <><span className="finding">rollback rehearsal at {shortSha(last.sha)}: {last.command} → exit {last.exitCode} · {last.status}</span><pre>{last.output || "(no output)"}</pre></> : null}
+      </>
+    ) : state;
+    const actions = e.agentDeployable && canAct && (p.onDeploy || p.onRehearse) && view.pr ? (
+      <>
+        {p.onDeploy ? <button className="btn text" disabled={busy || e.status === "running"} title={`runs the declared deploy command for ${e.name} at ${view.pr.mergeSha ? "the merged commit" : "the PR head"}`} onClick={() => { setBusy(true); p.onDeploy?.(e.name); }}>Deploy to {e.name}</button> : null}
+        {p.onRehearse && e.status === "succeeded" ? <button className="btn text" disabled={busy} title={`runs the declared rollback command for ${e.name} at what it has deployed; the record is the production gate's evidence`} onClick={() => { setBusy(true); p.onRehearse?.(e.name); }}>Rehearse rollback</button> : null}
+      </>
+    ) : null;
+    row(`env:${e.name}`, envGlyph(e.status), `${e.name} · ${e.kind}`, detail, actions);
+  }
+  if (production && (production.open || production.deployment || production.authorized)) {
+    const d = production.deployment;
+    const title = d?.status === "running" ? `Deploying ${shortSha(d.sha)} to ${production.env}` : d?.status === "succeeded" ? `Deployed ${shortSha(d.sha)} to ${production.env}` : d?.status === "failed" && !production.open ? `${production.env} deploy failed` : `Deploy ${production.sha ? shortSha(production.sha) : ""} to ${production.env}`;
+    row(
+      "production-gate",
+      d?.status === "succeeded" ? "✓" : d?.status === "failed" ? "✗" : production.open ? "!" : "·",
+      `Production gate · ${production.env}`,
+      <>
+        {title} · owner: {production.ownerLabel}{production.authorized ? ` · authorized by ${production.authorized.by} ${relativeTime(production.authorized.at, p.now)}` : ""}{production.open && production.since ? ` · ${waitingFor(production.since, p.now)}` : ""}
+        {production.open && !ownsProduction ? <span className="finding">Waiting on the {production.ownerLabel}.</span> : null}
+        {production.open && ownsProduction && production.blocked ? <span className="finding amber-text">{production.blocked}</span> : null}
+        {d && d.status !== "running" ? <pre>{d.output || "(no output)"}</pre> : null}
+      </>,
+      production.open && ownsProduction ? <button className="btn text" disabled={busy || !view.valid || production.blocked !== null || !p.onDeploy} title={production.blocked ?? `runs the declared deploy command for ${production.env} after the decision is committed`} onClick={() => { setBusy(true); p.onDeploy?.(production.env); }}>Deploy to {production.env}</button> : null,
+    );
+    for (const c of production.checks) row(`prod-check:${c.name}`, verdictGlyph(c.verdict), c.name, `${c.verdict} · ${c.summary}`);
+  }
+
+  // 5 · record: the external record and each artifact's sync
+  if (view.record || external.length > 0) {
+    const canLink = !view.record && p.onLinkRecord && canAct;
+    row(
+      "record",
+      "·",
+      <>record · {view.record ? (view.record.url ? <a href={view.record.url} target="_blank" rel="noreferrer">{view.record.system} {view.record.id}</a> : `${view.record.system} ${view.record.id}`) : "none linked"}</>,
+      undefined,
+      canLink && !open("link-record") ? <button className="btn text" disabled={busy} title="change.yaml.record; verified through the records connector when one is configured" onClick={() => p.onForm({ kind: "link-record" })}>Link record</button> : null,
+      canLink && open("link-record") ? <InlineReason placeholder="" submitLabel="Link record" fields={[{ key: "system", placeholder: "Record system (e.g. jira, servicenow)" }, { key: "id", placeholder: "Record id" }, { key: "url", placeholder: "Record URL — optional", required: false }]} onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onLinkRecord?.(v["system"] ?? "", v["id"] ?? "", v["url"] ? v["url"] : undefined); }} /> : null,
+    );
+    for (const d of external) {
+      const wb = d.record.writeback && d.record.writeback.state !== "ok" ? d.record.writeback : null;
+      row(
+        `record:${d.index}`,
+        wb ? (wb.state === "failed" ? "✗" : "·") : d.record.syncedAt ? "✓" : "·",
+        `${d.name} · ${d.record.mode}`,
+        wb ? `${wb.kind} ${shortSha(wb.sha)} · ${wb.state === "failed" ? `write-back failed${wb.error ? `: ${wb.error}` : ""}` : "write-back pending"}` : d.record.syncedAt ? `synced ${d.record.syncedAt}` : "not synced",
+        wb?.state === "failed" && p.onRetryWriteback && canAct ? <button className="btn text" disabled={busy} onClick={() => { setBusy(true); p.onRetryWriteback?.(d.index); }}>Retry</button> : null,
+      );
+    }
+  }
+  if (selectedPr && !selectedPr.merged) row("artifact-pr", "·", <><a href={selectedPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, selectedPr.number)}</a> · {ARTIFACT_FILES[selected]} in review</>, selectedPr.branch);
+
+  // 6 · eval suite: harvested case, stale runs
+  if (merged && view.harvested) row("harvested", view.harvested.status === "active" ? "✓" : "·", <>harvested as <span className="mono">{view.harvested.id}</span></>, view.harvested.status);
+  if (view.evalsState === "stale" && view.latestRun) row("evals-stale", "!", "evals stale", `since ${view.latestRun.startedAt} · config changed after the run`);
+
+  // 7 · validation
+  for (const [i, d] of view.validationErrors.entries()) row(`validation:${i}`, "✗", `validation · ${d.rule}`, d.message);
+
+  // ---- History: sessions first, then the ledger, newest first ----
+  const firstAgent = view.activity.findIndex((a) => a.actor === "agent");
+  const history = (
+    <section className="rail-section" aria-label="history">
+      <div className="section-head">History</div>
+      {(p.sessions ?? []).map((s) => (
+        <HistoryRow key={s.id} actor="agent" pulse={s.status === "running"} text={<><span className="mono">{s.id}</span> · {s.kind} · {s.mode} · {s.status}{s.standIn && !s.standIn.allowed ? ` — ${s.standIn.reason}` : ""} <HarnessChips harness={s.harness} /></>} when={relativeTime(s.startedAt, p.now)} />
+      ))}
+      {view.activity.slice(0, 20).map((a, i) => (
+        <HistoryRow key={a.id} actor={a.actor} pulse={a.actor === "agent" && view.agent && i === firstAgent} text={<>{a.actor === "human" ? `${a.role ? ROLE_LABEL[a.role as Role] ?? a.role : a.actorId} ` : ""}{a.text}</>} when={relativeTime(a.ts, p.now)} />
+      ))}
+      <div className="section-foot">
+        {merged && !view.harvested ? <button className="btn text" disabled={busy} onClick={() => { setBusy(true); p.onHarvest(); }} title="draft a case from the intent and the acceptance line; the platform owner activates it">Add as eval</button> : null}
+        {p.exportHref ? <a className="btn text" href={p.exportHref} download={`${view.id}-export.json`} title="compliance export: change, every cycle, the ledger verbatim, gate decisions with their commits, PRs, runs and findings — JSON with a sha256 content hash">Export ledger</a> : null}
+      </div>
+    </section>
+  );
 
   return (
     <div className="detail">
@@ -179,255 +387,14 @@ export function ChangeDetail(p: ChangeDetailProps) {
         </section>
 
         <aside className="rail">
-          {gate ? (
-            <div className="panel gate">
-              <div className="eyebrow">Human gate · {waitingFor(gate.since, p.now)}</div>
-              <h3>{gate.label}</h3>
-              <div className="who">owner: {gate.ownerLabel}</div>
-              {reviewPr ? <div className="who">in review as <a href={reviewPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, reviewPr.number)}</a> · merging it is the decision</div> : null}
-              {techLead ? (
-                <div className="waiting">Waiting on tech lead — approval happens via {prLabel(p.codeHost)} review on plan.md.{reviewPr ? <> <a href={reviewPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, reviewPr.number)}</a></> : null}</div>
-              ) : owned ? (
-                <>
-                  {view.recordBlock ? <div className="waiting" role="note">{view.recordBlock}</div> : null}
-                  <div className="actions">
-                    <button className="btn primary" disabled={busy || !view.valid || view.recordBlock !== null} title={view.recordBlock ?? undefined} onClick={() => { setBusy(true); p.onAccept(gate.s); }}>{gate.acceptLabel}</button>
-                  </div>
-                  {sendBack}
-                </>
-              ) : (
-                <div className="waiting">Waiting on the {gate.ownerLabel} — switch role in the top bar to act.</div>
-              )}
-              {techLead && role === "eng" ? sendBack : null}
-            </div>
-          ) : (
-            <div className="panel">
-              <div className="eyebrow">{view.agent ? <span className="pulse">⌁ </span> : null}No gate open</div>
-              <h3>{view.status}</h3>
-              <div className="who">{view.waitingOnYou ? `waiting on you: ${view.waitingOnYou}` : "The next human gate opens when the artifact is committed."}</div>
-            </div>
-          )}
+          {decision}
           {evidence.length > 0 ? (
             <section className="rail-section" aria-label="evidence">
               <div className="section-head">Evidence</div>
               {evidence}
             </section>
           ) : null}
-          {external.length > 0 ? (
-            <div className="panel records">
-              <div className="eyebrow">Record · {view.record ? `${view.record.system} ${view.record.id}` : "none linked"}</div>
-              <ul className="activity">
-                {external.map((d) => (
-                  <li key={d.index}>
-                    <span className={`glyph ${d.record.writeback?.state === "failed" ? "system" : "human"}`}>{d.record.writeback?.state === "failed" ? "✗" : d.record.writeback?.state === "pending" ? "…" : d.record.syncedAt ? "✓" : "·"}</span>
-                    <span>{d.name} · {d.record.mode}</span>
-                    <span className="when">{d.record.writeback && d.record.writeback.state !== "ok" ? `${d.record.writeback.kind} ${d.record.writeback.sha.slice(0, 7)} · ${d.record.writeback.state === "failed" ? "write-back failed · retry" : "write-back pending"}` : d.record.syncedAt ? `synced ${d.record.syncedAt}` : "not synced"}</span>
-                  </li>
-                ))}
-              </ul>
-              {!view.record && p.onLinkRecord && (role === "eng" || role === "po") ? (
-                open("link-record") ? (
-                  <InlineReason placeholder="" submitLabel="Link record" fields={[{ key: "system", placeholder: "Record system (e.g. jira, servicenow)" }, { key: "id", placeholder: "Record id" }, { key: "url", placeholder: "Record URL — optional", required: false }]} onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onLinkRecord?.(v["system"] ?? "", v["id"] ?? "", v["url"] ? v["url"] : undefined); }} />
-                ) : (
-                  <div className="actions"><button className="btn" disabled={busy} title="change.yaml.record; verified through the records connector when one is configured" onClick={() => p.onForm({ kind: "link-record" })}>Link record</button></div>
-                )
-              ) : null}
-            </div>
-          ) : null}
-          {view.kind === "fix" && (view.stage === 3 || view.stage === 4 || view.repro) ? (
-            <div className="panel repro">
-              <div className="eyebrow">Repro first · {view.repro?.state === "committed" ? "freeze active" : p.reproDraft ? (p.reproDraft.rejected ? "sent back" : "waiting on you") : "agent writing the failing test"}</div>
-              {view.repro?.state === "committed" ? (
-                <>
-                  <div className="who">repro test <span className="mono">{view.repro.testPath}</span> committed <span className="mono">{view.repro.sha?.slice(0, 7)}</span> · fails: {view.repro.failureReason}</div>
-                  <div className="who">no edits under the test globs until merge{view.freezeLifts.length > 0 ? ` · lifted once for ${view.freezeLifts.map((l) => l.path).join(", ")}` : ""}</div>
-                  {role === "eng" && view.stage <= 4 && p.onLiftFreeze ? (
-                    open("lift-freeze") ? (
-                      <InlineReason placeholder="" submitLabel="Lift freeze" fields={[{ key: "path", placeholder: "Which file — one lift per file per change", ...(view.repro.testPath ? { initial: view.repro.testPath } : {}) }, { key: "reason", placeholder: "Why — required, logged on the ledger" }]} onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onLiftFreeze?.(v["path"] ?? "", v["reason"] ?? ""); }} />
-                    ) : (
-                      <div className="actions">
-                        <button className="btn" disabled={busy} title="one lift per file per change; logged on the ledger" onClick={() => p.onForm({ kind: "lift-freeze" })}>Lift freeze once</button>
-                      </div>
-                    )
-                  ) : null}
-                </>
-              ) : p.reproDraft ? (
-                <>
-                  <div className="who"><span className="mono">{p.reproDraft.testPath}</span> · commit <span className="mono">{p.reproDraft.sha.slice(0, 7)}</span> (the test alone) · session {p.reproDraft.session}</div>
-                  <div className="who">fails: {p.reproDraft.failureReason}</div>
-                  <pre className="viewer-body cmd">{p.reproDraft.output}</pre>
-                  {p.reproDraft.rejected ? <div className="chip amber">sent back: {p.reproDraft.rejected.reason} — the session rewrites the test</div> : role === "eng" ? (
-                    <div className="actions">
-                      <button className="btn primary" disabled={busy} title="commits the repro block and the proof verbatim; the test freeze begins" onClick={() => { setBusy(true); p.onReproConfirm?.(); }}>Fails for the right reason → commit</button>
-                      <button className="btn" disabled={busy} onClick={() => p.onForm({ kind: "repro-reject" })}>Wrong failure — send back</button>
-                    </div>
-                  ) : <div className="waiting">The engineer decides whether this failure is the right one.</div>}
-                  {open("repro-reject") ? <InlineReason placeholder="Wrong failure — why? Goes to the session" submitLabel="Send back" onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onReproReject?.(v["reason"] ?? ""); }} /> : null}
-                </>
-              ) : (
-                <div className="who">{view.reproRejection ? `last verdict: wrong failure — ${view.reproRejection.reason}` : "The build session writes the failing test first and reports it; you confirm it fails for the right reason before any code changes."}</div>
-              )}
-            </div>
-          ) : null}
-          {view.pr ? (
-            <div className="panel pr">
-              <div className="eyebrow">{prNoun(view.pr.provider)} · {view.pr.provider}</div>
-              <h3>{view.pr.url ? <a href={view.pr.url} target="_blank" rel="noreferrer">{prLabel(view.pr.provider, view.pr.number)} {view.pr.branch}</a> : view.pr.branch}</h3>
-              <div className="who">→ {view.pr.baseBranch} · head {view.pr.headSha.slice(0, 7)}{view.pr.mergeSha ? ` · merged ${view.pr.mergeSha.slice(0, 7)}` : ""}</div>
-              <ul className="activity">
-                {view.pr.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.summary ? `${c.verdict} · ${c.summary}` : c.verdict}</span></li>)}
-                <li><span className={`glyph ${view.pr.planMatches === false ? "system" : "human"}`}>{view.pr.planMatches === null ? "?" : view.pr.planMatches ? "✓" : "✗"}</span><span>plan matches</span><span className="when">{view.pr.planMatches === null ? "unknown" : view.pr.planMatches ? "yes" : "reviewer judgment"}</span></li>
-                {view.pr.findings ? <li><span className="glyph system">·</span><span>findings</span><span className="when">{view.pr.findings.high} high · {view.pr.findings.medium} medium · {view.pr.findings.low} low</span></li> : null}
-              </ul>
-              {(view.pr.autoFindings ?? []).length > 0 ? (
-                <ul className="findings">
-                  {(view.pr.autoFindings ?? []).map((f) => (
-                    <li key={`${f.rule}:${f.path}`}>
-                      <span className={`chip ${f.dismissal ? "gray" : "red"}`}>{f.dismissal ? "dismissed" : "blocks merge"}</span>
-                      <span className="title">{f.title}</span>
-                      <span className="when">{f.path}</span>
-                      <pre className="detail">{f.detail}{f.dismissal ? `\ndismissed by ${f.dismissal.by}: ${f.dismissal.reason}` : ""}</pre>
-                      {!f.dismissal && role === "eng" && !view.pr?.mergedAt && p.onDismissAutoFinding ? (
-                        open("dismiss-finding", f.path) ? (
-                          <InlineReason placeholder={`Why the finding on ${f.path} does not block — required`} submitLabel="Dismiss" onCancel={close} onSubmit={(v) => { setBusy(true); close(); p.onDismissAutoFinding?.(f.path, v["reason"] ?? ""); }} />
-                        ) : (
-                          <div className="actions"><button className="btn" disabled={busy} onClick={() => p.onForm({ kind: "dismiss-finding", id: f.path })}>Dismiss with reason</button></div>
-                        )
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              {view.pr.reviewers.length > 0 ? <div className="who">reviewers: {view.pr.reviewers.join(", ")}</div> : null}
-              <div className="who">
-                {view.pr.review
-                  ? `review of ${view.pr.review.headSha.slice(0, 7)} · session ${view.pr.review.session}${view.pr.review.afterMerge ? " · ended after the merge" : ""}${view.pr.review.headSha !== view.pr.headSha ? " · head moved since — review pending" : ""}`
-                  : view.pr.mergedAt
-                    ? "not reviewed by an agent"
-                    : "review pending"}
-              </div>
-              {view.findings.length > 0 ? (
-                <ul className="findings">
-                  {view.findings.map((f) => (
-                    <li key={f.id}>
-                      <span className={`chip ${f.severity === "high" ? "red" : f.severity === "medium" ? "amber" : "gray"}`}>{f.severity}</span>
-                      <span className="title">{f.title}</span>
-                      {f.path ? <span className="when">{f.path}</span> : null}
-                      {f.detail ? <pre className="detail">{f.detail}</pre> : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          ) : null}
-          {production && (production.open || production.deployment || production.authorized) ? (
-            <div className={`panel${production.open ? " gate" : ""}`} aria-label="production gate">
-              <div className="eyebrow">Production gate · {production.env}{production.open && production.since ? ` · ${waitingFor(production.since, p.now)}` : ""}</div>
-              <h3>{production.deployment?.status === "running" ? `Deploying ${shortSha(production.deployment.sha)} to ${production.env}` : production.deployment?.status === "succeeded" ? `Deployed ${shortSha(production.deployment.sha)} to ${production.env}` : production.deployment?.status === "failed" && !production.open ? `${production.env} deploy failed` : `Deploy ${production.sha ? shortSha(production.sha) : ""} to ${production.env}`}</h3>
-              <div className="who">owner: {production.ownerLabel}{production.authorized ? ` · authorized by ${production.authorized.by} ${relativeTime(production.authorized.at, p.now)}` : ""}</div>
-              <ul className="activity">
-                {production.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.verdict}</span></li>)}
-              </ul>
-              {production.checks.map((c) => <div key={`${c.name}-summary`} className="who">{c.summary}</div>)}
-              {production.open ? (
-                ownsProduction ? (
-                  <>
-                    {production.blocked ? <div className="waiting" role="note">{production.blocked}</div> : null}
-                    <div className="actions">
-                      <button className="btn primary" disabled={busy || !view.valid || production.blocked !== null || !p.onDeploy} title={production.blocked ?? `runs the declared deploy command for ${production.env} after the decision is committed`} onClick={() => { setBusy(true); p.onDeploy?.(production.env); }}>Deploy to {production.env}</button>
-                    </div>
-                  </>
-                ) : (
-                  <div className="waiting">Waiting on the {production.ownerLabel} — switch role in the top bar to act.</div>
-                )
-              ) : null}
-              {production.deployment && production.deployment.status !== "running" ? <pre className="viewer-body cmd">{production.deployment.output || "(no output)"}</pre> : null}
-            </div>
-          ) : null}
-          {environments.length > 0 ? (
-            <div className="panel environments" aria-label="environments">
-              <div className="eyebrow">Environments</div>
-              <ul className="activity">
-                {environments.map((e) => (
-                  <li key={e.name}>
-                    <span className={`glyph ${e.status === "succeeded" ? "human" : e.status === "failed" ? "system" : "system"}`}>{e.status === "succeeded" ? "✓" : e.status === "failed" ? "✗" : e.status === "running" ? "…" : "·"}</span>
-                    <span>{e.name} <span className="chip gray">{e.kind}</span></span>
-                    <span className="when">{e.status === "not-deployed" ? "not deployed" : `${e.status}${e.latest ? ` · ${shortSha(e.latest.sha)} · ${relativeTime(e.latest.finishedAt ?? e.latest.startedAt, p.now)}` : ""}`}{e.rehearsals.length > 0 ? ` · rollback rehearsed ${e.rehearsals.at(-1)?.status}` : ""}</span>
-                  </li>
-                ))}
-              </ul>
-              {environments.filter((e) => e.agentDeployable).map((e) => (
-                <div key={`${e.name}-detail`} className="env-detail">
-                  {e.latest ? <div className="who">{e.name}: {e.latest.command} → exit {e.latest.exitCode ?? "?"} · by {e.latest.actor.type === "agent" ? `⌁ ${e.latest.actor.session ?? e.latest.actor.id}` : e.latest.actor.id}</div> : null}
-                  {e.latest && e.latest.status !== "running" ? <pre className="viewer-body cmd">{e.latest.output || "(no output)"}</pre> : null}
-                  {e.rehearsals.length > 0 ? (
-                    <>
-                      <div className="who">rollback rehearsal on {e.name} at {shortSha(e.rehearsals.at(-1)?.sha ?? "")}: {e.rehearsals.at(-1)?.command} → exit {e.rehearsals.at(-1)?.exitCode} · {e.rehearsals.at(-1)?.status}</div>
-                      <pre className="viewer-body cmd">{e.rehearsals.at(-1)?.output || "(no output)"}</pre>
-                    </>
-                  ) : null}
-                  {(role === "eng" || role === "po") && (p.onDeploy || p.onRehearse) && view.pr ? (
-                    <div className="actions">
-                      {p.onDeploy ? <button className="btn" disabled={busy || e.status === "running"} title={`runs the declared deploy command for ${e.name} at ${view.pr.mergeSha ? "the merged commit" : "the PR head"}`} onClick={() => { setBusy(true); p.onDeploy?.(e.name); }}>Deploy to {e.name}</button> : null}
-                      {p.onRehearse && e.status === "succeeded" ? <button className="btn" disabled={busy} title={`runs the declared rollback command for ${e.name} at what it has deployed; the record is the production gate's evidence`} onClick={() => { setBusy(true); p.onRehearse?.(e.name); }}>Rehearse rollback</button> : null}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {view.stage === 6 || view.pr?.mergedAt ? (
-            <div className="panel">
-              <div className="eyebrow">Eval suite</div>
-              {view.harvested ? (
-                <div className="who">harvested as <span className="mono">{view.harvested.id}</span> <span className={`chip ${view.harvested.status === "active" ? "green" : view.harvested.status === "draft" ? "amber" : "gray"}`}>{view.harvested.status}</span></div>
-              ) : (
-                <div className="actions"><button className="btn" disabled={busy} onClick={() => { setBusy(true); p.onHarvest(); }} title="draft a case from the intent and the acceptance line; the platform owner activates it">Add as eval</button></div>
-              )}
-            </div>
-          ) : null}
-          {!view.valid ? (
-            <div className="panel">
-              <div className="eyebrow">Validation errors</div>
-              <ul className="errors">{view.validationErrors.map((d, i) => <li key={i}>{d.rule}: {d.message}</li>)}</ul>
-            </div>
-          ) : null}
-          {view.planState !== "none" ? (
-            <div className="panel">
-              <div className="eyebrow">Auto mode</div>
-              <div className="who">{view.autoEligible.value ? "eligible" : "not eligible"}</div>
-              <ul className="activity">{view.autoEligible.terms.map((t) => <li key={t.name}><span className={`glyph ${t.ok ? "human" : "system"}`}>{t.ok ? "✓" : "✗"}</span><span>{t.name}</span><span className="when">{t.detail}</span></li>)}</ul>
-              {view.visual.warning ? <div className="warn">{view.visual.warning}</div> : null}
-              {view.visual.mock ? <div className="card-status">mock {view.visual.mock.path.split("/").pop()}{view.visual.tool ? ` · visual tool ${view.visual.tool}` : " · no visual tool in CLAUDE.md"}</div> : null}
-            </div>
-          ) : null}
-          {p.sessions && p.sessions.length > 0 ? (
-            <div className="panel">
-              <div className="eyebrow">Sessions</div>
-              <ul className="activity">
-                {p.sessions.map((s) => (
-                  <li key={s.id}>
-                    <span className="glyph agent">⌁</span>
-                    <span><span className="mono">{s.id}</span> · {s.kind} · {s.mode} · {s.status}{s.standIn && !s.standIn.allowed ? ` — ${s.standIn.reason}` : ""} <HarnessChips harness={s.harness} /></span>
-                    <span className="when">{relativeTime(s.startedAt, p.now)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          <div className="panel">
-            <div className="eyebrow">Activity</div>
-            <ul className="activity">
-              {view.activity.slice(0, 20).map((a) => (
-                <li key={a.id}>
-                  <span className={`glyph ${a.actor}`}>{a.actor === "agent" ? "⌁" : a.actor === "human" ? "●" : "·"}</span>
-                  <span>{a.actor === "human" ? `${a.role ? ROLE_LABEL[a.role as Role] ?? a.role : a.actorId} ` : ""}{a.text}</span>
-                  <span className="when">{relativeTime(a.ts, p.now)}</span>
-                </li>
-              ))}
-            </ul>
-            {p.exportHref ? <div className="section-foot"><a className="btn text mono" href={p.exportHref} download={`${view.id}-export.json`} title="compliance export: change, every cycle, the ledger verbatim, gate decisions with their commits, PRs, runs and findings — JSON with a sha256 content hash">Export ledger</a></div> : null}
-          </div>
+          {history}
         </aside>
       </div>
     </div>

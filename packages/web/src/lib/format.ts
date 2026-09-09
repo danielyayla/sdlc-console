@@ -16,11 +16,6 @@ export function prLabel(codeHost: CodeHost | undefined, number?: number | undefi
   return mr ? `MR !${number}` : `PR #${number}`;
 }
 
-/** "Pull request" / "Merge request" for panel headings. */
-export function prNoun(codeHost: CodeHost | undefined): string {
-  return codeHost === "gitlab" ? "Merge request" : "Pull request";
-}
-
 /** A trace link when the server has `OTEL_TRACE_URL_TEMPLATE` and the row carries a trace id (3.3); null otherwise. */
 export function traceUrl(template: string | null | undefined, traceId: string | null | undefined): string | null {
   if (!template || !traceId) return null;
@@ -96,6 +91,15 @@ export function recordState(doc: ChangeView["docs"][0]): string {
 export function gateOwnerLabel(view: ChangeView): string {
   if (!view.gate) return "";
   return view.gate.ownerRole === "tech_lead" ? "TECH LEAD" : view.gate.ownerRole === "po" ? "PO" : "ENG";
+}
+
+/** The primary button's verb: the gate label with what it accepts — "Accept plan.md rev 2", "Merge PR #412", "Accept intent.md". */
+export function acceptVerb(view: ChangeView, codeHost?: CodeHost): string {
+  const g = view.gate;
+  if (!g) return "";
+  if (g.s === 3 && view.planRev > 0) return `${g.label} rev ${view.planRev}`;
+  if (g.s === 5) return `Merge ${prLabel(view.pr?.provider ?? codeHost, view.pr?.number)}`;
+  return g.label;
 }
 
 export function ownsGate(view: ChangeView, role: Role): boolean {
