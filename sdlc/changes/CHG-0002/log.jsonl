@@ -23,3 +23,5 @@
 {"schema":1,"id":"01M23QFJPDFTP1NJFWWWES07ZG","ts":"2026-09-09T18:39:29Z","seq":24,"cycle":1,"actor":{"type":"system","id":"sdlc-bot"},"event":"stage.entered","data":{"stage":4}}
 {"schema":1,"id":"01M23QFV3BTYCXDTBEDP9JS2ZW","ts":"2026-09-09T18:39:38Z","seq":26,"cycle":1,"actor":{"type":"human","id":"dkapper01@gmail.com","role":"eng"},"event":"tasks.confirmed","data":{"taskIds":["packages-hooks-test"]}}
 {"schema":1,"id":"01M23R52EKQ7N0BEHVWA2S56YE","ts":"2026-09-09T18:51:14Z","seq":27,"cycle":1,"actor":{"type":"system","id":"sdlc-bot@sdlc.local"},"event":"evals.green","data":{"run":"run-1","passed":3,"total":3}}
+{"schema":1,"id":"01M23R57ZGSQPSX1S45DPVX6X4","ts":"2026-09-09T18:51:14Z","seq":28,"cycle":1,"actor":{"type":"system","id":"sdlc-bot@sdlc.local"},"event":"pr.opened","data":{"headSha":"9c4ca3f5092b046dcd0a8de6ab60bd831f381e8a","number":47,"url":"https://github.com/danielyayla/sdlc-console/pull/47"}}
+{"schema":1,"id":"01M23R57ZG5ZW87HWCN1M25G3P","ts":"2026-09-09T18:51:14Z","seq":29,"cycle":1,"actor":{"type":"system","id":"sdlc-bot@sdlc.local"},"event":"stage.entered","data":{"stage":5}}

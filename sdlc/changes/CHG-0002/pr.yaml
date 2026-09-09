@@ -1,0 +1,17 @@
+schema: 1
+provider: github
+number: 47
+url: https://github.com/danielyayla/sdlc-console/pull/47
+branch: CHG-0002/packages-hooks-test
+baseBranch: main
+headSha: 9c4ca3f5092b046dcd0a8de6ab60bd831f381e8a
+openedAt: 2026-09-09T18:51:14Z
+reviewers: []
+checks:
+  - name: evidence
+    verdict: pass
+    summary: per-change run 1 green · 3/3 verification commands passed
+  - name: evals
+    verdict: pass
+    summary: per-change run 1 · no eval cases intersect the diff
+planMatches: true
