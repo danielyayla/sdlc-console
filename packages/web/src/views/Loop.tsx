@@ -1,7 +1,13 @@
 import type { Snapshot } from "@sdlc/server";
 import type { JobRow } from "../api";
 import { formOpen, type FormState } from "../state";
-import { InlineReason } from "./InlineReason";
+import { InlineReason, type InlineReasonField } from "./InlineReason";
+
+/** The dismiss form's fields: the reason is required (a dismissal is recorded with why), the band tune is an optional note for whoever edits bands.yaml. */
+export const DISMISS_TRIAGE_FIELDS = (id: string): InlineReasonField[] => [
+  { key: "reason", placeholder: `Why ${id} is dismissed — required` },
+  { key: "tune", placeholder: "Tune the band? — optional note", required: false },
+];
 
 export interface LoopProps {
   snapshot: Snapshot;
@@ -22,7 +28,7 @@ function fmt(n: number | null, unit: string | null): string {
   return unit ? `${s} ${unit}` : s;
 }
 
-/** Loop view (spec §4.6, FR-60/61): the Bands table over bands.yaml + detection snapshots, then the triage queue. */
+/** Loop view (spec §4.6, FR-60/61): the triage queue is the primary object, then the bands over bands.yaml + detection snapshots. */
 export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form, onForm }: LoopProps) {
   const close = () => onForm(null);
   const open = snapshot.triage.filter((t) => t.data.status === "open");
@@ -34,48 +40,7 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form,
   const runbooks = snapshot.bands?.runbooks ?? [];
   return (
     <div className="loop">
-      <div className="view-head">
-        <h1 className="primary">Loop</h1>
-        <span className="mono faint">bands.yaml · rolling {snapshot.bands?.baselineWindow ?? "30d"} baseline · Western Electric rules</span>
-      </div>
-      <table className="bands">
-        <thead>
-          <tr><th>Metric</th><th>Baseline</th><th>Current</th><th>σ</th><th>Tier</th><th>Action</th><th>Status</th></tr>
-        </thead>
-        <tbody>
-          {bands.length === 0 ? <tr><td colSpan={7} className="empty">no bands.yaml</td></tr> : null}
-          {bands.map((b) => {
-            const s = rows.find((r) => r.metric === b.metric);
-            const breached = s?.breached ?? false;
-            const raised = bandJobs(b.metric);
-            const live = raised.find((j) => j.state === "running") ?? raised[0] ?? null;
-            return (
-              <tr key={b.metric} className={breached ? "breached" : s?.tier === 1 ? "warned" : ""}>
-                <td className="mono">{b.metric}</td>
-                <td className="num">{fmt(b.baseline, b.unit ?? null)}</td>
-                <td className={`num${s?.current === null || s === undefined ? " muted" : ""}`}>{s ? fmt(s.current, b.unit ?? null) : "no data"}</td>
-                <td className="num muted">{s?.sigma === null || s === undefined ? "—" : fmt(s.sigma, null)}</td>
-                <td className="mono">{s?.tier === null || s === undefined ? "—" : <span className={s.tier >= 2 ? "amber-text" : "muted"}>{s.tier}σ</span>}</td>
-                <td>{b.tiers["1sigma"].action} / {b.tiers["2sigma"].action} / {b.tiers["3sigma"].action}</td>
-                <td className={breached ? "" : "muted"}>
-                  {s?.status ?? "no data · needs detection snapshots"}
-                  {s?.triage.map((id) => <span key={id} className="mono amber-text word" title="open triage item">{id}</span>)}
-                  {live ? <span className="mono faint word" title={live.key}>{live.kind} {live.state}{live.sessionId ? ` · ${live.sessionId}` : ""}</span> : null}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <div className="footer mono">
-        1σ log, 2σ diagnose read-only, 3σ propose via PR or pre-approved runbook.
-        {" "}detection {snapshot.bands?.detectEvery ? `every ${snapshot.bands.detectEvery}` : "every 15m"} · last snapshot {latest ?? "never"}
-        {runbooks.length > 0 ? ` · runbooks: ${runbooks.map((r) => (typeof r === "string" ? `${r} (no command)` : r.id)).join(", ")}` : ""}
-        {onDetect ? <> · <button className="btn text" onClick={onDetect} title="run the detection script now">Run detection</button></> : null}
-      </div>
-
-      <h2 className="section-head"><span className="secondary">Triage queue</span><span>{open.length} open · accept → a new change in Plan</span></h2>
-      {open.length === 0 ? <div className="empty">Queue clear — the loop is feeding itself</div> : null}
+      <div className="primary">{open.length === 0 ? "Queue clear — the loop is feeding itself." : open.length === 1 ? "1 signal in the triage queue." : `${open.length} signals in the triage queue.`}</div>
       <div className="items">
       {open.map((t) => {
         const job = jobFor(t.data.job ?? null);
@@ -89,6 +54,7 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form,
               {t.data.job ? <span title={t.data.job}>{job ? `${job.kind} ${job.state}` : "job"}{job?.sessionId ? ` · ${job.sessionId}` : t.data.session ? ` · ${t.data.session}` : ""}</span> : null}
               {t.data.channel ? <span title={`message ${t.data.channel.messageId}`}>{t.data.channel.author} · <a href={t.data.channel.permalink} target="_blank" rel="noreferrer">message</a>{t.data.channel.postedAt ? ` · ${t.data.channel.postedAt}` : ""}</span> : null}
               {t.data.channel?.tags?.map((tag) => <span className="faint" key={tag}>{tag}</span>)}
+              <span className="when">{t.data.createdAt}</span>
             </div>
             <div className="item-title">{t.data.title}</div>
             <pre className="evidence">{t.data.evidence}</pre>
@@ -97,11 +63,41 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form,
               <button className="btn primary" onClick={() => onAccept(t.data.id)}>Accept → Plan</button>
               {formOpen(form, "dismiss-triage", t.data.id) ? null : <button className="btn text" onClick={() => onForm({ kind: "dismiss-triage", id: t.data.id })}>Dismiss · tune band</button>}
             </div>
-            {formOpen(form, "dismiss-triage", t.data.id) ? <InlineReason placeholder="" submitLabel="Dismiss · tune band" fields={[{ key: "reason", placeholder: `Why ${t.data.id} is dismissed — required` }, { key: "tune", placeholder: "Tune the band? — optional note", required: false }]} onCancel={close} onSubmit={(v) => { close(); onDismiss(t.data.id, v["reason"] ?? "", v["tune"] ?? ""); }} /> : null}
+            {formOpen(form, "dismiss-triage", t.data.id) ? <InlineReason placeholder="" submitLabel="Dismiss · tune band" fields={DISMISS_TRIAGE_FIELDS(t.data.id)} onCancel={close} onSubmit={(v) => { close(); onDismiss(t.data.id, v["reason"] ?? "", v["tune"] ?? ""); }} /> : null}
           </article>
         );
       })}
       </div>
+      <section className="bands" aria-label="bands">
+        <div className="bands-head mono">
+          <span className="secondary">Bands</span>
+          <span>rolling {snapshot.bands?.baselineWindow ?? "30d"} · Western Electric · detection every {snapshot.bands?.detectEvery ?? "15m"} · last {latest ?? "never"}</span>
+          <span className="spacer"></span>
+          {onDetect ? <button className="btn text" onClick={onDetect} title="run the detection script now">Run detection</button> : null}
+        </div>
+        {bands.length === 0 ? <div className="band-row mono"><span className="faint">no bands.yaml</span></div> : null}
+        {bands.map((b) => {
+          const s = rows.find((r) => r.metric === b.metric);
+          const breached = s?.breached ?? false;
+          const raised = bandJobs(b.metric);
+          const live = raised.find((j) => j.state === "running") ?? raised[0] ?? null;
+          return (
+            <div className="band-row mono" key={b.metric}>
+              <span className="secondary">{b.metric}</span>
+              <span className="muted">{fmt(b.baseline, b.unit ?? null)}</span>
+              <span className={breached ? "amber-text" : s && s.current !== null ? "secondary" : "faint"}>{s ? fmt(s.current, b.unit ?? null) : "no data"}</span>
+              <span className="faint">{s?.sigma === null || s === undefined ? "—" : `${fmt(s.sigma, null)}σ`}</span>
+              <span className={s?.tier !== null && s !== undefined && s.tier >= 2 ? "amber-text" : "faint"}>{s?.tier === null || s === undefined ? "—" : `${s.tier}σ`}</span>
+              <span className={breached ? "" : "muted"}>
+                {s?.status ?? "no data · needs detection snapshots"}
+                {s?.triage.map((id) => <span key={id} className="mono amber-text word" title="open triage item">{id}</span>)}
+                {live ? <span className="mono faint word" title={live.key}>{live.kind} {live.state}{live.sessionId ? ` · ${live.sessionId}` : ""}</span> : null}
+              </span>
+            </div>
+          );
+        })}
+      </section>
+      <div className="foot-line mono">1σ log · 2σ diagnose read-only · 3σ propose via PR or runbook{runbooks.length > 0 ? ` ${runbooks.map((r) => (typeof r === "string" ? `${r} (no command)` : r.id)).join(" · ")}` : ""}</div>
     </div>
   );
 }

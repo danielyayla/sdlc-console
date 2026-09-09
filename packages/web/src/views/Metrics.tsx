@@ -19,27 +19,12 @@ function fmtPrev(v: MetricValue): string {
   return `previous window: ${fmt(p)}`;
 }
 
-/** The trend as a word in its state colour (spec §4.8): green when it moved the better way, amber when not, muted when flat; the % change against the previous window. */
+/** The trend as a glyph in its state colour (handoff, C10): ▲/▼ with the % change, green when it moved the better way, amber when not; — when flat or unknown. The previous window stays in the title. */
 function Trend({ v }: { v: MetricValue }) {
-  if (v.trend === null || v.trend === "flat") return <span className="trend mono muted" title={fmtPrev(v)}>flat{v.trend === "flat" && v.delta !== null && v.delta !== 0 ? ` ${v.delta > 0 ? "+" : ""}${v.delta}%` : ""}</span>;
+  if (v.trend === null || v.trend === "flat") return <span className="trend mono faint" title={fmtPrev(v)}>—</span>;
   const good = v.trend === v.better;
   const delta = v.delta === null ? "" : ` ${v.delta > 0 ? "+" : ""}${v.delta}%`;
-  return <span className={`trend mono ${good ? "green-text" : "amber-text"}`} title={fmtPrev(v)}>{v.trend}{delta}</span>;
-}
-
-function Half({ label, values }: { label: string; values: MetricValue[] }) {
-  return (
-    <div className="half">
-      <div className="eyebrow">{label}</div>
-      {values.map((v) => (
-        <div className="metric" key={v.key}>
-          <div className="metric-head"><span className="metric-name">{v.name}</span><span className="metric-sources">{v.sources.join(" · ")}</span><Trend v={v} /></div>
-          <div className="metric-value">{fmt(v)}</div>
-          <div className="metric-note">{v.note}</div>
-        </div>
-      ))}
-    </div>
-  );
+  return <span className={`trend mono ${good ? "green-text" : "amber-text"}`} title={fmtPrev(v)}>{v.trend === "up" ? "▲" : "▼"}{delta}</span>;
 }
 
 const FEEDS: { key: keyof MetricSourcesStatus; label: string }[] = [
@@ -57,27 +42,25 @@ function via(s: SourceStatus): string {
 export function Metrics({ metrics, sources }: { metrics: StageMetrics[]; sources?: MetricSourcesStatus }) {
   return (
     <div className="metrics">
-      <div className="view-head metrics-head">
-        <h1 className="primary">Metrics</h1>
-        <span className="mono faint">30-day window vs the 30 days before</span>
+      <div className="primary">Metrics</div>
+      <div className="mono faint view-sub msub">
+        <span>30-day window vs the 30 before</span>
+        {sources ? FEEDS.map((f) => <span key={f.key} className={sources[f.key].via === "none" ? "amber-text" : ""}>{f.label} · {via(sources[f.key])}</span>) : null}
       </div>
-      {sources ? (
-        <div className="metrics-sources mono">
-          <span className="faint">sources</span>
-          {FEEDS.map((f) => (
-            <span key={f.key} className={sources[f.key].via === "none" ? "amber-text" : "muted"}>{f.label} · {via(sources[f.key])}</span>
-          ))}
-        </div>
-      ) : null}
-      {metrics.map((s) => (
-        <section className="stage-plane" key={s.stage}>
-          <div className="column-head"><span className="column-num">{String(s.stage).padStart(2, "0")}</span><span>{s.name}</span><span className="column-count">30 days</span></div>
-          <div className="halves">
-            <Half label="Leading" values={s.leading} />
-            <Half label="Lagging" values={s.lagging} />
-          </div>
-        </section>
-      ))}
+      <div className="mgrid">
+        {metrics.map((s) => (
+          <section className="mstage" key={s.stage} aria-label={`${s.stage} ${s.name}`}>
+            <div className="mstage-head mono">{String(s.stage).padStart(2, "0")} {s.name}</div>
+            {[...s.leading.map((v) => ({ v, kind: "leading" })), ...s.lagging.map((v) => ({ v, kind: "lagging" }))].map(({ v, kind }) => (
+              <div className="mrow" key={v.key}>
+                <div className="mvalue-row"><span className="mvalue tabular">{fmt(v)}</span><Trend v={v} /><span className="mkind mono">{kind}</span></div>
+                <div className="mname">{v.name}</div>
+                <div className="mono faint">{[v.note, ...v.sources].join(" · ")}</div>
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

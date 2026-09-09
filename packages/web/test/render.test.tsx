@@ -5,6 +5,8 @@ import { PO, seedSessions, seedTree } from "@sdlc/fixtures";
 import { buildSnapshot } from "@sdlc/server";
 import { App } from "../src/app";
 import { initialState } from "../src/state";
+import { canSubmit } from "../src/views/InlineReason";
+import { DISMISS_TRIAGE_FIELDS } from "../src/views/Loop";
 
 const now = new Date("2026-09-03T12:00:00Z");
 const repo = loadRepo(seedTree());
@@ -18,19 +20,28 @@ describe("Pipeline (spec §4)", () => {
     const html = render();
     for (const name of ["01", "Plan", "02", "Design", "03", "Build", "04", "Test", "05", "Deploy", "06", "Maintain"]) expect(html).toContain(name);
     for (const id of ["CHG-0012", "CHG-0017", "CHG-0018", "CHG-0019", "CHG-0020", "CHG-0021", "CHG-0022", "CHG-0023"]) expect(html).toContain(id);
-    expect(html).toContain("commits intent.md");
+    expect(html).toContain("incident → intent.md");
+    expect(html).not.toContain('class="column');
     expect(html).toContain("Accept intent.md");
     expect(html).toContain("Merge PR");
-    expect(html).toContain("TECH LEAD");
-    expect(html).toContain('<span class="agent-text pulse">agent</span>');
-    expect(html).toContain('class="card edge-lit amber"');
-    expect(html).toContain('class="card edge-lit agent pulse"');
+    expect(html).toContain("· tech lead ·");
+    expect(html).not.toContain("env-strip");
+    // the agent word left line 1: the orange pulsing edge carries it, line 3 keeps the status words
+    expect(html).not.toContain("agent-text pulse");
+    expect(html).not.toContain(">routine<");
+    expect(html).toContain('class="pcard edge-lit amber owned"');
+    expect(html).toContain('class="pcard edge-lit agent pulse"');
+    expect(html).not.toContain('class="card');
     expect(html).not.toContain("gate-strip");
     expect(html).toContain("Evals red — agent fixing");
     expect(html).not.toContain("Nothing here");
     // counts for po: gates 3, loop 2, security 2 — mono numerals, not badges; hidden at 0 is exercised by eng below
     expect(html).toContain('class="count">3<');
     expect(html).not.toContain("badge");
+    // the headline is the decision count for the role, the sub-line the flight numbers
+    expect(html).toContain("decisions wait on the product owner.");
+    expect(html).toContain("changes in flight ·");
+    expect(render(initialState("eng"))).toContain("decisions wait on the engineer.");
   });
 });
 
@@ -91,14 +102,27 @@ describe("Change detail (spec §4)", () => {
 describe("Gates (acceptance e)", () => {
   it("swaps YOURS and OTHER when the role switches", () => {
     const po = render({ ...initialState("po"), view: "gates" });
-    expect(po).toContain("Yours · product owner");
-    expect(po.indexOf("CHG-0022")).toBeLessThan(po.indexOf("Other role"));
-    expect(po.indexOf("CHG-0020")).toBeGreaterThan(po.indexOf("Other role"));
+    expect(po).toContain("decisions wait on the product owner.");
+    expect(po).toContain('class="grow edge-lit amber"');
+    expect(po.indexOf("CHG-0022")).toBeLessThan(po.indexOf("Waiting on the engineer or tech lead"));
+    expect(po.indexOf("CHG-0020")).toBeGreaterThan(po.indexOf("Waiting on the engineer or tech lead"));
     const eng = render({ ...initialState("eng"), view: "gates" });
-    expect(eng).toContain("Yours · engineer");
-    expect(eng.indexOf("CHG-0020")).toBeLessThan(eng.indexOf("Other role"));
-    expect(eng.indexOf("CHG-0022")).toBeGreaterThan(eng.indexOf("Other role"));
+    expect(eng).toContain("decisions wait on the engineer.");
+    expect(eng.indexOf("CHG-0020")).toBeLessThan(eng.indexOf("Waiting on the product owner or tech lead"));
+    expect(eng.indexOf("CHG-0022")).toBeGreaterThan(eng.indexOf("Waiting on the product owner or tech lead"));
     expect(eng).toContain('class="count">2<');
+    expect(eng).not.toContain("Other role");
+  });
+  it("Pipeline and Gates headline numbers agree", () => {
+    const count = (html: string) => {
+      const m = /(\d+) decisions? waits? on the/.exec(html);
+      return m ? Number(m[1]) : 0;
+    };
+    for (const role of ["po", "eng"] as const) {
+      const board = count(render(initialState(role)));
+      expect(board).toBe(count(render({ ...initialState(role), view: "gates" })));
+      expect(board).toBe(role === "po" ? 3 : 2);
+    }
   });
 });
 
@@ -115,7 +139,7 @@ describe("Loop with detection snapshots (3.4)", () => {
     const withSnapshots = buildSnapshot(measured, { id: PO, name: "Priya Owens", roles: ["po", "eng"] }, seedSessions() as never, 1, now, undefined, snapshots);
     const jobs = [{ key: "band:p95_latency_ms:3σ:" + ts, kind: "propose", changeId: "", cycle: 0, stage: 6, state: "running", createdAt: ts, updatedAt: ts, sessionId: "sess-band1", error: null, note: null, traceId: null }];
     const html = renderToString(<App snapshot={withSnapshots} initial={{ ...initialState("po"), view: "loop" }} now={now} live={false} jobs={jobs} />).replace(/<!-- -->/g, "");
-    expect(html).toContain('class="breached"');
+    expect(html).toContain('class="amber-text">842 ms'); // the current value goes amber on a breach; no row tint
     expect(html).toContain("842 ms");
     expect(html).toContain("3σ</span>");
     expect(html).toContain("3σ · propose · TRI-0042 · " + ts);
@@ -123,57 +147,75 @@ describe("Loop with detection snapshots (3.4)", () => {
     expect(html).toContain("propose running · sess-band1");
     expect(html).toContain("0.45 %");
     expect(html).toContain("within 1σ · " + ts);
-    expect(html).toContain("last snapshot " + ts);
+    expect(html).toContain("last " + ts);
   });
 });
 
 describe("Loop, Security, Metrics (spec §4)", () => {
   it("Loop shows the bands table, the tier footer and both triage items (lit by tier) with their actions", () => {
     const html = render({ ...initialState("po"), view: "loop" });
+    expect(html).toContain("2 signals in the triage queue.");
     expect(html).toContain("p95_latency_ms");
     // the seed's bands declare no source: the row says so instead of pretending to measure (3.4)
     expect(html).toContain("no source · add `source:` to bands.yaml");
-    expect(html).toContain("rolling 30d baseline · Western Electric rules");
-    expect(html).toContain("1σ log, 2σ diagnose read-only, 3σ propose via PR or pre-approved runbook.");
-    expect(html).toContain("detection every 15m · last snapshot never");
-    expect(html).toContain("runbooks: rollback");
+    expect(html).toContain("rolling 30d · Western Electric · detection every 15m · last never");
+    expect(html).toContain("1σ log · 2σ diagnose read-only · 3σ propose via PR or runbook rollback");
+    expect(html).not.toContain("<table");
+    expect(html).not.toContain("runbooks:");
     expect(html).not.toContain("Run detection"); // no engine injected
     expect(html).toContain("TRI-0042");
     expect(html).toContain("TRI-0043");
     expect(html).toContain("Accept → Plan");
     expect(html).toContain("Dismiss · tune band");
     expect(html).toContain('class="item edge-lit amber"');
+    expect(html).toContain('class="when">2026-'); // the item's createdAt verbatim, right-aligned
     expect(html).not.toContain("Queue clear");
   });
   it("Security shows severity as the item's lit edge and word, statuses, actions only while new, and the governance footer", () => {
     const html = render({ ...initialState("eng"), view: "security" });
+    expect(html).toContain("2 findings need a route."); // the seed has two new, unresolved findings — the same two that carry actions below
     expect(html).toContain("SEC-0118");
     expect(html).toContain("SEC-0120");
     expect(html).toContain("patch in PR gate");
-    expect(html).toContain('class="item edge-lit red"');
+    expect(html).toContain('class="item edge-lit red new primary-row"');
     expect(html).not.toContain('class="chip');
     expect(html).toContain("Patch → PR gate");
     expect(html).toContain("Wider than one patch → intent.md");
     expect(html).toContain("Dismiss with reason");
     expect((html.match(/Wider than one patch/g) ?? []).length).toBe(2);
     expect(html).toContain("the proposing agent cannot approve its own fix");
+    expect(html).not.toContain('class="footer');
+  });
+  it("the first new finding is the only primary row", () => {
+    const html = render({ ...initialState("eng"), view: "security" });
+    expect((html.match(/primary-row/g) ?? []).length).toBe(1);
+    const at = html.indexOf('primary-row"');
+    expect(html.slice(at, html.indexOf("</article>", at))).toContain("SEC-0118");
   });
   it("Metrics renders six stage planes with leading/lagging halves, source words, the feeds line and trend words with %", () => {
     const html = render({ ...initialState("po"), view: "metrics" });
-    expect((html.match(/class="half"/g) ?? []).length).toBe(12);
+    expect((html.match(/class="mstage"/g) ?? []).length).toBe(6);
+    expect(html).toContain('class="mkind mono">leading<');
+    expect(html).not.toContain(">Leading<");
+    expect(html).not.toContain(">Lagging<");
     expect(html).toContain("intents committed");
     expect(html).toContain("n/a · needs detection snapshots");
     expect(html).toContain("first-pass green");
     expect(html).toContain("67%");
     expect(html).toContain("PR metadata · git mirror");
     expect(html).toContain("incident records · git mirror");
-    expect(html).toContain('<span class="metric-sources">pr</span>');
+    expect(html).toContain("30-day window vs the 30 before");
+    expect(html).not.toContain("30 days");
+    expect(html).not.toContain("metrics-sources");
+    expect(html).not.toContain("metric-sources");
     expect(html).toContain("review time per PR");
-    expect(html).toContain("median of 1 · review job");
+    expect(html).toContain("median of 1 · review job · pr"); // note · sources on one mono line
+    expect(html).toContain("needs detection snapshots</div>"); // a metric without a source ends its line at the note
     expect(html).toContain('title="previous window: 0"');
-    expect(html).toContain('class="trend mono green-text"');
+    expect(html).toMatch(/class="trend mono green-text" title="[^"]*">[▲▼]/);
     expect(html).not.toContain('class="chip');
     expect(html).toContain("2 incidents open, none fixed in window");
+    expect(html).not.toContain('class="column');
   });
 });
 
@@ -332,8 +374,12 @@ describe("maintain intake in the views (3.5)", () => {
     expect(html).toContain("CWE-208");
     expect(html).toContain('href="https://security.example/runs/scan-2026-09-08-01"');
     expect(html).toContain("if (given == expected) return true;");
+    expect(html).toContain("3 findings need a route."); // the seed's two plus SEC-0121; SEC-0122 is resolved
     expect(html).toContain("last run 2026-09-08T06:04:12Z");
     expect(html).toContain("resolved by scanner · 2026-09-10T06:02:55Z");
+    // the edge colour follows severity; the glow (and the `new` class that lights it) only while the finding still needs a route
+    expect(html).toContain('class="item edge-lit amber new"');
+    expect(html).toContain('class="item edge-lit amber dismissed"');
     // actions: the three seed findings have one `new` (SEC-0118) plus SEC-0121; SEC-0122 is resolved and shows none
     expect((html.match(/Wider than one patch/g) ?? []).length).toBe(3);
   });
@@ -385,9 +431,9 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(html).toContain("not deployed");
     expect(html).toContain("production");
     expect(html).toContain("succeeded");
-    // the board: Deploy-stage cards carry the environment strip
+    // the board: Deploy-stage cards carry the environments as words on line 3
     const board = render();
-    expect(board).toContain('class="env-strip mono"');
+    expect(board).toContain('aria-label="environments"');
     expect(board).toContain("· staging");
   });
 
@@ -414,5 +460,36 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(ready.html).toMatch(/<button class="btn primary" title="runs the declared deploy command for production[^"]*">Deploy to production<\/button>/);
     expect(ready.html).toContain("Rehearse rollback");
     expect(ready.snap.changes.find((c) => c.id === "CHG-0017")?.status).toBe("Merged · production gate — waiting on the engineer");
+  });
+});
+
+describe("Cybercab step 6 (CHG-0001): the handoff's tests", () => {
+  const card = (html: string, id: string) => html.slice(html.lastIndexOf("<button", html.indexOf(id)), html.indexOf("</button>", html.indexOf(id)));
+  it("a Pipeline card lights amber for the role that owns its gate and off for the other", () => {
+    // CHG-0022 waits on the product owner at gate 1
+    expect(card(render(initialState("po")), "CHG-0022")).toContain('class="pcard edge-lit amber owned"');
+    expect(card(render(initialState("eng")), "CHG-0022")).toContain('class="pcard edge-lit off"');
+  });
+  it("a Loop dismiss opens an InlineReason whose submit needs a reason and tunes optionally", () => {
+    const html = render({ ...initialState("po"), view: "loop", form: { kind: "dismiss-triage", id: "TRI-0042" } });
+    expect(html).toContain('aria-label="Dismiss · tune band"');
+    expect(html).toContain('<button type="button" class="btn" disabled="">Dismiss · tune band</button>');
+    expect(html).toContain("Why TRI-0042 is dismissed — required");
+    expect(html).toContain("Tune the band? — optional note");
+    expect(canSubmit(DISMISS_TRIAGE_FIELDS("TRI-0042"), { reason: "", tune: "x" })).toBe(false);
+    expect(canSubmit(DISMISS_TRIAGE_FIELDS("TRI-0042"), { reason: "noise", tune: "" })).toBe(true);
+  });
+  it("the removed strings are gone from every view for both roles", () => {
+    const removed = [
+      "⌁ agent", "agent-text pulse", ">routine<", ">Leading<", ">Lagging<", 'class="half"', "Triage queue", "Yours · product owner", "Yours · engineer", "Other role", "Nothing here",
+      "commits intent.md", "TECH LEAD", 'class="card ', 'class="breached"', 'class="env-strip mono"', '<span class="metric-sources">', "pre-approved runbook",
+      "rolling 30d baseline · Western Electric rules", "last snapshot never", 'class="chip',
+    ];
+    for (const view of ["board", "gates", "loop", "security", "metrics"] as const) {
+      for (const role of ["po", "eng"] as const) {
+        const html = render({ ...initialState(role), view });
+        for (const s of removed) expect(html, `${view} as ${role}: ${s}`).not.toContain(s);
+      }
+    }
   });
 });
