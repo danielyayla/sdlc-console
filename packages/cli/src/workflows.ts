@@ -63,7 +63,17 @@ ${install}      - name: Run the suite
           SDLC_IDENTITY: sdlc-bot@sdlc.local
       - name: Keep the run file (PR branch)
         if: github.event_name == 'pull_request'
-        run: git push origin HEAD:\${{ github.head_ref }}
+        env:
+          GH_TOKEN: \${{ github.token }}
+        run: |
+          # The suite takes minutes; the PR may have merged or closed meanwhile. A push then would land on a
+          # branch nobody reads and never reach the default branch, so the run file stays in the job log.
+          state=$(gh pr view "\${{ github.event.pull_request.number }}" --json state --jq .state)
+          if [ "$state" != "OPEN" ]; then
+            echo "PR #\${{ github.event.pull_request.number }} is $state; not pushing the run file to \${{ github.head_ref }}"
+            exit 0
+          fi
+          git push origin HEAD:\${{ github.head_ref }}
       - name: Keep the run file (sdlc/evals-runs)
         if: github.event_name != 'pull_request'
         env:

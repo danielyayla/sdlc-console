@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { desktopMain, freePort, launchDesktop, type DesktopIo } from "../src/index.js";
 
 const FAKE_SERVE = fileURLToPath(new URL("./fixtures/fake-serve.mjs", import.meta.url));
@@ -30,6 +31,38 @@ describe("sdlc-desktop (3.8): sdlc serve + the system browser, nothing native", 
     await handle.stop();
     await expect(launchDesktop(io({ FAKE_SERVE_DIE: "1" }), { sdlcBin: FAKE_SERVE, open: () => undefined })).rejects.toThrow(/exited with code 3 before printing its URL/);
     await expect(launchDesktop(io({ FAKE_SERVE_SILENT: "1" }), { sdlcBin: FAKE_SERVE, open: () => undefined, startTimeoutMs: 300 })).rejects.toThrow(/no URL within 300 ms/);
+
+    // a silent server is stopped when the launch gives up on it (the exit run left one fake-serve per test run behind)
+    const spawned: ChildProcess[] = [];
+    const spawnImpl: typeof nodeSpawn = ((cmd: string, args: readonly string[], o: object) => {
+      const c = nodeSpawn(cmd, args as string[], o as Parameters<typeof nodeSpawn>[2]);
+      spawned.push(c);
+      return c;
+    }) as typeof nodeSpawn;
+    await expect(launchDesktop(io({ FAKE_SERVE_SILENT: "1" }), { sdlcBin: FAKE_SERVE, open: () => undefined, startTimeoutMs: 300, spawnImpl })).rejects.toThrow(/no URL within 300 ms/);
+    expect(spawned).toHaveLength(1);
+    const silent = spawned[0];
+    if (!silent) throw new Error("no spawn recorded");
+    await new Promise<void>((resolve, reject) => {
+      const c = silent;
+      if (c.exitCode !== null || c.signalCode !== null) return resolve();
+      const t = setTimeout(() => reject(new Error("silent fake-serve still running 2 s after the launch was rejected")), 2000);
+      c.once("exit", () => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+    // an opener that throws stops the server too
+    const opened: ChildProcess[] = [];
+    const spawn2: typeof nodeSpawn = ((cmd: string, args: readonly string[], o: object) => {
+      const c = nodeSpawn(cmd, args as string[], o as Parameters<typeof nodeSpawn>[2]);
+      opened.push(c);
+      return c;
+    }) as typeof nodeSpawn;
+    await expect(launchDesktop(io(), { sdlcBin: FAKE_SERVE, open: () => Promise.reject(new Error("no browser")), spawnImpl: spawn2 })).rejects.toThrow(/no browser/);
+    const unopened = opened[0];
+    if (!unopened) throw new Error("no spawn recorded");
+    expect(unopened.exitCode !== null || unopened.signalCode !== null).toBe(true);
   });
 
   it("desktopMain parses --port/--engine, prints help, refuses junk and returns the server's exit code", async () => {
