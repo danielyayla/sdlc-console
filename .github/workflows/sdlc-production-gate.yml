@@ -31,6 +31,8 @@ jobs:
         run: |
           corepack enable
           pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm exec tsc -b
       - name: Production gate check
         run: node packages/cli/dist/bin.js production-gate ${{ inputs.change }} --sha ${{ github.sha }} --publish
         env:

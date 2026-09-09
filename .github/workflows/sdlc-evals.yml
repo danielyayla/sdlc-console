@@ -34,6 +34,8 @@ jobs:
         run: |
           corepack enable
           pnpm install --frozen-lockfile
+      - name: Build
+        run: pnpm exec tsc -b
       - name: Run the suite
         run: node packages/cli/dist/bin.js evals run --trigger ${{ github.event_name == 'pull_request' && 'config-pr' || github.event_name == 'schedule' && 'schedule' || 'manual' }} --json
         env:
