@@ -179,6 +179,8 @@ a:hover { color: var(--accent-hover); }
 .step .bar-lit { display: block; }
 .step .label { margin-top: 10px; display: flex; justify-content: space-between; gap: var(--s-2); font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-faint); }
 .step.selected .name { color: var(--text-primary); }
+.section-foot { display: flex; gap: 18px; margin-top: var(--s-3); font-family: var(--font-mono); font-size: var(--text-data); }
+.section-foot a { text-decoration: none; }
 .body { display: grid; grid-template-columns: 1fr 330px; gap: 14px; }
 .viewer { background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-panel); }
 .viewer-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border-subtle); }
