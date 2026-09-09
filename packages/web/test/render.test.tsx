@@ -34,7 +34,7 @@ describe("Change detail (spec §4)", () => {
   it("shows the stepper, viewer header, the Decision section with the accept verb for the owning role", () => {
     const html = render({ ...initialState("po"), view: "detail", sel: "CHG-0022" });
     expect(html).toContain("Multi-currency invoice totals");
-    expect(html).toContain("← Pipeline");
+    expect(html).toContain('<button class="btn text mono">Pipeline</button> · CHG-0022 · Plan');
     expect(html).toContain("intent.md");
     expect(html).toContain("Decision · waiting");
     expect(html).toContain("Owned by the product owner");

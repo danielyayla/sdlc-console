@@ -171,7 +171,6 @@ a:hover { color: var(--accent-hover); }
 
 /* detail */
 .detail { max-width: 1200px; margin: 0 auto; }
-.back { background: transparent; border: 0; color: var(--text-muted); cursor: pointer; padding: 0; margin-bottom: 10px; }
 .detail-head { display: flex; align-items: baseline; gap: var(--s-2); flex-wrap: wrap; font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-muted); }
 .detail-title { font-size: var(--text-primary-size); line-height: 1.2; margin: 6px 0 32px; color: var(--text-primary); font-weight: 500; }
 .stepper { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s-3); margin: 0 0 var(--s-6); }
