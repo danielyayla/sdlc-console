@@ -1,7 +1,13 @@
 import type { Snapshot } from "@sdlc/server";
 import type { JobRow } from "../api";
 import { formOpen, type FormState } from "../state";
-import { InlineReason } from "./InlineReason";
+import { InlineReason, type InlineReasonField } from "./InlineReason";
+
+/** The dismiss form's fields: the reason is required (a dismissal is recorded with why), the band tune is an optional note for whoever edits bands.yaml. */
+export const DISMISS_TRIAGE_FIELDS = (id: string): InlineReasonField[] => [
+  { key: "reason", placeholder: `Why ${id} is dismissed — required` },
+  { key: "tune", placeholder: "Tune the band? — optional note", required: false },
+];
 
 export interface LoopProps {
   snapshot: Snapshot;
@@ -57,7 +63,7 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form,
               <button className="btn primary" onClick={() => onAccept(t.data.id)}>Accept → Plan</button>
               {formOpen(form, "dismiss-triage", t.data.id) ? null : <button className="btn text" onClick={() => onForm({ kind: "dismiss-triage", id: t.data.id })}>Dismiss · tune band</button>}
             </div>
-            {formOpen(form, "dismiss-triage", t.data.id) ? <InlineReason placeholder="" submitLabel="Dismiss · tune band" fields={[{ key: "reason", placeholder: `Why ${t.data.id} is dismissed — required` }, { key: "tune", placeholder: "Tune the band? — optional note", required: false }]} onCancel={close} onSubmit={(v) => { close(); onDismiss(t.data.id, v["reason"] ?? "", v["tune"] ?? ""); }} /> : null}
+            {formOpen(form, "dismiss-triage", t.data.id) ? <InlineReason placeholder="" submitLabel="Dismiss · tune band" fields={DISMISS_TRIAGE_FIELDS(t.data.id)} onCancel={close} onSubmit={(v) => { close(); onDismiss(t.data.id, v["reason"] ?? "", v["tune"] ?? ""); }} /> : null}
           </article>
         );
       })}

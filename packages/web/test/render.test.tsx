@@ -5,6 +5,8 @@ import { PO, seedSessions, seedTree } from "@sdlc/fixtures";
 import { buildSnapshot } from "@sdlc/server";
 import { App } from "../src/app";
 import { initialState } from "../src/state";
+import { canSubmit } from "../src/views/InlineReason";
+import { DISMISS_TRIAGE_FIELDS } from "../src/views/Loop";
 
 const now = new Date("2026-09-03T12:00:00Z");
 const repo = loadRepo(seedTree());
@@ -457,5 +459,36 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(ready.html).toMatch(/<button class="btn primary" title="runs the declared deploy command for production[^"]*">Deploy to production<\/button>/);
     expect(ready.html).toContain("Rehearse rollback");
     expect(ready.snap.changes.find((c) => c.id === "CHG-0017")?.status).toBe("Merged · production gate — waiting on the engineer");
+  });
+});
+
+describe("Cybercab step 6 (CHG-0001): the handoff's tests", () => {
+  const card = (html: string, id: string) => html.slice(html.lastIndexOf("<button", html.indexOf(id)), html.indexOf("</button>", html.indexOf(id)));
+  it("a Pipeline card lights amber for the role that owns its gate and off for the other", () => {
+    // CHG-0022 waits on the product owner at gate 1
+    expect(card(render(initialState("po")), "CHG-0022")).toContain('class="pcard edge-lit amber owned"');
+    expect(card(render(initialState("eng")), "CHG-0022")).toContain('class="pcard edge-lit off"');
+  });
+  it("a Loop dismiss opens an InlineReason whose submit needs a reason and tunes optionally", () => {
+    const html = render({ ...initialState("po"), view: "loop", form: { kind: "dismiss-triage", id: "TRI-0042" } });
+    expect(html).toContain('aria-label="Dismiss · tune band"');
+    expect(html).toContain('<button type="button" class="btn" disabled="">Dismiss · tune band</button>');
+    expect(html).toContain("Why TRI-0042 is dismissed — required");
+    expect(html).toContain("Tune the band? — optional note");
+    expect(canSubmit(DISMISS_TRIAGE_FIELDS("TRI-0042"), { reason: "", tune: "x" })).toBe(false);
+    expect(canSubmit(DISMISS_TRIAGE_FIELDS("TRI-0042"), { reason: "noise", tune: "" })).toBe(true);
+  });
+  it("the removed strings are gone from every view for both roles", () => {
+    const removed = [
+      "⌁ agent", "agent-text pulse", ">routine<", ">Leading<", ">Lagging<", 'class="half"', "Triage queue", "Yours · product owner", "Yours · engineer", "Other role", "Nothing here",
+      "commits intent.md", "TECH LEAD", 'class="card ', 'class="breached"', 'class="env-strip mono"', '<span class="metric-sources">', "pre-approved runbook",
+      "rolling 30d baseline · Western Electric rules", "last snapshot never", 'class="chip',
+    ];
+    for (const view of ["board", "gates", "loop", "security", "metrics"] as const) {
+      for (const role of ["po", "eng"] as const) {
+        const html = render({ ...initialState(role), view });
+        for (const s of removed) expect(html, `${view} as ${role}: ${s}`).not.toContain(s);
+      }
+    }
   });
 });
