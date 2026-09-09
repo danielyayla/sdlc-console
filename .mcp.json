@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "sdlc": {
+      "command": "node",
+      "args": [
+        "/Users/danielkapper/Projects/sdlc-console/packages/cli/dist/bin.js",
+        "mcp"
+      ]
+    }
+  }
+}
