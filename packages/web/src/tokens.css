@@ -80,7 +80,6 @@ a:hover { color: var(--accent-hover); }
 .amber-text { color: var(--amber); }
 .green-text { color: var(--green); }
 .red-text { color: var(--red); }
-.agent-text { color: var(--agent); }
 .faint { color: var(--text-faint); }
 .muted { color: var(--text-muted); }
 .secondary { color: var(--text-secondary); }
@@ -101,9 +100,8 @@ a:hover { color: var(--accent-hover); }
 .inline-reason { display: flex; flex-direction: column; gap: var(--s-2); max-width: 560px; }
 .inline-reason .row { display: flex; gap: var(--s-4); align-items: center; }
 
-/* Component rules below this line (.pipeline, .detail, .rail, .scard, .bands …) follow the mock in
-   `SDLC Console (Cybercab).dc.html`: no borders on planes, radii from the tokens above, chips become
-   words in state colours, badges become mono numerals, gate strips become .edge-lit. */
+/* Component rules below this line follow the mocks in sdlc/changes/CHG-0001/design: no borders on planes,
+   radii from the tokens above, state as words in state colours or a lit edge. */
 
 /* ---- component rules ---- */
 .eyebrow { font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-muted); }
@@ -218,8 +216,6 @@ a:hover { color: var(--accent-hover); }
 .loop .primary { margin-bottom: var(--s-6); }
 .security .primary { margin-bottom: 4px; }
 .view-sub { margin-bottom: var(--s-6); }
-.view-head { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; margin-bottom: var(--s-5); }
-.view-head .primary { margin: 0; }
 .bands { margin-top: 48px; }
 .bands-head { display: flex; gap: 14px; align-items: baseline; color: var(--text-muted); padding-bottom: 10px; border-bottom: 1px solid var(--border-subtle); }
 .band-row { display: grid; grid-template-columns: 180px 110px 110px 60px 50px minmax(0, 1fr); gap: 16px; padding: 10px 0; border-top: 1px solid var(--border-subtle); }

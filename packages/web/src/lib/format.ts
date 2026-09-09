@@ -89,12 +89,6 @@ export function recordState(doc: ChangeView["docs"][0]): string {
   return r.mode === "external" ? `copy of ${who} · ${synced}` : `authoritative · linked to ${who} · ${synced}`;
 }
 
-/** Gate label for a change in the column strip: "Accept intent.md" / "Merge PR" / "Accept plan.md · tech lead". */
-export function gateOwnerLabel(view: ChangeView): string {
-  if (!view.gate) return "";
-  return view.gate.ownerRole === "tech_lead" ? "TECH LEAD" : view.gate.ownerRole === "po" ? "PO" : "ENG";
-}
-
 /** The primary button's verb: the gate label with what it accepts — "Accept plan.md rev 2", "Merge PR #412", "Accept intent.md". */
 export function acceptVerb(view: ChangeView, codeHost?: CodeHost): string {
   const g = view.gate;
