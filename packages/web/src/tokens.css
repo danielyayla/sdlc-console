@@ -307,6 +307,15 @@ a:hover { color: var(--accent-hover); }
 .sactions:empty { display: none; }
 .srow .inline-reason { margin-top: 8px; }
 .cmd { min-height: 0; font-size: var(--text-data); margin-top: 8px; }
+.jobs { margin-top: var(--s-6); }
+.jobs summary { cursor: pointer; color: var(--text-muted); list-style: none; }
+.jobs summary::-webkit-details-marker { display: none; }
+.jobs summary:hover { color: var(--text-primary); }
+.jobs[open] summary::after { content: " — hide"; }
+.job-list { margin-top: 10px; }
+.job { display: grid; grid-template-columns: 140px 100px 80px minmax(0, 1fr) auto; gap: var(--s-4); padding: 8px 0; border-top: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: var(--text-data); }
+.job .btn.text { font: inherit; color: inherit; }
+.job .btn.text:hover { color: var(--text-primary); }
 
 /* config */
 .config { max-width: 1020px; display: flex; flex-direction: column; gap: 12px; }

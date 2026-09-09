@@ -82,7 +82,7 @@ function mockUrl(change: ChangeView | undefined): string | null {
   return `/api/changes/${change?.id}/design/${mock.path.split("/").pop() ?? ""}`;
 }
 
-const JOB_CLASS: Record<string, string> = { done: "green", failed: "red", running: "amber", skipped: "gray", queued: "gray" };
+const JOB_CLASS: Record<string, string> = { done: "green-text", failed: "red-text", running: "amber-text", skipped: "muted", queued: "muted" };
 
 /** The session's status line: status, loop state, the last round's verdicts — or what it is waiting on you for. */
 function headline(s: SessionCard): string {
@@ -240,29 +240,23 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
         })}
       </div>
       {jobs.length > 0 ? (
-        <>
-          <h2 className="eyebrow">Jobs · {jobs.length}</h2>
-          <table className="bands" aria-label="jobs">
-            <thead>
-              <tr><th>Job</th><th>Change</th><th>State</th><th>Note</th><th>Updated</th><th>Trace</th></tr>
-            </thead>
-            <tbody>
-              {jobs.slice(0, 40).map((j) => {
-                const trace = traceUrl(traceUrlTemplate, j.traceId);
-                return (
-                  <tr key={j.key}>
-                    <td className="mono" title={j.key}>{j.kind}</td>
-                    <td>{j.changeId ? <button className="btn text mono" onClick={() => onSelect(j.changeId)}>{j.changeId}</button> : <span className="muted">—</span>}{j.sessionId ? <span className="mono muted"> {j.sessionId}</span> : null}</td>
-                    <td><span className={`chip ${JOB_CLASS[j.state] ?? ""}`}>{j.state}</span></td>
-                    <td className="muted">{j.error ?? j.note ?? ""}</td>
-                    <td className="muted">{relativeTime(j.updatedAt, now)}</td>
-                    <td>{trace ? <a className="chip" href={trace} target="_blank" rel="noreferrer" title={`OTel trace ${j.traceId ?? ""}`}>trace</a> : <span className="muted">—</span>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </>
+        <details className="jobs">
+          <summary className="mono">Jobs · {jobs.length}</summary>
+          <div className="job-list" aria-label="jobs">
+            {jobs.slice(0, 40).map((j) => {
+              const trace = traceUrl(traceUrlTemplate, j.traceId);
+              return (
+                <div className="job" key={j.key}>
+                  <span className="secondary" title={j.key}>{j.kind}</span>
+                  <span className="muted">{j.changeId ? <button className="btn text mono" onClick={() => onSelect(j.changeId)}>{j.changeId}</button> : "—"}{j.sessionId ? ` ${j.sessionId}` : ""}</span>
+                  <span className={JOB_CLASS[j.state] ?? "muted"}>{j.state}</span>
+                  <span className="faint">{j.error ?? j.note ?? ""}</span>
+                  <span className="faint">{relativeTime(j.updatedAt, now)}{trace ? <> · <a href={trace} target="_blank" rel="noreferrer" title={`OTel trace ${j.traceId ?? ""}`}>trace</a></> : null}</span>
+                </div>
+              );
+            })}
+          </div>
+        </details>
       ) : null}
     </div>
   );
