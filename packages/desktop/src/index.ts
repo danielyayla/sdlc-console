@@ -95,7 +95,14 @@ export async function launchDesktop(io: DesktopIo, opts: DesktopOptions = {}): P
     let buffer = "";
     let found = false;
     const timer = setTimeout(() => {
-      if (!found) reject(new Error(`sdlc serve printed no URL within ${opts.startTimeoutMs ?? 30_000} ms`));
+      if (found) return;
+      // A server that never prints its URL is not one we can hand to a browser; it does not get to outlive the launch.
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // already gone
+      }
+      reject(new Error(`sdlc serve printed no URL within ${opts.startTimeoutMs ?? 30_000} ms`));
     }, opts.startTimeoutMs ?? 30_000);
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
@@ -127,7 +134,18 @@ export async function launchDesktop(io: DesktopIo, opts: DesktopOptions = {}): P
       }
     });
   });
-  await (opts.open ?? ((u, i) => openInBrowser(u, i)))(url, io);
+  try {
+    await (opts.open ?? ((u, i) => openInBrowser(u, i)))(url, io);
+  } catch (e) {
+    // The opener failed: nothing will reach the server, so it stops instead of running headless behind a rejected launch.
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // already gone
+    }
+    await exited;
+    throw e;
+  }
   return {
     url,
     child,
