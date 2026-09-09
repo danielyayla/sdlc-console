@@ -1,0 +1,54 @@
+schema: 1
+changeId: CHG-0001
+cycle: 1
+tasks:
+  - id: packages-web-src-views
+    title: Work in packages/web/src/views
+    files:
+      - packages/web/src/views/Pipeline.tsx
+      - packages/web/src/views/Gates.tsx
+      - packages/web/src/views/Loop.tsx
+      - packages/web/src/views/Security.tsx
+      - packages/web/src/views/Metrics.tsx
+    sequential: false
+    target: pnpm build, pnpm test and pnpm lint are green; `grep -rnE '\.chip|"chip|chip[ "]' packages/web/src` prints nothing; render.test.tsx has the 5 named tests (owned card amber/off, single primary-row, dismiss needs a reason, headline numbers agree, removed strings) passing and none of the 21 removed strings; `git log --oneline main..HEAD` shows 24 commits touching only the 10 listed files.
+    worktree: CHG-0001/packages-web-src-views
+    branch: CHG-0001/packages-web-src-views
+    state: confirmed
+  - id: packages-web-src
+    title: Work in packages/web/src
+    files:
+      - packages/web/src/tokens.css
+      - packages/web/src/app.tsx
+    sequential: false
+    target: pnpm build, pnpm test and pnpm lint are green; `grep -rnE '\.chip|"chip|chip[ "]' packages/web/src` prints nothing; render.test.tsx has the 5 named tests (owned card amber/off, single primary-row, dismiss needs a reason, headline numbers agree, removed strings) passing and none of the 21 removed strings; `git log --oneline main..HEAD` shows 24 commits touching only the 10 listed files.
+    worktree: CHG-0001/packages-web-src
+    branch: CHG-0001/packages-web-src
+    state: confirmed
+  - id: packages-web-src-lib
+    title: Work in packages/web/src/lib
+    files:
+      - packages/web/src/lib/format.ts
+    sequential: false
+    target: pnpm build, pnpm test and pnpm lint are green; `grep -rnE '\.chip|"chip|chip[ "]' packages/web/src` prints nothing; render.test.tsx has the 5 named tests (owned card amber/off, single primary-row, dismiss needs a reason, headline numbers agree, removed strings) passing and none of the 21 removed strings; `git log --oneline main..HEAD` shows 24 commits touching only the 10 listed files.
+    worktree: CHG-0001/packages-web-src-lib
+    branch: CHG-0001/packages-web-src-lib
+    state: confirmed
+  - id: packages-web-test
+    title: Work in packages/web/test
+    files:
+      - packages/web/test/render.test.tsx
+    sequential: false
+    target: pnpm build, pnpm test and pnpm lint are green; `grep -rnE '\.chip|"chip|chip[ "]' packages/web/src` prints nothing; render.test.tsx has the 5 named tests (owned card amber/off, single primary-row, dismiss needs a reason, headline numbers agree, removed strings) passing and none of the 21 removed strings; `git log --oneline main..HEAD` shows 24 commits touching only the 10 listed files.
+    worktree: CHG-0001/packages-web-test
+    branch: CHG-0001/packages-web-test
+    state: confirmed
+  - id: docs
+    title: Work in docs
+    files:
+      - docs/decisions.md
+    sequential: false
+    target: pnpm build, pnpm test and pnpm lint are green; `grep -rnE '\.chip|"chip|chip[ "]' packages/web/src` prints nothing; render.test.tsx has the 5 named tests (owned card amber/off, single primary-row, dismiss needs a reason, headline numbers agree, removed strings) passing and none of the 21 removed strings; `git log --oneline main..HEAD` shows 24 commits touching only the 10 listed files.
+    worktree: CHG-0001/docs
+    branch: CHG-0001/docs
+    state: confirmed
