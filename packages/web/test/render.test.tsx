@@ -14,7 +14,7 @@ const snapshot = buildSnapshot(repo, { id: PO, name: "Priya Owens", roles: ["po"
 const render = (state = initialState("po")) => renderToString(<App snapshot={snapshot} initial={state} now={now} live={false} />).replace(/<!-- -->/g, "");
 
 describe("Pipeline (spec §4)", () => {
-  it("renders six columns with the seed's eight cards, agent chips and gate strips", () => {
+  it("renders six columns with the seed's eight cards, agent words and lit gate edges", () => {
     const html = render();
     for (const name of ["01", "Plan", "02", "Design", "03", "Build", "04", "Test", "05", "Deploy", "06", "Maintain"]) expect(html).toContain(name);
     for (const id of ["CHG-0012", "CHG-0017", "CHG-0018", "CHG-0019", "CHG-0020", "CHG-0021", "CHG-0022", "CHG-0023"]) expect(html).toContain(id);
@@ -22,7 +22,10 @@ describe("Pipeline (spec §4)", () => {
     expect(html).toContain("Accept intent.md");
     expect(html).toContain("Merge PR");
     expect(html).toContain("TECH LEAD");
-    expect(html).toContain("⌁ agent");
+    expect(html).toContain('<span class="agent-text pulse">agent</span>');
+    expect(html).toContain('class="card edge-lit amber"');
+    expect(html).toContain('class="card edge-lit agent pulse"');
+    expect(html).not.toContain("gate-strip");
     expect(html).toContain("Evals red — agent fixing");
     expect(html).not.toContain("Nothing here");
     // counts for po: gates 3, loop 2, security 2 — mono numerals, not badges; hidden at 0 is exercised by eng below
@@ -378,7 +381,7 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(html).toContain("succeeded");
     // the board: Deploy-stage cards carry the environment strip
     const board = render();
-    expect(board).toContain('class="env-strip"');
+    expect(board).toContain('class="env-strip mono"');
     expect(board).toContain("· staging");
   });
 
