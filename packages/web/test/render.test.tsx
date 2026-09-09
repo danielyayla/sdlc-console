@@ -209,7 +209,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("review time per PR");
     expect(html).toContain("median of 1 · review job · pr"); // note · sources on one mono line
     expect(html).toContain('title="previous window: 0"');
-    expect(html).toContain('class="trend mono green-text"');
+    expect(html).toMatch(/class="trend mono green-text" title="[^"]*">[▲▼]/);
     expect(html).not.toContain('class="chip');
     expect(html).toContain("2 incidents open, none fixed in window");
   });

@@ -19,12 +19,12 @@ function fmtPrev(v: MetricValue): string {
   return `previous window: ${fmt(p)}`;
 }
 
-/** The trend as a word in its state colour (spec §4.8): green when it moved the better way, amber when not, muted when flat; the % change against the previous window. */
+/** The trend as a glyph in its state colour (handoff, C10): ▲/▼ with the % change, green when it moved the better way, amber when not; — when flat or unknown. The previous window stays in the title. */
 function Trend({ v }: { v: MetricValue }) {
-  if (v.trend === null || v.trend === "flat") return <span className="trend mono muted" title={fmtPrev(v)}>flat{v.trend === "flat" && v.delta !== null && v.delta !== 0 ? ` ${v.delta > 0 ? "+" : ""}${v.delta}%` : ""}</span>;
+  if (v.trend === null || v.trend === "flat") return <span className="trend mono faint" title={fmtPrev(v)}>—</span>;
   const good = v.trend === v.better;
   const delta = v.delta === null ? "" : ` ${v.delta > 0 ? "+" : ""}${v.delta}%`;
-  return <span className={`trend mono ${good ? "green-text" : "amber-text"}`} title={fmtPrev(v)}>{v.trend}{delta}</span>;
+  return <span className={`trend mono ${good ? "green-text" : "amber-text"}`} title={fmtPrev(v)}>{v.trend === "up" ? "▲" : "▼"}{delta}</span>;
 }
 
 const FEEDS: { key: keyof MetricSourcesStatus; label: string }[] = [
