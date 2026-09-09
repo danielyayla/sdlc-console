@@ -168,7 +168,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
 });
 
 describe("Sessions (spec §4)", () => {
-  it("renders the header counts, four seed cards with mode chips, waiting-on-you, rationale and the footer callout", () => {
+  it("renders the header counts, four seed cards with mode chips, waiting-on-you and rationale", () => {
     const html = render({ ...initialState("eng"), view: "sessions" });
     expect(html).toContain("2 active · review backlog 2 · ceiling 4"); // running + waiting; the done plan (CHG-0019 at stage 3) and design (CHG-0021 at stage 2) sessions await their gates
     expect(html).toContain("CHG-0018/export-fix");
@@ -177,7 +177,8 @@ describe("Sessions (spec §4)", () => {
     expect(html).toContain("waiting on you: plan.md rev 2 marked final");
     expect(html).toContain("test edit attempts: 1");
     expect(html).toContain("New session");
-    expect(html).toContain("Sessions run Claude Code headless in a worktree per task");
+    // the explanatory footer is documentation, not a control (removals log)
+    expect(html).not.toContain("Sessions run Claude Code headless in a worktree per task");
   });
   it("renders the visual rounds strip from the session's screenshot rounds and offers Downgrade only on running AUTO/HEADLESS cards", () => {
     const html = render({ ...initialState("eng"), view: "sessions" });
@@ -188,7 +189,6 @@ describe("Sessions (spec §4)", () => {
     expect(html).toContain("chip amber");
     // the seed's running session is SUPERVISED and the AUTO/HEADLESS ones are done: nothing to downgrade
     expect(html).not.toContain("Downgrade to SUPERVISED");
-    expect(html).toContain("AUTO can be taken away, never granted");
   });
 });
 

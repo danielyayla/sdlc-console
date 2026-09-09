@@ -229,7 +229,6 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
           </table>
         </>
       ) : null}
-      <div className="footer">Sessions run Claude Code headless in a worktree per task; repo configuration (CLAUDE.md, .claude/**) steers them and is never edited here. Every session is logged per engineer. Autonomy is derived: AUTO can be taken away, never granted.</div>
     </div>
   );
 }
