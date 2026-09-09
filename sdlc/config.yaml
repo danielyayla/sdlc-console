@@ -4,6 +4,7 @@ codeHost: github
 identities:
   - id: dkapper01@gmail.com
     name: Daniel Kapper
+    github: danielyayla
     roles:
       - po
       - eng
