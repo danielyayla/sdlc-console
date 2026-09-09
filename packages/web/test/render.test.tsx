@@ -25,8 +25,9 @@ describe("Pipeline (spec §4)", () => {
     expect(html).toContain("⌁ agent");
     expect(html).toContain("Evals red — agent fixing");
     expect(html).not.toContain("Nothing here");
-    // badges for po: gates 3, loop 2, security 2; hidden at 0 is exercised by eng below
-    expect(html).toContain('class="badge">3<');
+    // counts for po: gates 3, loop 2, security 2 — mono numerals, not badges; hidden at 0 is exercised by eng below
+    expect(html).toContain('class="count">3<');
+    expect(html).not.toContain("badge");
   });
 });
 
@@ -94,7 +95,7 @@ describe("Gates (acceptance e)", () => {
     expect(eng).toContain("Yours · engineer");
     expect(eng.indexOf("CHG-0020")).toBeLessThan(eng.indexOf("Other role"));
     expect(eng.indexOf("CHG-0022")).toBeGreaterThan(eng.indexOf("Other role"));
-    expect(eng).toContain('class="badge">2<');
+    expect(eng).toContain('class="count">2<');
   });
 });
 
@@ -287,13 +288,13 @@ describe("product switcher (3.2)", () => {
     expect(two).toContain('aria-label="product"');
     expect(two).toContain('<option value="invoicing" title="/r" selected="">invoicing</option>');
     expect(two).toContain('<option value="billing" title="/r/apps/billing">billing</option>');
-    expect(two).not.toContain("/ invoicing / SDLC console");
+    expect(two).not.toContain("Veri</span><span> / invoicing</span>");
     const one = renderWith(1);
     expect(one).not.toContain('aria-label="product"');
-    expect(one).toContain("/ invoicing / SDLC console");
+    expect(one).toContain("Veri</span><span> / invoicing</span>");
     const none = render();
     expect(none).not.toContain('aria-label="product"');
-    expect(none).toContain("/ repo / SDLC console");
+    expect(none).toContain("Veri</span><span> / repo</span>");
   });
   it("the selected product is the one in UIState; switching keeps the tab, drops the selection and leaves the detail view", async () => {
     const { reduce } = await import("../src/state");

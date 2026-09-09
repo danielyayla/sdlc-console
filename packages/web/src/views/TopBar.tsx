@@ -13,6 +13,8 @@ const TABS: { view: Exclude<View, "detail">; label: string }[] = [
   { view: "metrics", label: "Metrics" },
 ];
 
+const ROLE_TAB: Record<Role, string> = { po: "Product owner", eng: "Engineer" };
+
 export interface TopBarProps {
   state: UIState;
   snapshot: Snapshot | null;
@@ -24,6 +26,7 @@ export interface TopBarProps {
   onProduct?: (name: string | null) => void;
 }
 
+/** One hairline below; tabs are text with a lit underline on the active one; counts are mono numerals, not badges (rule 6). */
 export function TopBar({ state, snapshot, repoLabel, products = [], onTab, onRole, onProduct }: TopBarProps) {
   const b = snapshot?.badges[state.role];
   const counts: Partial<Record<View, number>> = { gates: b?.gates ?? 0, loop: b?.loop ?? 0, security: b?.security ?? 0 };
@@ -33,12 +36,10 @@ export function TopBar({ state, snapshot, repoLabel, products = [], onTab, onRol
   const selected = state.product ?? primary ?? "";
   return (
     <header className="topbar">
-      <div className="brand">
-        <span className="brand-square" aria-hidden="true" />
-        <span>Veri</span>
+      <div className="brand mono">
+        <span className="secondary">Veri</span>
         {products.length > 1 ? (
           <label className="product-switch">
-            <span className="eyebrow">Product</span>
             <select aria-label="product" value={selected} onChange={(e) => onProduct?.(e.target.value === primary ? null : e.target.value)}>
               {products.map((p) => (
                 <option key={p.name} value={p.name} title={p.home}>
@@ -48,7 +49,7 @@ export function TopBar({ state, snapshot, repoLabel, products = [], onTab, onRol
             </select>
           </label>
         ) : (
-          <span className="brand-repo">/ {repoLabel} / SDLC console</span>
+          <span> / {repoLabel}</span>
         )}
       </div>
       <nav className="tabs" aria-label="views">
@@ -58,28 +59,24 @@ export function TopBar({ state, snapshot, repoLabel, products = [], onTab, onRol
           return (
             <button key={t.view} className={`tab${active ? " active" : ""}`} onClick={() => onTab(t.view)} aria-current={active ? "page" : undefined}>
               {t.label}
-              {n > 0 ? <span className="badge">{n}</span> : null}
+              {n > 0 ? <span className="count">{n}</span> : null}
             </button>
           );
         })}
       </nav>
       <div className="spacer" />
       {snapshot?.config.auth ? (
-        <div className="whoami" title={`signed in via ${snapshot.config.auth.issuer}`}>
-          <span className="eyebrow">Signed in</span>
-          <span className="who-name">{snapshot.identity.name ?? snapshot.identity.id}</span>
+        <div className="whoami mono" title={`signed in via ${snapshot.config.auth.issuer}`}>
+          <span className="secondary">{snapshot.identity.name ?? snapshot.identity.id}</span>
           <a className="signout" href="/auth/logout">Sign out</a>
         </div>
       ) : null}
-      <div className="switcher">
-        <span className="eyebrow">Acting as</span>
-        <div className="segment" role="group" aria-label="role">
-          {(["po", "eng"] as Role[]).map((r) => (
-            <button key={r} className={state.role === r ? "active" : ""} disabled={!canSwitch(r)} title={canSwitch(r) ? ROLE_LABEL[r] : `${snapshot?.identity.id ?? "you"} does not hold ${ROLE_LABEL[r]}`} onClick={() => onRole(r)}>
-              {r.toUpperCase()}
-            </button>
-          ))}
-        </div>
+      <div className="roles" role="group" aria-label="role">
+        {(["po", "eng"] as Role[]).map((r) => (
+          <button key={r} className={`tab${state.role === r ? " active" : ""}`} disabled={!canSwitch(r)} title={canSwitch(r) ? ROLE_LABEL[r] : `${snapshot?.identity.id ?? "you"} does not hold ${ROLE_LABEL[r]}`} onClick={() => onRole(r)}>
+            {ROLE_TAB[r]}
+          </button>
+        ))}
       </div>
     </header>
   );
