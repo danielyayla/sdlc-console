@@ -157,9 +157,9 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     // the seed's bands declare no source: the row says so instead of pretending to measure (3.4)
     expect(html).toContain("no source · add `source:` to bands.yaml");
     expect(html).toContain("rolling 30d · Western Electric · detection every 15m · last never");
-    expect(html).toContain("1σ log, 2σ diagnose read-only, 3σ propose via PR or pre-approved runbook.");
+    expect(html).toContain("1σ log · 2σ diagnose read-only · 3σ propose via PR or runbook rollback");
     expect(html).not.toContain("<table");
-    expect(html).toContain("runbooks: rollback");
+    expect(html).not.toContain("runbooks:");
     expect(html).not.toContain("Run detection"); // no engine injected
     expect(html).toContain("TRI-0042");
     expect(html).toContain("TRI-0043");

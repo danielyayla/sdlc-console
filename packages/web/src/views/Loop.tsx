@@ -91,10 +91,7 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], form,
           );
         })}
       </section>
-      <div className="footer mono">
-        1σ log, 2σ diagnose read-only, 3σ propose via PR or pre-approved runbook.
-        {runbooks.length > 0 ? ` · runbooks: ${runbooks.map((r) => (typeof r === "string" ? `${r} (no command)` : r.id)).join(", ")}` : ""}
-      </div>
+      <div className="foot-line mono">1σ log · 2σ diagnose read-only · 3σ propose via PR or runbook{runbooks.length > 0 ? ` ${runbooks.map((r) => (typeof r === "string" ? `${r} (no command)` : r.id)).join(" · ")}` : ""}</div>
     </div>
   );
 }
