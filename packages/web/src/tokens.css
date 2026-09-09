@@ -290,6 +290,10 @@ a:hover { color: var(--accent-hover); }
 .composer .btn.text { padding-bottom: 8px; }
 .session-list { display: flex; flex-direction: column; gap: 2px; margin-top: var(--s-6); }
 .srow { padding: 16px 24px; transition: background 0.12s; }
+.srow.selected { background: var(--bg-panel); }
+.srow.primary-row { padding: 24px; }
+.srow.primary-row .shead { font-size: var(--text-primary-size); line-height: 1.2; font-weight: 500; }
+.srow-select { display: block; width: 100%; text-align: left; background: transparent; border: 0; padding: 0; cursor: pointer; color: inherit; font: inherit; }
 .smeta { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-faint); }
 .smeta .swhen { margin-left: auto; }
 .smeta .btn.text { color: var(--text-faint); }

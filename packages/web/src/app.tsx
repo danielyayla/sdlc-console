@@ -160,6 +160,8 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onStart={(input) => void run("/sessions", input)}
         onAction={(id, action, body) => void run(`/sessions/${id}/${action}`, body ?? {})}
         onSelect={(id) => dispatch({ type: "select", id })}
+        selected={state.session}
+        onSelectSession={(id) => dispatch({ type: "session", id })}
         jobs={jobs}
         traceUrlTemplate={traceUrlTemplate}
         now={now}

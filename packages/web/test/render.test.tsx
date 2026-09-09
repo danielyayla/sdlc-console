@@ -181,7 +181,7 @@ describe("Sessions (spec §4)", () => {
     expect(html).not.toContain("Sessions run Claude Code headless in a worktree per task");
   });
   it("renders the visual rounds as coloured words from the session's screenshot rounds and offers Downgrade only on running AUTO/HEADLESS rows", () => {
-    const html = render({ ...initialState("eng"), view: "sessions" });
+    const html = render({ ...initialState("eng"), view: "sessions", session: "sess-0018-repro" });
     expect(html).toContain('aria-label="visual rounds"');
     expect(html).toContain("round 1 · 14.2%");
     expect(html).toContain("round 2 · 3.1%");
@@ -189,6 +189,15 @@ describe("Sessions (spec §4)", () => {
     expect(html).toContain("btn text amber-text");
     // the seed's running session is SUPERVISED and the AUTO/HEADLESS ones are done: nothing to downgrade
     expect(html).not.toContain("Downgrade to supervised");
+    // the running row shows Stop / Take over only once selected; the row waiting on you shows Add guidance unselected (usability exception)
+    const unselected = render({ ...initialState("eng"), view: "sessions" });
+    expect(unselected).not.toContain(">Stop</button>");
+    expect(unselected).not.toContain('aria-label="visual rounds"');
+    expect(unselected).toContain(">Add guidance</button>");
+    expect(unselected).toContain('class="srow edge-lit amber primary-row"');
+    expect(html).toContain('class="srow edge-lit agent pulse selected"');
+    expect(html).toContain(">Stop</button>");
+    expect(html).toContain(">Take over</button>");
   });
 });
 

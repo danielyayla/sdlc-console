@@ -58,6 +58,9 @@ export interface SessionsProps {
   onStart: (input: { changeId: string; kind?: string; target?: string; mode?: string }) => void;
   onAction: (id: string, action: "stop" | "takeover" | "raise-cap" | "message" | "downgrade", body?: Record<string, unknown>) => void;
   onSelect: (id: string) => void;
+  /** The selected row: its details and actions show; a row waiting on you shows them without being selected. */
+  selected: string | null;
+  onSelectSession: (id: string | null) => void;
   /** The open inline reason form (rule 3): guidance and downgrade reasons are typed under the row. */
   form: FormState;
   onForm: (form: FormState) => void;
@@ -91,7 +94,7 @@ function headline(s: SessionCard): string {
   return `${s.status}${s.loop ? ` · loop ${s.loop.state}` : ""}${lastRound ? ` · round ${lastRound.n}: ${lastRound.results.map((r) => `${r.name} ${r.pass ? "✓" : "✗"}`).join(" ")}` : ""}`;
 }
 
-export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, jobs = [], traceUrlTemplate = null, now = new Date() }: SessionsProps) {
+export function Sessions({ snapshot, onStart, onAction, onSelect, selected: selectedSession, onSelectSession, form, onForm, jobs = [], traceUrlTemplate = null, now = new Date() }: SessionsProps) {
   const close = () => onForm(null);
   const sessions = snapshot.sessions as unknown as SessionCard[];
   const cap = snapshot.capacity;
@@ -105,6 +108,8 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
   const verificationMissing = !snapshot.claudeMd?.verification || snapshot.claudeMd.verification.commands.length === 0;
   const targetValue = target || selected?.acceptanceLine || "";
   const needsTarget = (selected?.stage ?? 0) === 4;
+  // rule 2: one primary row — the session waiting on you, else the running one, else the newest
+  const primary = (sessions.find((s) => s.waitingOnYou) ?? sessions.find((s) => s.status === "running") ?? sessions[0])?.id ?? null;
   const header = `${cap.active} active · review backlog ${cap.backlog}${cap.ceiling === null ? "" : cap.over ? ` · over the ceiling of ${cap.ceiling}` : ` · ceiling ${cap.ceiling}`}`;
   return (
     <div className="sessions">
@@ -158,12 +163,14 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
           const mock = mockUrl(change);
           const trace = traceUrl(traceUrlTemplate, s.traceId);
           const edge = s.waitingOnYou ? "amber" : running ? "agent pulse" : "off";
+          const isSelected = selectedSession === s.id;
+          // usability exception: a row that is waiting on you shows its actions without being selected
+          const expanded = isSelected || Boolean(s.waitingOnYou) || form?.id === s.id;
           const details: { k: string; v: ReactNode; cls?: string }[] = [];
           for (const r of s.loop?.rounds ?? []) details.push({ k: `round ${r.n}`, v: `${r.results.map((x) => `${x.name} ${x.pass ? "✓" : "✗"}`).join(" ")}${r.diffPct !== undefined ? ` · ${r.diffPct}% from mock` : ""}` });
           if (s.verifier) details.push({ k: "verifier", v: `ran ${s.verifier.ran ? "✓" : "✗"} · saw ${s.verifier.saw ? "✓" : "✗"} · mismatch ${s.verifier.mismatch ? "✗" : "—"}` });
           if (s.subagents && s.subagents.length > 0) details.push({ k: "subagents", v: s.subagents.map((a) => `${a.name} · ${a.state}`).join(" · ") });
           if (s.autoRationale && s.autoRationale.terms.length > 0) details.push({ k: `${MODE_WORD[s.mode] ?? s.mode.toLowerCase()} because`, v: s.autoRationale.terms.join(" · "), cls: "green-text" });
-          if (trace) details.push({ k: "otel", v: <a href={trace} target="_blank" rel="noreferrer" title={`OTel trace ${s.traceId ?? ""}`}>trace</a> });
           if (shots.length > 0)
             details.push({
               k: "visual",
@@ -178,14 +185,16 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
               ),
             });
           return (
-            <article className={`srow edge-lit ${edge}`} key={s.id}>
+            <article className={`srow edge-lit ${edge}${isSelected ? " selected" : ""}${primary === s.id ? " primary-row" : ""}`} key={s.id} aria-selected={isSelected}>
+              <button className="srow-select" onClick={() => onSelectSession(isSelected ? null : s.id)} aria-expanded={expanded}>
               <div className="smeta">
                 <span className="secondary">{s.worktree}</span>
                 <span>{MODE_WORD[s.mode] ?? s.mode.toLowerCase()}</span>
-                {s.changeId ? <button className="btn text mono" onClick={() => onSelect(s.changeId)}>{s.changeId}</button> : s.band ? <span className="amber-text" title={s.band.job}>{s.band.metric} {s.band.tier}σ · {s.band.triageId}</span> : null}
+                {s.changeId ? <span className="btn text mono" role="link" onClick={(e) => { e.stopPropagation(); onSelect(s.changeId); }}>{s.changeId}</span> : s.band ? <span className="amber-text" title={s.band.job}>{s.band.metric} {s.band.tier}σ · {s.band.triageId}</span> : null}
                 {s.taskId ? <span>task {s.taskId}</span> : null}
                 {(s.testEditAttempts ?? 0) > 0 ? <span className="red-text">test edits {s.testEditAttempts}</span> : null}
                 <HarnessWords harness={s.harness ?? null} />
+                {trace ? <a href={trace} target="_blank" rel="noreferrer" title={`OTel trace ${s.traceId ?? ""}`} onClick={(e) => e.stopPropagation()}>trace</a> : null}
                 <span className="swhen">{relativeTime(s.startedAt, now)}</span>
               </div>
               <div className="shead">{headline(s)}</div>
@@ -194,6 +203,9 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
               {lostEligibility ? <div className="snote amber-text">no longer AUTO-eligible: {lostEligibility} — downgrade to supervised?</div> : null}
               {change?.visual.warning && shots.length === 0 && (s.kind ?? "build") === "build" ? <div className="snote amber-text">{change.visual.warning}</div> : null}
               {s.error ? <div className="snote red-text">{s.error}</div> : null}
+              </button>
+              {expanded ? (
+              <>
               <div className="sdetail">
                 {details.map((d) => (
                   <div className="kv" key={d.k}>
@@ -235,6 +247,8 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
               </div>
               {formOpen(form, "downgrade", s.id) ? <InlineReason placeholder="Reason for AUTO → SUPERVISED — optional; the override is recorded" submitLabel="Downgrade" required={false} onCancel={close} onSubmit={(v) => { close(); onAction(s.id, "downgrade", v["reason"] ? { reason: v["reason"] } : {}); }} /> : null}
               {formOpen(form, "guidance", s.id) ? <InlineReason placeholder={`Guidance for ${s.id} — goes to the session`} submitLabel="Send guidance" onCancel={close} onSubmit={(v) => { close(); onAction(s.id, "message", { text: v["reason"] ?? "" }); }} /> : null}
+              </>
+              ) : null}
             </article>
           );
         })}

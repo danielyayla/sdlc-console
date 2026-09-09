@@ -15,6 +15,8 @@ export interface UIState {
   /** Product the console shows; null = the server's primary product. */
   product: string | null;
   form: FormState;
+  /** The session row open on the Sessions tab (rule 3: its actions appear when selected). */
+  session: string | null;
 }
 
 export type UIAction =
@@ -28,10 +30,11 @@ export type UIAction =
   | { type: "toast.clear"; n: number }
   | { type: "seed-role"; role: Role }
   | { type: "form.open"; kind: string; id?: string }
-  | { type: "form.close" };
+  | { type: "form.close" }
+  | { type: "session"; id: string | null };
 
 export function initialState(role: Role = "po", product: string | null = null): UIState {
-  return { view: "board", role, sel: null, art: null, toast: null, product, form: null };
+  return { view: "board", role, sel: null, art: null, toast: null, product, form: null, session: null };
 }
 
 /** Is the form for this row open? */
@@ -43,11 +46,11 @@ export function formOpen(form: FormState, kind: string, id?: string): boolean {
 export function reduce(state: UIState, action: UIAction): UIState {
   switch (action.type) {
     case "tab":
-      return { ...state, view: action.view, sel: null, art: null, form: null };
+      return { ...state, view: action.view, sel: null, art: null, form: null, session: null };
     case "role":
       return { ...state, role: action.role, form: null };
     case "product":
-      return state.product === action.name ? state : { ...state, product: action.name, view: state.view === "detail" ? "board" : state.view, sel: null, art: null, form: null };
+      return state.product === action.name ? state : { ...state, product: action.name, view: state.view === "detail" ? "board" : state.view, sel: null, art: null, form: null, session: null };
     case "seed-role":
       return state.role === action.role ? state : { ...state, role: action.role };
     case "select":
@@ -64,5 +67,7 @@ export function reduce(state: UIState, action: UIAction): UIState {
       return { ...state, form: action.id === undefined ? { kind: action.kind } : { kind: action.kind, id: action.id } };
     case "form.close":
       return state.form === null ? state : { ...state, form: null };
+    case "session":
+      return state.session === action.id ? state : { ...state, session: action.id, form: null };
   }
 }

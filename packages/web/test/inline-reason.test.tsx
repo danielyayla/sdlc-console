@@ -50,6 +50,8 @@ describe("InlineReason (rule 3: forms replace prompts)", () => {
     expect(reduce(scoped, { type: "select", id: "CHG-0020" }).form).toBeNull();
     expect(reduce(scoped, { type: "back" }).form).toBeNull();
     expect(reduce(scoped, { type: "product", name: "billing" }).form).toBeNull();
+    expect(reduce(scoped, { type: "session", id: "sess-0018-repro" })).toMatchObject({ session: "sess-0018-repro", form: null });
+    expect(reduce({ ...scoped, session: "sess-0018-repro" }, { type: "tab", view: "sessions" }).session).toBeNull();
     // closing an already closed form is a no-op
     expect(reduce(s0, { type: "form.close" })).toBe(s0);
   });
