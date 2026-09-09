@@ -100,13 +100,7 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
       </section>
 
       <section className="panel">
-        <div className="eyebrow">Subagents</div>
-        {snapshot.agents.length === 0 ? <div className="empty">none under .claude/agents</div> : null}
-        {snapshot.agents.map((a) => <div className="card-status" key={a.name}><span className="mono">{a.name}</span> · {a.description} · <span className="muted">{a.tools.join(", ") || "all tools"}</span></div>)}
-      </section>
-
-      <section className="panel">
-        <div className="eyebrow">Skills · advisory unless a hook backs them · pass % from trigger tests (threshold {skillThreshold}%)</div>
+        <div className="eyebrow">Skills &amp; subagents · advisory unless a hook backs them · pass % from trigger tests (threshold {skillThreshold}%)</div>
         <table className="bands">
           <thead><tr><th>Name</th><th>Trigger</th><th>Owner</th><th>Version</th><th>Backed by</th><th>Must hold</th><th>Pass %</th><th>Findings citing</th></tr></thead>
           <tbody>
@@ -119,6 +113,11 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
                 <td>{s.mustHold ? (s.mustHoldWithoutHook ? <span className="chip amber">must hold · no hook</span> : "yes") : "no"}</td>
                 <td title={s.passNote}>{s.passPct === null ? <span className="muted">{s.passNote}</span> : <span className={`chip ${s.belowThreshold ? "amber" : "green"}`}>{s.passPct}%{s.belowThreshold ? " · not triggering" : ""}</span>}<div className="muted">{s.triggerTests.active} trigger test{s.triggerTests.active === 1 ? "" : "s"}{s.run ? ` · ${s.run}` : ""}</div></td>
                 <td>{s.findingsCiting}</td>
+              </tr>
+            ))}
+            {snapshot.agents.map((a) => (
+              <tr key={`agent:${a.name}`}>
+                <td className="mono">{a.name}</td><td colSpan={5}>{a.description} · <span className="muted">{a.tools.join(", ") || "all tools"}</span></td><td colSpan={2} className="muted">{a.model ?? "subagent"}</td>
               </tr>
             ))}
           </tbody>
