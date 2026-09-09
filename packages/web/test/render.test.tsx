@@ -128,11 +128,12 @@ describe("Loop with detection snapshots (3.4)", () => {
 });
 
 describe("Loop, Security, Metrics (spec §4)", () => {
-  it("Loop shows the bands table, the tier footer and both triage cards with their actions", () => {
+  it("Loop shows the bands table, the tier footer and both triage items (lit by tier) with their actions", () => {
     const html = render({ ...initialState("po"), view: "loop" });
     expect(html).toContain("p95_latency_ms");
     // the seed's bands declare no source: the row says so instead of pretending to measure (3.4)
     expect(html).toContain("no source · add `source:` to bands.yaml");
+    expect(html).toContain("rolling 30d baseline · Western Electric rules");
     expect(html).toContain("1σ log, 2σ diagnose read-only, 3σ propose via PR or pre-approved runbook.");
     expect(html).toContain("detection every 15m · last snapshot never");
     expect(html).toContain("runbooks: rollback");
@@ -141,6 +142,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("TRI-0043");
     expect(html).toContain("Accept → Plan");
     expect(html).toContain("Dismiss · tune band");
+    expect(html).toContain('class="item edge-lit amber"');
     expect(html).not.toContain("Queue clear");
   });
   it("Security shows severity chips, statuses, actions only while new, and the governance footer", () => {
