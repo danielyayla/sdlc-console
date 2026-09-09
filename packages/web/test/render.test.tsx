@@ -14,7 +14,7 @@ const snapshot = buildSnapshot(repo, { id: PO, name: "Priya Owens", roles: ["po"
 const render = (state = initialState("po")) => renderToString(<App snapshot={snapshot} initial={state} now={now} live={false} />).replace(/<!-- -->/g, "");
 
 describe("Pipeline (spec §4)", () => {
-  it("renders six columns with the seed's eight cards, agent chips and gate strips", () => {
+  it("renders six columns with the seed's eight cards, agent words and lit gate edges", () => {
     const html = render();
     for (const name of ["01", "Plan", "02", "Design", "03", "Build", "04", "Test", "05", "Deploy", "06", "Maintain"]) expect(html).toContain(name);
     for (const id of ["CHG-0012", "CHG-0017", "CHG-0018", "CHG-0019", "CHG-0020", "CHG-0021", "CHG-0022", "CHG-0023"]) expect(html).toContain(id);
@@ -22,7 +22,10 @@ describe("Pipeline (spec §4)", () => {
     expect(html).toContain("Accept intent.md");
     expect(html).toContain("Merge PR");
     expect(html).toContain("TECH LEAD");
-    expect(html).toContain("⌁ agent");
+    expect(html).toContain('<span class="agent-text pulse">agent</span>');
+    expect(html).toContain('class="card edge-lit amber"');
+    expect(html).toContain('class="card edge-lit agent pulse"');
+    expect(html).not.toContain("gate-strip");
     expect(html).toContain("Evals red — agent fixing");
     expect(html).not.toContain("Nothing here");
     // counts for po: gates 3, loop 2, security 2 — mono numerals, not badges; hidden at 0 is exercised by eng below
@@ -125,11 +128,12 @@ describe("Loop with detection snapshots (3.4)", () => {
 });
 
 describe("Loop, Security, Metrics (spec §4)", () => {
-  it("Loop shows the bands table, the tier footer and both triage cards with their actions", () => {
+  it("Loop shows the bands table, the tier footer and both triage items (lit by tier) with their actions", () => {
     const html = render({ ...initialState("po"), view: "loop" });
     expect(html).toContain("p95_latency_ms");
     // the seed's bands declare no source: the row says so instead of pretending to measure (3.4)
     expect(html).toContain("no source · add `source:` to bands.yaml");
+    expect(html).toContain("rolling 30d baseline · Western Electric rules");
     expect(html).toContain("1σ log, 2σ diagnose read-only, 3σ propose via PR or pre-approved runbook.");
     expect(html).toContain("detection every 15m · last snapshot never");
     expect(html).toContain("runbooks: rollback");
@@ -138,20 +142,23 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("TRI-0043");
     expect(html).toContain("Accept → Plan");
     expect(html).toContain("Dismiss · tune band");
+    expect(html).toContain('class="item edge-lit amber"');
     expect(html).not.toContain("Queue clear");
   });
-  it("Security shows severity chips, statuses, actions only while new, and the governance footer", () => {
+  it("Security shows severity as the item's lit edge and word, statuses, actions only while new, and the governance footer", () => {
     const html = render({ ...initialState("eng"), view: "security" });
     expect(html).toContain("SEC-0118");
     expect(html).toContain("SEC-0120");
     expect(html).toContain("patch in PR gate");
+    expect(html).toContain('class="item edge-lit red"');
+    expect(html).not.toContain('class="chip');
     expect(html).toContain("Patch → PR gate");
     expect(html).toContain("Wider than one patch → intent.md");
     expect(html).toContain("Dismiss with reason");
     expect((html.match(/Wider than one patch/g) ?? []).length).toBe(2);
     expect(html).toContain("the proposing agent cannot approve its own fix");
   });
-  it("Metrics renders six stage cards with leading/lagging halves, source chips, the feeds header and % trend chips", () => {
+  it("Metrics renders six stage planes with leading/lagging halves, source words, the feeds line and trend words with %", () => {
     const html = render({ ...initialState("po"), view: "metrics" });
     expect((html.match(/class="half"/g) ?? []).length).toBe(12);
     expect(html).toContain("intents committed");
@@ -164,6 +171,8 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("review time per PR");
     expect(html).toContain("median of 1 · review job");
     expect(html).toContain('title="previous window: 0"');
+    expect(html).toContain('class="trend mono green-text"');
+    expect(html).not.toContain('class="chip');
     expect(html).toContain("2 incidents open, none fixed in window");
   });
 });
@@ -378,7 +387,7 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(html).toContain("succeeded");
     // the board: Deploy-stage cards carry the environment strip
     const board = render();
-    expect(board).toContain('class="env-strip"');
+    expect(board).toContain('class="env-strip mono"');
     expect(board).toContain("· staging");
   });
 

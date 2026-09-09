@@ -365,8 +365,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
   return (
     <div className="detail">
       <div className="detail-head">
-        <span><button className="btn text mono" onClick={p.onBack}>Pipeline</button> · {view.id} · {STAGE_NAMES[view.stage - 1]}{view.risk === "high" ? <> · <span className="amber-text">{riskLabel(view.risk)}</span></> : null}{view.cycle > 1 ? ` · cycle ${view.cycle}` : ""}</span>
-        {!view.valid ? <span className="chip red">validation error</span> : null}
+        <span><button className="btn text mono" onClick={p.onBack}>Pipeline</button> · {view.id} · {STAGE_NAMES[view.stage - 1]}{view.risk === "high" ? <> · <span className="amber-text">{riskLabel(view.risk)}</span></> : null}{view.cycle > 1 ? ` · cycle ${view.cycle}` : ""}{!view.valid ? <> · <span className="red-text">validation error</span></> : null}</span>
       </div>
       <h1 className="detail-title">{view.title}</h1>
 

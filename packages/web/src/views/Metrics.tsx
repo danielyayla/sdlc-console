@@ -19,12 +19,12 @@ function fmtPrev(v: MetricValue): string {
   return `previous window: ${fmt(p)}`;
 }
 
-/** ▲ green / — gray / ▼ amber (spec §4.8) with the % change against the previous window. */
-function TrendChip({ v }: { v: MetricValue }) {
-  if (v.trend === null || v.trend === "flat") return <span className="chip gray" title={fmtPrev(v)}>—{v.trend === "flat" && v.delta !== null && v.delta !== 0 ? ` ${v.delta > 0 ? "+" : ""}${v.delta}%` : ""}</span>;
+/** The trend as a word in its state colour (spec §4.8): green when it moved the better way, amber when not, muted when flat; the % change against the previous window. */
+function Trend({ v }: { v: MetricValue }) {
+  if (v.trend === null || v.trend === "flat") return <span className="trend mono muted" title={fmtPrev(v)}>flat{v.trend === "flat" && v.delta !== null && v.delta !== 0 ? ` ${v.delta > 0 ? "+" : ""}${v.delta}%` : ""}</span>;
   const good = v.trend === v.better;
   const delta = v.delta === null ? "" : ` ${v.delta > 0 ? "+" : ""}${v.delta}%`;
-  return <span className={`chip ${good ? "green" : "amber"}`} title={fmtPrev(v)}>{v.trend === "up" ? "▲" : "▼"}{delta}</span>;
+  return <span className={`trend mono ${good ? "green-text" : "amber-text"}`} title={fmtPrev(v)}>{v.trend}{delta}</span>;
 }
 
 function Half({ label, values }: { label: string; values: MetricValue[] }) {
@@ -33,7 +33,7 @@ function Half({ label, values }: { label: string; values: MetricValue[] }) {
       <div className="eyebrow">{label}</div>
       {values.map((v) => (
         <div className="metric" key={v.key}>
-          <div className="metric-head"><span className="metric-name">{v.name}</span><span className="metric-sources">{v.sources.join(" · ")}</span><TrendChip v={v} /></div>
+          <div className="metric-head"><span className="metric-name">{v.name}</span><span className="metric-sources">{v.sources.join(" · ")}</span><Trend v={v} /></div>
           <div className="metric-value">{fmt(v)}</div>
           <div className="metric-note">{v.note}</div>
         </div>
@@ -57,17 +57,20 @@ function via(s: SourceStatus): string {
 export function Metrics({ metrics, sources }: { metrics: StageMetrics[]; sources?: MetricSourcesStatus }) {
   return (
     <div className="metrics">
+      <div className="view-head metrics-head">
+        <h1 className="primary">Metrics</h1>
+        <span className="mono faint">30-day window vs the 30 days before</span>
+      </div>
       {sources ? (
-        <div className="metrics-sources">
-          <span className="eyebrow">Sources</span>
+        <div className="metrics-sources mono">
+          <span className="faint">sources</span>
           {FEEDS.map((f) => (
-            <span key={f.key} className={`chip ${sources[f.key].via === "none" ? "amber" : "gray"}`}>{f.label} · {via(sources[f.key])}</span>
+            <span key={f.key} className={sources[f.key].via === "none" ? "amber-text" : "muted"}>{f.label} · {via(sources[f.key])}</span>
           ))}
-          <span className="muted">30-day window vs the 30 days before</span>
         </div>
       ) : null}
       {metrics.map((s) => (
-        <section className="panel" key={s.stage}>
+        <section className="stage-plane" key={s.stage}>
           <div className="column-head"><span className="column-num">{String(s.stage).padStart(2, "0")}</span><span>{s.name}</span><span className="column-count">30 days</span></div>
           <div className="halves">
             <Half label="Leading" values={s.leading} />
