@@ -137,7 +137,7 @@ describe("Loop with detection snapshots (3.4)", () => {
     const withSnapshots = buildSnapshot(measured, { id: PO, name: "Priya Owens", roles: ["po", "eng"] }, seedSessions() as never, 1, now, undefined, snapshots);
     const jobs = [{ key: "band:p95_latency_ms:3σ:" + ts, kind: "propose", changeId: "", cycle: 0, stage: 6, state: "running", createdAt: ts, updatedAt: ts, sessionId: "sess-band1", error: null, note: null, traceId: null }];
     const html = renderToString(<App snapshot={withSnapshots} initial={{ ...initialState("po"), view: "loop" }} now={now} live={false} jobs={jobs} />).replace(/<!-- -->/g, "");
-    expect(html).toContain('class="breached"');
+    expect(html).toContain('class="amber-text">842 ms'); // the current value goes amber on a breach; no row tint
     expect(html).toContain("842 ms");
     expect(html).toContain("3σ</span>");
     expect(html).toContain("3σ · propose · TRI-0042 · " + ts);
@@ -145,7 +145,7 @@ describe("Loop with detection snapshots (3.4)", () => {
     expect(html).toContain("propose running · sess-band1");
     expect(html).toContain("0.45 %");
     expect(html).toContain("within 1σ · " + ts);
-    expect(html).toContain("last snapshot " + ts);
+    expect(html).toContain("last " + ts);
   });
 });
 
@@ -156,9 +156,9 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("p95_latency_ms");
     // the seed's bands declare no source: the row says so instead of pretending to measure (3.4)
     expect(html).toContain("no source · add `source:` to bands.yaml");
-    expect(html).toContain("rolling 30d baseline · Western Electric rules");
+    expect(html).toContain("rolling 30d · Western Electric · detection every 15m · last never");
     expect(html).toContain("1σ log, 2σ diagnose read-only, 3σ propose via PR or pre-approved runbook.");
-    expect(html).toContain("detection every 15m · last snapshot never");
+    expect(html).not.toContain("<table");
     expect(html).toContain("runbooks: rollback");
     expect(html).not.toContain("Run detection"); // no engine injected
     expect(html).toContain("TRI-0042");
