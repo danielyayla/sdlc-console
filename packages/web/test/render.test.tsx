@@ -102,13 +102,14 @@ describe("Gates (acceptance e)", () => {
     const po = render({ ...initialState("po"), view: "gates" });
     expect(po).toContain("decisions wait on the product owner.");
     expect(po).toContain('class="grow edge-lit amber"');
-    expect(po.indexOf("CHG-0022")).toBeLessThan(po.indexOf("Other role"));
-    expect(po.indexOf("CHG-0020")).toBeGreaterThan(po.indexOf("Other role"));
+    expect(po.indexOf("CHG-0022")).toBeLessThan(po.indexOf("Waiting on the engineer or tech lead"));
+    expect(po.indexOf("CHG-0020")).toBeGreaterThan(po.indexOf("Waiting on the engineer or tech lead"));
     const eng = render({ ...initialState("eng"), view: "gates" });
     expect(eng).toContain("decisions wait on the engineer.");
-    expect(eng.indexOf("CHG-0020")).toBeLessThan(eng.indexOf("Other role"));
-    expect(eng.indexOf("CHG-0022")).toBeGreaterThan(eng.indexOf("Other role"));
+    expect(eng.indexOf("CHG-0020")).toBeLessThan(eng.indexOf("Waiting on the product owner or tech lead"));
+    expect(eng.indexOf("CHG-0022")).toBeGreaterThan(eng.indexOf("Waiting on the product owner or tech lead"));
     expect(eng).toContain('class="count">2<');
+    expect(eng).not.toContain("Other role");
   });
   it("Pipeline and Gates headline numbers agree", () => {
     const count = (html: string) => {
