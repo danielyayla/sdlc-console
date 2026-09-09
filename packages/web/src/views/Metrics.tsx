@@ -27,21 +27,6 @@ function Trend({ v }: { v: MetricValue }) {
   return <span className={`trend mono ${good ? "green-text" : "amber-text"}`} title={fmtPrev(v)}>{v.trend}{delta}</span>;
 }
 
-function Half({ label, values }: { label: string; values: MetricValue[] }) {
-  return (
-    <div className="half">
-      <div className="eyebrow">{label}</div>
-      {values.map((v) => (
-        <div className="metric" key={v.key}>
-          <div className="metric-head"><span className="metric-name">{v.name}</span><span className="metric-sources">{v.sources.join(" · ")}</span><Trend v={v} /></div>
-          <div className="metric-value">{fmt(v)}</div>
-          <div className="metric-note">{v.note}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 const FEEDS: { key: keyof MetricSourcesStatus; label: string }[] = [
   { key: "pr", label: "PR metadata" },
   { key: "ci", label: "CI" },
@@ -62,15 +47,20 @@ export function Metrics({ metrics, sources }: { metrics: StageMetrics[]; sources
         <span>30-day window vs the 30 before</span>
         {sources ? FEEDS.map((f) => <span key={f.key} className={sources[f.key].via === "none" ? "amber-text" : ""}>{f.label} · {via(sources[f.key])}</span>) : null}
       </div>
-      {metrics.map((s) => (
-        <section className="stage-plane" key={s.stage}>
-          <div className="column-head"><span className="column-num">{String(s.stage).padStart(2, "0")}</span><span>{s.name}</span></div>
-          <div className="halves">
-            <Half label="Leading" values={s.leading} />
-            <Half label="Lagging" values={s.lagging} />
-          </div>
-        </section>
-      ))}
+      <div className="mgrid">
+        {metrics.map((s) => (
+          <section className="mstage" key={s.stage} aria-label={`${s.stage} ${s.name}`}>
+            <div className="mstage-head mono">{String(s.stage).padStart(2, "0")} {s.name}</div>
+            {[...s.leading.map((v) => ({ v, kind: "leading" })), ...s.lagging.map((v) => ({ v, kind: "lagging" }))].map(({ v, kind }) => (
+              <div className="mrow" key={v.key}>
+                <div className="mvalue-row"><span className="mvalue tabular">{fmt(v)}</span><Trend v={v} /><span className="mkind mono">{kind}</span></div>
+                <div className="mname">{v.name}</div>
+                <div className="mono faint">{v.note} · {v.sources.join(" · ")}</div>
+              </div>
+            ))}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

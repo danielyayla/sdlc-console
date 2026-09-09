@@ -192,7 +192,10 @@ describe("Loop, Security, Metrics (spec §4)", () => {
   });
   it("Metrics renders six stage planes with leading/lagging halves, source words, the feeds line and trend words with %", () => {
     const html = render({ ...initialState("po"), view: "metrics" });
-    expect((html.match(/class="half"/g) ?? []).length).toBe(12);
+    expect((html.match(/class="mstage"/g) ?? []).length).toBe(6);
+    expect(html).toContain('class="mkind mono">leading<');
+    expect(html).not.toContain(">Leading<");
+    expect(html).not.toContain(">Lagging<");
     expect(html).toContain("intents committed");
     expect(html).toContain("n/a · needs detection snapshots");
     expect(html).toContain("first-pass green");
@@ -202,9 +205,9 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("30-day window vs the 30 before");
     expect(html).not.toContain("30 days");
     expect(html).not.toContain("metrics-sources");
-    expect(html).toContain('<span class="metric-sources">pr</span>');
+    expect(html).not.toContain("metric-sources");
     expect(html).toContain("review time per PR");
-    expect(html).toContain("median of 1 · review job");
+    expect(html).toContain("median of 1 · review job · pr"); // note · sources on one mono line
     expect(html).toContain('title="previous window: 0"');
     expect(html).toContain('class="trend mono green-text"');
     expect(html).not.toContain('class="chip');
