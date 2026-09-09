@@ -281,9 +281,13 @@ a:hover { color: var(--accent-hover); }
 /* sessions */
 .sessions { max-width: 960px; }
 .sessions-head { display: flex; align-items: baseline; gap: 20px; margin-bottom: 12px; flex-wrap: wrap; }
-.newsession { display: flex; gap: 8px; margin-left: auto; align-items: center; }
-.newsession select, .newsession input { background: var(--bg-raised); color: var(--text-primary); border: 0; border-bottom: 1px solid var(--border-default); padding: 8px 0; font: inherit; }
-.newsession input { width: 320px; }
+.sessions-head .primary { margin: 0; }
+.composer { margin-top: var(--s-5); background: var(--bg-panel); padding: 20px 24px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) auto auto; gap: var(--s-4); align-items: end; }
+.composer label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.composer select, .composer input { background: var(--bg-raised); color: var(--text-primary); border: 0; border-bottom: 1px solid var(--border-default); border-radius: 0; padding: 8px 0; font: inherit; min-width: 0; }
+.composer select:focus, .composer input:focus { outline: none; border-bottom-color: var(--accent); }
+.composer .btn.primary { height: 36px; }
+.composer .btn.text { padding-bottom: 8px; }
 .session-list { display: flex; flex-direction: column; gap: 2px; margin-top: var(--s-6); }
 .srow { padding: 16px 24px; transition: background 0.12s; }
 .smeta { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-faint); }

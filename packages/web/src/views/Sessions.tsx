@@ -100,6 +100,7 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
   const [changeId, setChangeId] = useState(candidates[0]?.id ?? "");
   const selected: ChangeView | undefined = byId.get(changeId);
   const [target, setTarget] = useState("");
+  const [composerOpen, setComposerOpen] = useState(false);
   const [open, setOpen] = useState<{ session: string; n: number } | null>(null);
   const verificationMissing = !snapshot.claudeMd?.verification || snapshot.claudeMd.verification.commands.length === 0;
   const targetValue = target || selected?.acceptanceLine || "";
@@ -108,28 +109,42 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, form, onForm, 
   return (
     <div className="sessions">
       <div className="sessions-head">
-        <span className="eyebrow">{header}</span>
+        <h1 className="primary">Sessions</h1>
+        <span className="mono faint">{header}</span>
+        <span className="spacer" />
+        {composerOpen ? null : <button className="btn text accent-text" onClick={() => setComposerOpen(true)}>New session</button>}
+      </div>
+      {composerOpen ? (
         <form
-          className="newsession"
+          className="composer"
+          aria-label="new session"
           onSubmit={(e) => {
             e.preventDefault();
             if (!changeId) return;
+            setComposerOpen(false);
             onStart({ changeId, ...(targetValue ? { target: targetValue } : {}) });
           }}
         >
-          <select value={changeId} onChange={(e) => { setChangeId(e.target.value); setTarget(""); }} aria-label="change">
-            {candidates.map((c) => <option key={c.id} value={c.id}>{c.id} · {c.stageName} · {c.title}</option>)}
-          </select>
-          <input value={targetValue} onChange={(e) => setTarget(e.target.value)} placeholder="target — quantifiable: which tests, which endpoint, which mock" aria-label="target" />
+          <label>
+            <span className="mono faint">change</span>
+            <select value={changeId} onChange={(e) => { setChangeId(e.target.value); setTarget(""); }} aria-label="change">
+              {candidates.map((c) => <option key={c.id} value={c.id}>{c.id} · {c.stageName} · {c.title}</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="mono faint">target — which tests, which endpoint, which mock</span>
+            <input value={targetValue} onChange={(e) => setTarget(e.target.value)} aria-label="target" autoFocus />
+          </label>
           <button className="btn primary" type="submit" disabled={cap.over || !changeId || (needsTarget && targetValue.trim() === "")} title={cap.over ? `review backlog ${cap.backlog} over the ceiling ${cap.ceiling} — review finished sessions first` : needsTarget && targetValue.trim() === "" ? "waiting on you: define done" : "start a session"}>
-            New session
+            Start
           </button>
+          <button className="btn text" type="button" onClick={() => setComposerOpen(false)}>Cancel</button>
         </form>
-      </div>
-      {cap.over ? <div className="banner">review backlog {cap.backlog} is over the ceiling of {cap.ceiling} — review finished sessions before starting another (New session is disabled)</div> : null}
-      {verificationMissing ? <div className="banner">no feedback loop — set up verification in CLAUDE.md ("Verifying your work"); sessions cannot run AUTO</div> : null}
-      {selected?.visual.warning ? <div className="banner">{selected.id}: {selected.visual.warning}</div> : null}
-      {sessions.length === 0 ? <div className="empty">No sessions yet.</div> : null}
+      ) : null}
+      {cap.over ? <div className="snote amber-text">review backlog {cap.backlog} is over the ceiling of {cap.ceiling} — review finished sessions before starting another (Start is disabled)</div> : null}
+      {verificationMissing ? <div className="snote amber-text">no feedback loop — set up verification in CLAUDE.md ("Verifying your work"); sessions cannot run AUTO</div> : null}
+      {composerOpen && selected?.visual.warning ? <div className="snote amber-text">{selected.id}: {selected.visual.warning}</div> : null}
+      {sessions.length === 0 ? <div className="empty mono">Nothing here</div> : null}
       <div className="session-list">
         {sessions.map((s) => {
           const running = s.status === "running";
