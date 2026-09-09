@@ -14,6 +14,9 @@
       "path": "packages/adapters/github/tsconfig.build.json"
     },
     {
+      "path": "packages/adapters/gitlab/tsconfig.build.json"
+    },
+    {
       "path": "packages/detect/tsconfig.build.json"
     },
     {
@@ -27,6 +30,9 @@
     },
     {
       "path": "packages/cli/tsconfig.build.json"
+    },
+    {
+      "path": "packages/desktop/tsconfig.build.json"
     },
     {
       "path": "fixtures/tsconfig.build.json"

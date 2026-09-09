@@ -16,6 +16,7 @@
   "dependencies": {
     "@sdlc/adapter-git": "workspace:*",
     "@sdlc/adapter-github": "workspace:*",
+    "@sdlc/adapter-gitlab": "workspace:*",
     "@sdlc/core": "workspace:*",
     "@sdlc/detect": "workspace:*",
     "@sdlc/hooks": "workspace:*",

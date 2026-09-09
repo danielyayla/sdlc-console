@@ -22,4 +22,5 @@ export * from "./maintain/index.js";
 export * from "./intake/index.js";
 export * from "./deploy/index.js";
 export * from "./github/index.js";
+export * from "./gitlab/index.js";
 export * from "./otel.js";

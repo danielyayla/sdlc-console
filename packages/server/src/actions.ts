@@ -1,7 +1,6 @@
 import { CodeHostError, git, mergeIfUnmerged } from "@sdlc/adapter-git";
-import { codeHostFor } from "./engine/codehost.js";
+import { codeHostFor, hostedCodeHostFor } from "./engine/codehost.js";
 import { acceptViaPr, artifactPrFor, commitOnBranch, sendBackViaPr } from "./github/artifacts.js";
-import type { GitHubCodeHost } from "@sdlc/adapter-github";
 import {
   accept,
   acceptTriage,
@@ -69,19 +68,19 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
     try {
       const host = codeHostFor(repo.config.codeHost, env);
       mergeSha = await host.merge(root, before.pr, `sdlc(${id}): merge ${before.pr.branch} (gate 5)`, store.who);
-      if (host.provider === "github") source = "pr.merge";
+      if (host.provider !== "local") source = "pr.merge";
     } catch (e) {
       const retryable = e instanceof CodeHostError ? e.retryable : true;
       throw new ActionError(retryable ? 502 : 409, `merge refused: ${(e as Error).message}`, [], retryable);
     }
   }
-  if (gate !== 5 && repo.config.codeHost === "github" && artifactPrFor(before, gate, store.current?.branches)) {
-    // GitHub mode: the artifact is a pull request; accepting is merging it
-    const host = codeHostFor("github", env) as GitHubCodeHost;
+  if (gate !== 5 && repo.config.codeHost !== "local" && artifactPrFor(before, gate, store.current?.branches)) {
+    // hosted mode: the artifact is a pull request (merge request on GitLab); accepting is merging it
+    const host = hostedCodeHostFor(repo.config.codeHost, env);
     const r = await acceptViaPr({ host, identity: store.who, ...(store.committer ? { committer: store.committer } : {}) }, store, id, gate);
     const snap = store.current ?? (await store.refresh());
     const after = snap.changes.find((c) => c.id === id);
-    const toast = gate === 6 ? `Loop closed — ${id} re-entered Plan` : `${before.gate?.label ?? `gate ${gate}`} — ${id} moved to ${after ? stageDef(after.stage).name : "next stage"} (PR #${r.number} merged)`;
+    const toast = gate === 6 ? `Loop closed — ${id} re-entered Plan` : `${before.gate?.label ?? `gate ${gate}`} — ${id} moved to ${after ? stageDef(after.stage).name : "next stage"} (${host.label(r.number)} merged)`;
     return { commit: r.commit, snapshot: snap, toast, changeId: id };
   }
   if (gate !== 5) {
@@ -106,12 +105,12 @@ export async function acceptGate(store: StateStore, id: string, gate: GateNumber
 export async function sendBackGate(store: StateStore, id: string, gate: GateNumber, feedback: string, env: Record<string, string | undefined> = process.env): Promise<ActionResult> {
   await store.refresh();
   const repo0 = store.currentRepo;
-  if (repo0 && gate !== 5 && repo0.config.codeHost === "github" && artifactPrFor(view(repo0, id), gate, store.current?.branches)) {
-    const host = codeHostFor("github", env) as GitHubCodeHost;
+  if (repo0 && gate !== 5 && repo0.config.codeHost !== "local" && artifactPrFor(view(repo0, id), gate, store.current?.branches)) {
+    const host = hostedCodeHostFor(repo0.config.codeHost, env);
     const r = await sendBackViaPr({ host, identity: store.who, ...(store.committer ? { committer: store.committer } : {}) }, store, id, gate, feedback);
     const snap = store.current ?? (await store.refresh());
     const after = snap.changes.find((c) => c.id === id);
-    return { commit: r.commit, snapshot: snap, toast: `${after ? stageDef(after.stage).file : "artifact"} sent back on PR #${r.number} — ${id} stays in ${after ? stageDef(after.stage).name : "stage"}`, changeId: id };
+    return { commit: r.commit, snapshot: snap, toast: `${after ? stageDef(after.stage).file : "artifact"} sent back on ${host.label(r.number)} — ${id} stays in ${after ? stageDef(after.stage).name : "stage"}`, changeId: id };
   }
   const r = await store.act((repo, ctx) => sendBack(repo, view(repo, id), gate, feedback, { ...ctx, source: "console" }));
   const after = r.snapshot.changes.find((c) => c.id === id);
@@ -126,8 +125,8 @@ export async function loopChange(store: StateStore, id: string): Promise<ActionR
 export async function newChange(store: StateStore, input: CreateChangeInput): Promise<ActionResult> {
   await store.refresh();
   const repo0 = store.currentRepo;
-  if (repo0?.config.codeHost === "github") {
-    // GitHub mode: the intent is an artifact PR like spec, plan and incident — the change is born on sdlc/<CHG>/intent,
+  if (repo0 && repo0.config.codeHost !== "local") {
+    // hosted mode: the intent is an artifact PR like spec, plan and incident — the change is born on sdlc/<CHG>/intent,
     // the engine (or sdlc sync) opens the PR, and merging it is the gate 1 decision that puts the change on the default branch
     const res = createChange(repo0, input, store.context());
     if (!res.ok) throw new ActionError(409, res.diagnostics[0]?.message ?? "change refused", res.diagnostics);

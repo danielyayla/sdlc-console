@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -747,5 +747,41 @@ describe("deployment (3.6): sdlc deploy, sdlc rehearse-rollback, sdlc production
     expect(readFileSync(join(dir, ".claude/hooks/production-gate.sh"), "utf8")).toContain("exec sdlc hook production-gate");
     const hook = await sdlc(dir, ["hook", "production-gate"], {}, JSON.stringify({ session_id: "s", cwd: dir, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "echo deploy" } }));
     expect(hook.code).toBe(0);
+  });
+});
+
+describe("GitLab CI (3.7)", () => {
+  it("init --code-host gitlab writes config.codeHost: gitlab and .gitlab-ci.yml carrying the same jobs as the GitHub workflows, once; the token never sits in a URL", async () => {
+    const dir = await freshRepo();
+    put(dir, "pnpm-lock.yaml", "lockfileVersion: 9\n");
+    const first = await sdlc(dir, ["init", "--code-host", "gitlab", "--sdlc-bin", "node tools/sdlc/bin.js", "--json"]);
+    expect(first.code).toBe(0);
+    const created = first.json<{ created: string[] }>().created;
+    expect(created).toContain(".gitlab-ci.yml");
+    expect(created.some((f) => f.startsWith(".github/workflows/"))).toBe(false);
+    expect(readFileSync(join(dir, "sdlc/config.yaml"), "utf8")).toContain("codeHost: gitlab");
+    const ci = readFileSync(join(dir, ".gitlab-ci.yml"), "utf8");
+    for (const job of ["sdlc-validate:", "sdlc-evals:", "sdlc-detect:", "sdlc-production-gate:"]) expect(ci).toContain(job);
+    expect(ci).toContain("node tools/sdlc/bin.js validate");
+    expect(ci).toContain('node tools/sdlc/bin.js evals run --trigger "$TRIGGER" --json');
+    expect(ci).toContain("node tools/sdlc/bin.js evals gate");
+    expect(ci).toContain("node tools/sdlc/bin.js detect");
+    expect(ci).toContain('node tools/sdlc/bin.js production-gate $SDLC_CHANGE --sha "$CI_COMMIT_SHA" --publish');
+    expect(ci).toContain("pnpm install --frozen-lockfile");
+    expect(ci).toContain("GITLAB_TOKEN: $SDLC_GITLAB_TOKEN");
+    expect(ci).toContain("credential.helper=");
+    expect(ci).not.toMatch(/https:\/\/[^"\s]*\$SDLC_GITLAB_TOKEN/);
+    expect(ci).toContain('$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH');
+    expect(ci).not.toContain("npx sdlc");
+    const second = await sdlc(dir, ["init", "--code-host", "gitlab", "--json"]);
+    expect(second.json<{ skipped: string[] }>().skipped).toContain(".gitlab-ci.yml");
+    // the default stays local + GitHub workflows; a wrong host is refused
+    const gh = await freshRepo();
+    await sdlc(gh, ["init", "--json"]);
+    expect(readFileSync(join(gh, "sdlc/config.yaml"), "utf8")).toContain("codeHost: local");
+    expect(existsSync(join(gh, ".gitlab-ci.yml"))).toBe(false);
+    const bad = await sdlc(await freshRepo(), ["init", "--code-host", "bitbucket", "--json"]);
+    expect(bad.code).not.toBe(0);
+    expect(`${bad.out}${bad.err}`).toContain("--code-host must be local, github or gitlab");
   });
 });

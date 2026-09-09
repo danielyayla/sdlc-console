@@ -21,7 +21,8 @@
       "type": "string",
       "enum": [
         "local",
-        "github"
+        "github",
+        "gitlab"
       ]
     },
     "identities": {
@@ -53,6 +54,10 @@
             }
           },
           "github": {
+            "type": "string",
+            "minLength": 1
+          },
+          "gitlab": {
             "type": "string",
             "minLength": 1
           },
@@ -412,6 +417,194 @@
           "incident"
         ]
       }
+    },
+    "harness": {
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "claude-code"
+                },
+                "bin": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "jobs": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "intent",
+                      "design",
+                      "plan",
+                      "build",
+                      "review",
+                      "diagnose",
+                      "propose"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "command"
+                },
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                },
+                "command": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "env": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "jobs": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "intent",
+                      "design",
+                      "plan",
+                      "build",
+                      "review",
+                      "diagnose",
+                      "propose"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "command"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "claude-code"
+                  },
+                  "bin": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "jobs": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "intent",
+                        "design",
+                        "plan",
+                        "build",
+                        "review",
+                        "diagnose",
+                        "propose"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "command"
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "env": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "jobs": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "intent",
+                        "design",
+                        "plan",
+                        "build",
+                        "review",
+                        "diagnose",
+                        "propose"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "command"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      ]
     }
   },
   "required": [

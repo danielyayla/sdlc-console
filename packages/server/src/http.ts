@@ -2,7 +2,7 @@ import { collectSources, type FactsCache } from "./metrics/index.js";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
-import { gitRaw, ledgerCommits } from "@sdlc/adapter-git";
+import { gitRaw, ledgerCommits, prLabel } from "@sdlc/adapter-git";
 import { computeMetrics, deriveAll, deriveChange, exportChange, parseWindow, readFile, renderChangeExportMarkdown, type ArtifactIndex, type Tree } from "@sdlc/core";
 import type { Tracer } from "./otel.js";
 import type { Snapshot } from "./snapshot.js";
@@ -31,6 +31,7 @@ import {
 } from "./actions.js";
 import type { Engine, JobStore } from "./engine/index.js";
 import { receiveWebhook, type DeliveryLog } from "./github/webhooks.js";
+import { receiveGitLabWebhook } from "./gitlab/webhooks.js";
 import { intakeStatus, receiveIntake } from "./intake/index.js";
 import { clearRepro, downgradeSession, launchSession, markReproRejected, reproDraftFor, resumeAfterRepro, stopSession, verifyReproCommit, type LaunchDeps, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { acceptProposalAction } from "./proposals.js";
@@ -522,6 +523,8 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           path: "/api/webhooks/github",
           enabled: Boolean(env["GITHUB_WEBHOOK_SECRET"]) && Boolean(o.engine) && Boolean(o.deliveries),
           secretSet: Boolean(env["GITHUB_WEBHOOK_SECRET"]),
+          // GitLab receiver (3.7): token-verified deliveries under SDLC_GITLAB_WEBHOOK_SECRET
+          gitlab: { path: "/api/webhooks/gitlab", enabled: Boolean(env["SDLC_GITLAB_WEBHOOK_SECRET"]) && Boolean(o.engine) && Boolean(o.deliveries), secretSet: Boolean(env["SDLC_GITLAB_WEBHOOK_SECRET"]) },
           engine: Boolean(o.engine),
           lastDeliveryAt: last > 0 ? new Date(last).toISOString() : null,
           lastPollAt: (o.engine?.lastSyncAt ?? 0) > 0 ? new Date(o.engine?.lastSyncAt ?? 0).toISOString() : null,
@@ -544,13 +547,20 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         json(res, r.status, r.body);
         return;
       }
+      if (method === "POST" && parts[2] === "gitlab" && parts.length === 3) {
+        const body = await readRaw(req, 1024 * 1024);
+        const r = await receiveGitLabWebhook({ store, engine: o.engine ?? null, deliveries: o.deliveries ?? null, env }, { headers: { event: header(req, "x-gitlab-event"), uuid: header(req, "x-gitlab-event-uuid"), token: header(req, "x-gitlab-token") }, body });
+        json(res, r.status, r.body);
+        return;
+      }
       throw new ActionError(404, "not found");
     }
     if (parts[1] === "sync" && method === "POST") {
       if (!o.engine) throw new ActionError(409, "sync needs the engine (start the server with sdlcBin)");
       const summary = await o.engine.sync();
-      if (!summary) throw new ActionError(409, "GitHub sync is off: config.codeHost is not github or GITHUB_TOKEN is not set");
-      const toast = `sync: ${summary.opened.length} PR(s) opened · ${summary.pushed.length} PR(s) updated · ${summary.merges.filter((m) => m.recorded).length} merge(s) recorded · records ${summary.records.pushed ? `PR #${summary.records.number ?? "?"} (${summary.records.ahead} ahead)` : summary.records.error ? `failed: ${summary.records.error}` : "in sync"}${summary.errors.length > 0 ? ` · ${summary.errors.length} error(s)` : ""}`;
+      if (!summary) throw new ActionError(409, "code-host sync is off: config.codeHost is local, or no token (GITHUB_TOKEN / GITLAB_TOKEN) is set");
+      const kind = prLabel(store.currentRepo?.config.codeHost ?? "local", undefined);
+      const toast = `sync: ${summary.opened.length} ${kind}(s) opened · ${summary.pushed.length} ${kind}(s) updated · ${summary.merges.filter((m) => m.recorded).length} merge(s) recorded · records ${summary.records.pushed ? `${prLabel(store.currentRepo?.config.codeHost ?? "local", summary.records.number ?? 0)} (${summary.records.ahead} ahead)` : summary.records.error ? `failed: ${summary.records.error}` : "in sync"}${summary.errors.length > 0 ? ` · ${summary.errors.length} error(s)` : ""}`;
       json(res, 200, { ok: true, sync: summary, toast, revision: store.current?.revision ?? 0 });
       return;
     }

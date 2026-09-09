@@ -108,8 +108,8 @@ export async function productionGateCommand(ctx: CliContext, id: string | undefi
   const verdict = check.productionGate(view);
   const gate = view.deploy.productionGate;
   const published: string[] = [];
-  if (opts.publish && repo.config.codeHost === "github" && gate?.sha) {
-    const host = codeHostFor("github", ctx.io.env);
+  if (opts.publish && repo.config.codeHost !== "local" && gate?.sha) {
+    const host = codeHostFor(repo.config.codeHost, ctx.io.env);
     const c = rollbackCheckFor(view, repo);
     for (const sha of [...new Set([gate.sha, view.pr?.headSha].filter((s): s is string => typeof s === "string"))]) {
       await host.publishCheck(ctx.root, sha, c, view.pr?.url);

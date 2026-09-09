@@ -30,6 +30,8 @@ export const identity = z.strictObject({
   skillsOwned: z.array(nonEmpty).optional(),
   /** Code-host login, so a merge performed on GitHub can be attributed to this identity. */
   github: nonEmpty.optional(),
+  /** GitLab username, so a merge request merged on GitLab can be attributed to this identity (3.7). */
+  gitlab: nonEmpty.optional(),
   /** OIDC subject (`sub`) in hosted mode; without it the provider's `auth.claim` (email by default) must equal `id`. */
   subject: nonEmpty.optional(),
 });
@@ -48,6 +50,39 @@ export const auth = z.strictObject({
   publicUrl: z.string().url().optional(),
   sessionHours: z.number().int().min(1).max(24 * 30).optional(),
 });
+
+/** Session kinds a harness entry may be scoped to (`harness[].jobs`). */
+export const harnessJobKind = z.enum(["intent", "design", "plan", "build", "review", "diagnose", "propose"]);
+
+/**
+ * A harness the console launches sessions through (3.8). `claude-code` is
+ * the built-in with every managed guarantee honoured (hooks, tool allowlist,
+ * stream-json transcript, cost). `command` runs any CLI agent: the console
+ * hands it the prompt file, the per-session MCP config and the allowed-tools
+ * list through `{placeholders}` in `args`/`env` and through `SDLC_*` env, and
+ * declares which guarantees it cannot honour (no hooks, no allowlist, no
+ * transcript, no cost) — those are shown on the session and stood in for
+ * server-side where a real check exists. `jobs` scopes an entry to session
+ * kinds; an entry without `jobs` is the default for every kind.
+ */
+export const harnessSpec = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("claude-code"),
+    /** Executable (default `claude`, or `SDLC_CLAUDE_BIN`). */
+    bin: nonEmpty.optional(),
+    jobs: z.array(harnessJobKind).min(1).optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("command"),
+    /** Name shown on the session and recorded on the ledger (default `command`). */
+    id: z.string().regex(/^[a-z][a-z0-9-]*$/, "expected a harness slug").optional(),
+    command: nonEmpty,
+    /** Placeholders: {prompt} {promptFile} {mcpConfig} {allowedTools} {worktree} {sessionId} {harnessSessionId} {readOnly}. */
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    jobs: z.array(harnessJobKind).min(1).optional(),
+  }),
+]);
 
 export const thresholds = z.strictObject({
   /** files-in-plan ≤ this → AUTO eligible term holds */
@@ -96,7 +131,7 @@ export const config = z.strictObject({
   defaultRole: z.enum(["po", "eng"]),
   defaultBranch: z.string().optional(),
   /** Where gates that need a PR are executed; local mode has no PRs and lets a tech lead accept high-risk plans via CLI. */
-  codeHost: z.enum(["local", "github"]).optional(),
+  codeHost: z.enum(["local", "github", "gitlab"]).optional(),
   identities: z.array(identity).min(1),
   /** Hosted mode login; absent = local mode (git identity + role switcher). */
   auth: auth.optional(),
@@ -135,10 +170,14 @@ export const config = z.strictObject({
   environments: z.array(environment).optional(),
   /** Artifact names whose acceptance is recorded elsewhere; informational. */
   artifacts: z.array(artifactName).optional(),
+  /** Harnesses sessions run through (3.8), one entry or a list; absent = Claude Code for everything. */
+  harness: z.union([harnessSpec, z.array(harnessSpec).min(1)]).optional(),
 });
 
 export type Config = z.infer<typeof config>;
 export type Identity = z.infer<typeof identity>;
 export type Environment = z.infer<typeof environment>;
 export type Thresholds = z.infer<typeof thresholds>;
+export type HarnessSpec = z.infer<typeof harnessSpec>;
+export type HarnessJobKind = z.infer<typeof harnessJobKind>;
 export type RecordsMapping = z.infer<typeof recordsMapping>;

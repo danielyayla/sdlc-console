@@ -95,10 +95,10 @@ export function checkGate(
   if (view.closed) return fail("change.closed", `${view.id} is closed`);
   if (!view.gate) return fail("gate.closed", `${view.id} has no open gate (stage ${view.stage}: ${view.status})`);
   if (view.gate.s !== gate) return fail("gate.mismatch", `${view.id} is waiting at gate ${view.gate.s}, not gate ${gate}`);
-  const owner = gateOwner(gate, view.risk, repo.config.codeHost === "github" ? "github" : "local");
+  const owner = gateOwner(gate, view.risk, repo.config.codeHost);
   const viaCodeHost = ctx.source === "pr.merge";
   if (owner.mode === "via_branch_protection" && !viaCodeHost) return fail("gate.via-code-host", "this gate is accepted by merging the PR on the code host");
-  if (owner.mode === "via_pr" && repo.config.codeHost === "github" && !viaCodeHost) return fail("gate.via-pr", "high-risk plans are accepted by merging the plan PR");
+  if (owner.mode === "via_pr" && repo.config.codeHost !== "local" && !viaCodeHost) return fail("gate.via-pr", "high-risk plans are accepted by merging the plan PR");
   if (!holdsRole(repo.config, ctx.actor.id, owner.role)) {
     return fail("gate.not-owner", `${ctx.actor.id} does not hold the ${ROLE_LABELS[owner.role]} role that owns gate ${gate}`);
   }

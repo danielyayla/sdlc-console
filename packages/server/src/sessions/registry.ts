@@ -9,7 +9,8 @@ import type { RoundResult } from "@sdlc/schemas";
 import type { SessionRecord } from "../snapshot.js";
 
 export type SessionKind = "intent" | "design" | "plan" | "build" | "review" | "diagnose" | "propose";
-export type SessionStatus = "running" | "waiting" | "done" | "error" | "stopped" | "taken_over" | "awaiting_engineer";
+/** `done-unverified` (3.8): a harness without a Stop hook exited "done" but the last recorded round was not green; no run follows. */
+export type SessionStatus = "running" | "waiting" | "done" | "done-unverified" | "error" | "stopped" | "taken_over" | "awaiting_engineer";
 
 /** Runtime record (C): rebuildable; the ledger keeps the summary lines. */
 export interface SessionLoop {
@@ -50,6 +51,10 @@ export interface StoredSession extends SessionRecord {
   spanId?: string | null;
   /** A band diagnose/propose session (3.4): no change, the breached metric and its triage item instead; `changeId` is "". */
   band?: { metric: string; tier: 2 | 3; snapshotTs: string; triageId: string; job: string } | null;
+  /** The harness the session runs through (3.8) and the guarantees it cannot honour, verbatim as recorded on `session.started`. */
+  harness?: { id: string; degraded: { guarantee: string; reason: string }[] } | null;
+  /** A server-side check that stood in for a hook the harness lacks (3.8): verify-before-done at exit, with the verdict verbatim. */
+  standIn?: { guarantee: string; allowed: boolean; reason: string; rounds: number } | null;
 }
 
 interface Row {

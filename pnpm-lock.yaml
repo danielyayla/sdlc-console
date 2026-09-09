@@ -67,6 +67,18 @@ importers:
         specifier: workspace:*
         version: link:../../schemas
 
+  packages/adapters/gitlab:
+    dependencies:
+      '@sdlc/adapter-git':
+        specifier: workspace:*
+        version: link:../git
+      '@sdlc/core':
+        specifier: workspace:*
+        version: link:../../core
+      '@sdlc/schemas':
+        specifier: workspace:*
+        version: link:../../schemas
+
   packages/cli:
     dependencies:
       '@sdlc/adapter-git':
@@ -75,6 +87,9 @@ importers:
       '@sdlc/adapter-github':
         specifier: workspace:*
         version: link:../adapters/github
+      '@sdlc/adapter-gitlab':
+        specifier: workspace:*
+        version: link:../adapters/gitlab
       '@sdlc/core':
         specifier: workspace:*
         version: link:../core
@@ -99,6 +114,12 @@ importers:
       '@sdlc/schemas':
         specifier: workspace:*
         version: link:../schemas
+
+  packages/desktop:
+    dependencies:
+      '@sdlc/cli':
+        specifier: workspace:*
+        version: link:../cli
 
   packages/detect:
     dependencies:
@@ -178,6 +199,9 @@ importers:
       '@sdlc/adapter-github':
         specifier: workspace:*
         version: link:../adapters/github
+      '@sdlc/adapter-gitlab':
+        specifier: workspace:*
+        version: link:../adapters/gitlab
       '@sdlc/core':
         specifier: workspace:*
         version: link:../core

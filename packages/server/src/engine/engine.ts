@@ -1,11 +1,11 @@
-import { DEFAULT_DETECT_EVERY, deriveChange, loadRepo, openBreachItem, parseInterval, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, raiseBandBreaches, reasonKey, validateWritePlan, writebacksInState, type BandBreach, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
+import { DEFAULT_DETECT_EVERY, deriveChange, harnessFor, loadRepo, openBreachItem, parseInterval, pendingRepeatSignals, pendingWritebacks, proposeTasks, confirmTasks, raiseBandBreaches, reasonKey, validateWritePlan, writebacksInState, type BandBreach, type ChangeView, type Repo, type RepeatSignal, type RequiredWriteback } from "@sdlc/core";
 import { readSnapshots, runDetection, type DetectionPass } from "@sdlc/detect";
 import { launchBandSession, recordBandSession } from "../maintain/index.js";
 import { recordDeploysForSession } from "../deploy/index.js";
-import { SYSTEM_IDENTITY } from "./codehost.js";
-import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, listWorktrees, newUlid, readTree, type GitIdentity } from "@sdlc/adapter-git";
+import { SYSTEM_IDENTITY, hostedCodeHostFrom } from "./codehost.js";
+import { ARTIFACT_BRANCH, addWorktree, blobSha, branchExists, commitWritePlan, fetchRemote, gitRaw, headSha, hostName, listWorktrees, newUlid, prLabel, prNoun, readTree, type GitIdentity } from "@sdlc/adapter-git";
 import { readReproDraft, readSessionDeploys } from "@sdlc/mcp";
-import { capacityOf, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
+import { capacityOf, harnessFromConfig, launchSession, worktreePathFor, type SessionKind, type SessionRegistry, type StoredSession } from "../sessions/index.js";
 import type { StateStore } from "../store.js";
 import { JobStore, type Job } from "./jobs.js";
 import { runPerChange, type Exec } from "./runner.js";
@@ -14,9 +14,9 @@ import { mirrorProposal } from "./proposals.js";
 import { runSuite, type SuiteOutcome } from "./suite.js";
 import { nextRunId } from "@sdlc/core";
 import type { EvalRun } from "@sdlc/schemas";
-import { gitHubCodeHostFrom, type GitHubCodeHost, type WebhookEvent } from "@sdlc/adapter-github";
+import { GitHubCodeHost, gitHubCodeHostFrom, type WebhookEvent } from "@sdlc/adapter-github";
 import { refreshFacts, type FactsCache, type RefreshSummary } from "../metrics/index.js";
-import { syncGitHub, type SyncSummary } from "../github/artifacts.js";
+import { syncCodeHost, type SyncSummary } from "../github/artifacts.js";
 import { runWriteback, type WritebackDeps, type WritebackRun } from "../records.js";
 import type { Tracer } from "../otel.js";
 
@@ -207,7 +207,7 @@ export class Engine {
         const status = this.opts.store.current?.bandStatus.find((x) => x.metric === b.band.metric);
         const r = await launchBandSession(
           { band: b.band, snapshot: b.snapshot, tier, triageId: item.id, job: b.job, status: status ?? { metric: b.band.metric, baseline: b.band.baseline, unit: b.band.unit ?? null, source: b.band.source ?? null, current: b.snapshot.current, sigma: b.snapshot.sigma, tier: b.snapshot.tier, breached: true, action: tier === 3 ? "propose" : "diagnose", ts: b.snapshot.ts, samples: 0, status: "", triage: [item.id], job: b.job }, history: history[b.band.metric] ?? [] },
-          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
+          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, harness: harnessFromConfig(harnessFor(repo.config.harnesses, tier === 3 ? "propose" : "diagnose"), this.opts.claudeBin ?? this.opts.env?.["SDLC_CLAUDE_BIN"] ?? "claude"), ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
         );
         this.opts.jobs.update(b.job, { sessionId: r.session.id, state: "running", note: `${item.id} raised · ${r.session.kind} session on ${r.session.branch}` }, this.now());
         this.log(`[detect] ${b.band.metric} ${tier}σ → ${item.id}, ${r.session.kind} session ${r.session.id}`);
@@ -273,7 +273,7 @@ export class Engine {
       await this.forWritebacks(repo).catch((e: unknown) => this.log(`write-backs: ${(e as Error).message}`));
       if (this.opts.autoLaunch) await this.forProposals(repo).catch((e: unknown) => this.log(`proposals: ${(e as Error).message}`));
       // a poll is redundant while a pass is in flight: that pass reads the same state (a webhook's pass still queues behind it, see sync())
-      if (repo.config.codeHost === "github" && !this.inflight && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`github sync: ${(e as Error).message}`));
+      if (repo.config.codeHost !== "local" && !this.inflight && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`${repo.config.codeHost} sync: ${(e as Error).message}`));
     } finally {
       this.ticking = false;
       if (this.pending) {
@@ -319,17 +319,18 @@ export class Engine {
   private async syncOnce(): Promise<SyncSummary | null> {
     await this.opts.store.refresh();
     const repo = this.opts.store.currentRepo;
-    if (!repo || repo.config.codeHost !== "github" || this.closed) return null;
-    const host = gitHubCodeHostFrom(this.opts.env ?? process.env);
+    if (!repo || repo.config.codeHost === "local" || this.closed) return null;
+    const host = hostedCodeHostFrom(repo.config.codeHost, this.opts.env ?? process.env);
     if (!host) {
-      if (!this.warnedNoToken) this.log("config.codeHost is github but GITHUB_TOKEN is not set; artifact PRs and merge detection are off");
+      if (!this.warnedNoToken) this.log(`config.codeHost is ${repo.config.codeHost} but no token is set (${repo.config.codeHost === "gitlab" ? "GITLAB_TOKEN" : "GITHUB_TOKEN"}); artifact ${prNoun(repo.config.codeHost)}s and merge detection are off`);
       this.warnedNoToken = true;
       return null;
     }
     this.lastSync = Date.now();
     const committer = this.opts.store.committer;
-    const summary = await syncGitHub({ host, identity: this.opts.identity, ...(committer ? { committer } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), log: (l) => this.log(l) }, this.opts.store);
-    const fetched = await this.refreshFacts(host).catch((e: Error) => {
+    const summary = await syncCodeHost({ host, identity: this.opts.identity, ...(committer ? { committer } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), log: (l) => this.log(l) }, this.opts.store);
+    // the metrics feed reads GitHub reviews and statuses; GitLab facts are not folded in yet (the mirror serves them)
+    const fetched = await (host instanceof GitHubCodeHost ? this.refreshFacts(host) : Promise.resolve(false)).catch((e: Error) => {
       this.log(`metrics facts: ${e.message}`);
       return false;
     });
@@ -362,7 +363,7 @@ export class Engine {
   private changeForPull(repo: Repo, number: number): { view: ChangeView; what: "code" | "artifact" } | null {
     for (const files of repo.changes.values()) {
       const view = deriveChange(repo, files);
-      if (view.pr?.provider === "github" && view.pr.number === number) return { view, what: "code" };
+      if (view.pr?.provider !== "local" && view.pr?.number === number) return { view, what: "code" };
       if (Object.values(view.artifactPrs).some((p) => p?.number === number)) return { view, what: "artifact" };
     }
     return null;
@@ -408,6 +409,9 @@ export class Engine {
     const repo = this.opts.store.currentRepo ?? (await this.opts.store.refresh(), this.opts.store.currentRepo);
     if (!repo) return { outcome: "repository not loaded", changeId: null };
     const base = repo.config.defaultBranch;
+    const provider = repo.config.codeHost;
+    const label = (n: number) => prLabel(provider, n);
+    const noun = prNoun(provider);
     switch (event.kind) {
       case "ping":
         return { outcome: "pong", changeId: null };
@@ -415,30 +419,30 @@ export class Engine {
         const hit = this.changeForPull(repo, event.number);
         const id = hit?.view.id ?? null;
         if (event.action === "closed") {
-          if (!event.merged) return { outcome: `PR #${event.number} closed without merge${id ? ` (${id}); nothing recorded` : ""}`, changeId: id };
+          if (!event.merged) return { outcome: `${label(event.number)} closed without merge${id ? ` (${id}); nothing recorded` : ""}`, changeId: id };
           const summary = await this.sync();
-          if (!summary) return { outcome: `PR #${event.number} merged, but GitHub sync is off (GITHUB_TOKEN not set): nothing recorded`, changeId: id };
+          if (!summary) return { outcome: `${label(event.number)} merged, but ${hostName(provider)} sync is off (no token in the environment): nothing recorded`, changeId: id };
           const m = summary.merges.find((x) => x.number === event.number);
           // a recorded PR the sync no longer lists as a candidate is one whose merge is already recorded (a re-sent event)
-          if (!m) return { outcome: hit ? `${hit.view.id}: PR #${event.number} merge already recorded` : `PR #${event.number} merged: not a recorded pull request`, changeId: id };
-          return { outcome: m.recorded ? `${m.changeId}: gate ${m.gate} recorded from PR #${m.number} merged by ${m.mergedBy}` : `${m.changeId}: PR #${m.number} merged by ${m.mergedBy}, not recorded: ${m.reason ?? ""}`, changeId: m.changeId };
+          if (!m) return { outcome: hit ? `${hit.view.id}: ${label(event.number)} merge already recorded` : `${label(event.number)} merged: not a recorded ${noun}`, changeId: id };
+          return { outcome: m.recorded ? `${m.changeId}: gate ${m.gate} recorded from ${label(m.number)} merged by ${m.mergedBy}` : `${m.changeId}: ${label(m.number)} merged by ${m.mergedBy}, not recorded: ${m.reason ?? ""}`, changeId: m.changeId };
         }
         if (event.action === "synchronize") {
           if (hit?.what === "code") return { outcome: (await this.runForPrHead(hit.view.id, event.headSha, "webhook")).note, changeId: id };
           if (ARTIFACT_BRANCH.test(event.headRef)) return this.fetchArtifactBranch(event.headRef, id);
-          return { outcome: `PR #${event.number} (${event.headRef}) is not a recorded pull request`, changeId: id };
+          return { outcome: `${label(event.number)} (${event.headRef}) is not a recorded ${noun}`, changeId: id };
         }
         if (event.action === "opened" || event.action === "reopened" || event.action === "ready_for_review") {
-          if (!ARTIFACT_BRANCH.test(event.headRef) && !hit) return { outcome: `PR #${event.number} (${event.headRef}) ${event.action}: not a branch the console tracks`, changeId: null };
+          if (!ARTIFACT_BRANCH.test(event.headRef) && !hit) return { outcome: `${label(event.number)} (${event.headRef}) ${event.action}: not a branch the console tracks`, changeId: null };
           const summary = await this.sync();
-          return { outcome: summary ? `PR #${event.number} ${event.action}: synced (${summary.opened.length} artifact PR(s) recorded)` : `PR #${event.number} ${event.action}: GitHub sync is off`, changeId: id };
+          return { outcome: summary ? `${label(event.number)} ${event.action}: synced (${summary.opened.length} artifact ${prLabel(provider, undefined)}(s) recorded)` : `${label(event.number)} ${event.action}: ${hostName(provider)} sync is off`, changeId: id };
         }
-        return { outcome: `PR #${event.number} ${event.action}: noted`, changeId: id };
+        return { outcome: `${label(event.number)} ${event.action}: noted`, changeId: id };
       }
       case "pull_request_review": {
         const hit = this.changeForPull(repo, event.number);
         this.opts.store.rebuild();
-        return { outcome: `review ${event.state} by ${event.author ?? "?"} on PR #${event.number}${hit ? ` (${hit.view.id})` : ""} noted; gate decisions are recorded from merges`, changeId: hit?.view.id ?? null };
+        return { outcome: `review ${event.state} by ${event.author ?? "?"} on ${label(event.number)}${hit ? ` (${hit.view.id})` : ""} noted; gate decisions are recorded from merges`, changeId: hit?.view.id ?? null };
       }
       case "check_run":
       case "status": {
@@ -456,7 +460,7 @@ export class Engine {
         if (event.deleted) return { outcome: `${branch} deleted on origin: nothing to do`, changeId: null };
         if (branch === base) {
           const summary = await this.sync();
-          return { outcome: summary ? `origin/${base} moved to ${event.after.slice(0, 7)}: synced (${summary.merges.filter((m) => m.recorded).length} merge(s) recorded)` : `origin/${base} moved to ${event.after.slice(0, 7)}, but GitHub sync is off`, changeId: null };
+          return { outcome: summary ? `origin/${base} moved to ${event.after.slice(0, 7)}: synced (${summary.merges.filter((m) => m.recorded).length} merge(s) recorded)` : `origin/${base} moved to ${event.after.slice(0, 7)}, but ${hostName(provider)} sync is off`, changeId: null };
         }
         if (ARTIFACT_BRANCH.test(branch)) return this.fetchArtifactBranch(branch, ARTIFACT_BRANCH.exec(branch)?.[1] ?? null);
         for (const files of repo.changes.values()) {
@@ -657,7 +661,9 @@ export class Engine {
     for (const job of this.opts.jobs.list()) {
       if (job.sessionId === session.id && job.state === "running") {
         const downgraded = session.status === "awaiting_engineer";
-        this.opts.jobs.update(job.key, { state: session.status === "done" || downgraded ? "done" : "failed", ...(downgraded ? { note: "downgraded to SUPERVISED — the engineer continues" } : {}), ...(session.error ? { error: session.error } : {}) }, this.now());
+        // done-unverified (3.8): the harness said done, the console's stand-in for the Stop hook did not agree — the job failed with that verdict
+        const unverified = session.status === "done-unverified" ? `done-unverified: ${session.standIn?.reason ?? "last round not green"}` : null;
+        this.opts.jobs.update(job.key, { state: session.status === "done" || downgraded ? "done" : "failed", ...(downgraded ? { note: "downgraded to SUPERVISED — the engineer continues" } : {}), ...(unverified ? { error: unverified } : session.error ? { error: session.error } : {}) }, this.now());
       }
     }
     if (session.band) {
@@ -769,7 +775,9 @@ export class Engine {
     const job = this.opts.jobs.claim({ key, kind: "per-change-run", changeId: session.changeId, cycle: view.cycle, stage: 4 }, this.now());
     if (!job) return null;
     try {
-      const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), parent: this.opts.jobs.spanOf(key) }, repo);
+      // a harness without a PreToolUse hook (3.8) could not have been blocked by plan-sync or test-freeze: the run applies both rules to the diff instead
+      const hooksInSession = session.harness ? !session.harness.degraded.some((d) => d.guarantee === "plan-sync" || d.guarantee === "test-freeze") : true;
+      const outcome = await runPerChange({ root: this.opts.store.root, view, worktree: session.worktreePath, branch: session.branch, hooksInSession, ...(this.opts.exec ? { exec: this.opts.exec } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), parent: this.opts.jobs.spanOf(key) }, repo);
       this.opts.jobs.update(key, { state: "done", note: `run ${outcome.run.n} ${outcome.run.verdict}${outcome.prAction === "opened" ? " · PR opened" : outcome.prAction === "synchronized" ? ` · PR head → ${outcome.run.headSha.slice(0, 7)}` : ""}` }, this.now());
       this.log(`${view.id}: run ${outcome.run.n} ${outcome.run.verdict}`);
       this.opts.registry.patch(session.id, { reviewed: outcome.run.verdict === "green" });

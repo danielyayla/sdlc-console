@@ -1,4 +1,5 @@
 import { CONFIG_DEFAULTS, type Config, type EnvironmentKind, type Identity, type RecordsMode } from "@sdlc/schemas";
+import { resolveHarness, type ResolvedHarness } from "./harness.js";
 import type { GateRole } from "./stages.js";
 
 export interface ResolvedThresholds {
@@ -13,17 +14,25 @@ export interface ResolvedThresholds {
   skillPassThreshold: number;
 }
 
-/** Identity whose `github` login matches (case-insensitive), for attributing merges done on the code host. */
-export function identityForGitHubLogin(config: ResolvedConfig, login: string): Identity | null {
+/** Which code host the config names; `local` has no host. */
+export type CodeHostProvider = "local" | "github" | "gitlab";
+
+/** Identity whose host login (`github` or `gitlab` on the identity) matches, case-insensitively — for attributing merges done on the code host. */
+export function identityForHostLogin(config: ResolvedConfig, field: "github" | "gitlab", login: string): Identity | null {
   const wanted = login.toLowerCase();
-  return config.identities.find((i) => i.github?.toLowerCase() === wanted) ?? null;
+  return config.identities.find((i) => i[field]?.toLowerCase() === wanted) ?? null;
+}
+
+/** Identity whose `github` login matches (case-insensitive), for attributing merges done on GitHub. */
+export function identityForGitHubLogin(config: ResolvedConfig, login: string): Identity | null {
+  return identityForHostLogin(config, "github", login);
 }
 
 export interface ResolvedConfig {
   present: boolean;
   defaultRole: "po" | "eng";
   defaultBranch: string;
-  codeHost: "local" | "github";
+  codeHost: CodeHostProvider;
   identities: Identity[];
   thresholds: ResolvedThresholds;
   records: Record<"intent" | "spec" | "plan" | "evals" | "pr" | "incident", RecordsMode>;
@@ -36,6 +45,8 @@ export interface ResolvedConfig {
   auth: ResolvedAuth | null;
   /** Deployment environments (3.6) in config order; empty when none are declared. */
   environments: ResolvedEnvironment[];
+  /** Harnesses (3.8) in config order; empty = Claude Code for every session kind. */
+  harnesses: ResolvedHarness[];
 }
 
 /** A deployment environment as the console runs it (3.6): declared commands only, and the production gate's roles. */
@@ -111,6 +122,7 @@ export function resolveConfig(config: Config | null): ResolvedConfig {
       healthcheckCommand: e.healthcheck?.command ?? null,
       gateRoles: e.kind === "production" ? (e.gate?.roles ?? [...PRODUCTION_GATE_DEFAULT_ROLES]) : [],
     })),
+    harnesses: (config?.harness === undefined ? [] : Array.isArray(config.harness) ? config.harness : [config.harness]).map(resolveHarness),
     auth: config?.auth
       ? {
           provider: "oidc",

@@ -56,7 +56,7 @@ export function accept(repo: Repo, view: ChangeView, gate: GateNumber, ctx: Tran
   if (gate === 5) {
     if (!files.pr) return refuse("pr.missing", "pr.yaml is missing", `${dir}/pr.yaml`);
     if (!ctx.mergeSha) return refuse("merge.sha-missing", "gate 5 needs the merge commit sha (the adapter merges first)");
-    if (repo.config.codeHost === "github" && ctx.source !== "pr.merge") return refuse("gate.via-code-host", "in github mode gate 5 is the pull request merge (source pr.merge)");
+    if (repo.config.codeHost !== "local" && ctx.source !== "pr.merge") return refuse("gate.via-code-host", "in github/gitlab mode gate 5 is the pull request merge (source pr.merge)");
     // spec 5B.3 / stage 05 validation: the console's merge waits on the repro proof and on undismissed auto-findings; a merge already done on the code host is recorded as it happened
     if (ctx.source !== "pr.merge") {
       const open = (files.pr.autoFindings ?? []).filter((f) => !f.dismissal);

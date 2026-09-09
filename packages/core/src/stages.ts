@@ -77,7 +77,7 @@ export interface GateOwnership {
 }
 
 /** Who owns a gate for a change of the given risk, and how it is accepted. */
-export function gateOwner(gate: GateNumber, risk: RiskLevel, provider: "local" | "github" = "local"): GateOwnership {
+export function gateOwner(gate: GateNumber, risk: RiskLevel, provider: "local" | "github" | "gitlab" = "local"): GateOwnership {
   const def = gateDefs[gate];
   if (risk === "high" && def.highRiskOverride) {
     return {
@@ -86,7 +86,7 @@ export function gateOwner(gate: GateNumber, risk: RiskLevel, provider: "local" |
       mode: def.highRiskOverride.mode,
     };
   }
-  if (def.externalMode && provider === "github") {
+  if (def.externalMode && provider !== "local") {
     return { role: def.ownerRole, label: def.label, mode: def.externalMode };
   }
   return { role: def.ownerRole, label: def.label, mode: "console" };

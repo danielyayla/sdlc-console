@@ -3,7 +3,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { act, exportHref, fetchJobs, fetchProducts, subscribe, type Artifact, type JobRow, type ProductInfo } from "./api";
 import type { Role } from "./lib/format";
 import { initialState, reduce, type UIState } from "./state";
-import { ChangeDetail, type ReproDraftView } from "./views/ChangeDetail";
+import { ChangeDetail, type ReproDraftView, type SessionLine } from "./views/ChangeDetail";
 import { Config } from "./views/Config";
 import { Gates } from "./views/Gates";
 import { Loop } from "./views/Loop";
@@ -31,6 +31,13 @@ export interface AppProps {
 }
 
 /** The repro test a build session reported for the change and the engineer has not judged (from the session registry, never stored). */
+/** The change's sessions as the detail lists them (3.8): registry records reduced to the line and the harness gaps. */
+function sessionLinesOf(snapshot: Snapshot, changeId: string): SessionLine[] {
+  return snapshot.sessions
+    .filter((s) => s.changeId === changeId)
+    .map((s) => ({ id: s.id, kind: typeof s["kind"] === "string" ? s["kind"] : "build", mode: s.mode, status: s.status, startedAt: s.startedAt, harness: (s["harness"] as SessionLine["harness"] | undefined) ?? null, standIn: (s["standIn"] as SessionLine["standIn"] | undefined) ?? null }));
+}
+
 function reproDraftOf(snapshot: Snapshot, changeId: string): ReproDraftView | null {
   for (const s of snapshot.sessions) {
     if (s.changeId !== changeId) continue;
@@ -116,6 +123,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
       <ChangeDetail
         view={selected}
         role={state.role}
+        codeHost={snapshot.config.codeHost}
         art={state.art}
         now={now}
         loadArtifact={artifactLoader}
@@ -127,6 +135,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onRetryWriteback={(artifact) => void run(`/changes/${selected.id}/records/retry`, { artifact })}
         onHarvest={() => void run(`/changes/${selected.id}/harvest`, {})}
         reproDraft={reproDraftOf(snapshot, selected.id)}
+        sessions={sessionLinesOf(snapshot, selected.id)}
         onReproConfirm={() => void run(`/changes/${selected.id}/repro/confirm`, {})}
         onReproReject={(reason) => void run(`/changes/${selected.id}/repro/reject`, { reason })}
         onLiftFreeze={(path, reason) => void run(`/changes/${selected.id}/freeze/lift`, { path, reason })}

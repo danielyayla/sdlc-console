@@ -17,6 +17,7 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@sdlc/adapter-git": "workspace:*",
     "@sdlc/adapter-github": "workspace:*",
+    "@sdlc/adapter-gitlab": "workspace:*",
     "@sdlc/core": "workspace:*",
     "@sdlc/detect": "workspace:*",
     "@sdlc/hooks": "workspace:*",

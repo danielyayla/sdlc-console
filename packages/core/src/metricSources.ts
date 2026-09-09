@@ -17,7 +17,7 @@ import type { ChangeFiles, Repo } from "./repo.js";
 export interface PrFact {
   changeId: string;
   cycle: number;
-  provider: "local" | "github";
+  provider: "local" | "github" | "gitlab";
   number: number | null;
   /** Head the PR opened with (the first head CI judged), then the current one. */
   openedHeadSha: string;

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CodeHostError, branchExists, commitWritePlan, git, headSha, pushBranch } from "@sdlc/adapter-git";
-import { GitHubError, assertProtected, findOpenPull, gitHubCodeHostFrom, openPull } from "@sdlc/adapter-github";
+import { CodeHostError, branchExists, commitWritePlan, git, headSha, prLabel, prNoun, pushBranch } from "@sdlc/adapter-git";
+import { hostedCodeHostFrom } from "./engine/codehost.js";
 import { acceptProposal, checkAcceptProposal, type AcceptedPr, type WritePlan } from "@sdlc/core";
 import type { ActionResult } from "./actions.js";
 import { withBranchWorktree } from "./github/artifacts.js";
@@ -51,14 +51,13 @@ export async function acceptProposalAction(store: StateStore, id: string, env: R
     return commitWritePlan(dir, plan, { identity: store.who });
   });
   let pr: AcceptedPr = { branch };
-  if (repo.config.codeHost === "github") {
-    const host = gitHubCodeHostFrom(env);
-    if (!host) throw new ActionError(409, `${id}: config.codeHost is github but GITHUB_TOKEN is not set; the line is committed on ${branch} — push it and open the PR by hand, or set the token and accept again`);
+  if (repo.config.codeHost !== "local") {
+    const host = hostedCodeHostFrom(repo.config.codeHost, env);
+    if (!host) throw new ActionError(409, `${id}: config.codeHost is ${repo.config.codeHost} but ${repo.config.codeHost === "gitlab" ? "GITLAB_TOKEN" : "GITHUB_TOKEN"} is not set; the line is committed on ${branch} — push it and open the ${prNoun(repo.config.codeHost)} by hand, or set the token and accept again`);
     try {
-      const repoGh = await host.repoFor(root);
-      await assertProtected(host.client, repoGh, base);
+      await host.assertProtected(root, base);
       await pushBranch(root, branch);
-      const pull = (await findOpenPull(host.client, repoGh, branch)) ?? (await openPull(host.client, repoGh, {
+      const pull = (await host.findOpenPr(root, branch)) ?? (await host.openHostedPr(root, {
         head: branch,
         base,
         title: `sdlc(${id}): CLAUDE.md — ${proposal.text.length > 60 ? `${proposal.text.slice(0, 57)}…` : proposal.text}`,
@@ -66,11 +65,11 @@ export async function acceptProposalAction(store: StateStore, id: string, env: R
       }));
       pr = { branch, number: pull.number, url: pull.url };
     } catch (e) {
-      const retryable = e instanceof CodeHostError ? e.retryable : e instanceof GitHubError ? e.retryable : true;
-      throw new ActionError(retryable ? 502 : 409, `${id}: the line is committed on ${branch} (${head.slice(0, 7)}) but the pull request was not opened: ${(e as Error).message}`, [], retryable);
+      const retryable = e instanceof CodeHostError ? e.retryable : true;
+      throw new ActionError(retryable ? 502 : 409, `${id}: the line is committed on ${branch} (${head.slice(0, 7)}) but the ${prNoun(repo.config.codeHost)} was not opened: ${(e as Error).message}`, [], retryable);
     }
   }
   const r = await store.act((repo2, ctx) => acceptProposal(repo2, id, pr, ctx));
-  const where = pr.number !== undefined ? `PR #${pr.number} opened for the code owners` : `branch ${branch} carries the line — open a PR from it for the code owners`;
+  const where = pr.number !== undefined ? `${prLabel(repo.config.codeHost, pr.number)} opened for the code owners` : `branch ${branch} carries the line — open a ${prLabel(repo.config.codeHost, undefined)} from it for the code owners`;
   return { ...r, toast: `${id} accepted — ${where}`, changeId: null };
 }

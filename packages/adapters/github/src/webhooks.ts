@@ -1,5 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { WebhookEvent } from "@sdlc/adapter-git";
 import type { GitHubRepo } from "./remote.js";
+
+export { sameRepo, type WebhookEvent } from "@sdlc/adapter-git";
 
 /**
  * Inbound webhooks (blueprint §9.5, build-order 2.4). A delivery is verified
@@ -28,14 +31,7 @@ export interface WebhookHeaders {
   signature: string | undefined;
 }
 
-export type WebhookEvent =
-  | { kind: "ping"; repo: GitHubRepo | null; zen: string | null }
-  | { kind: "pull_request"; action: string; repo: GitHubRepo | null; number: number; headRef: string; headSha: string; baseRef: string; merged: boolean; mergeSha: string | null; mergedBy: string | null; state: "open" | "closed" }
-  | { kind: "pull_request_review"; action: string; repo: GitHubRepo | null; number: number; state: string; author: string | null; headSha: string | null }
-  | { kind: "check_run"; action: string; repo: GitHubRepo | null; name: string; status: string; conclusion: string | null; headSha: string }
-  | { kind: "status"; repo: GitHubRepo | null; sha: string; context: string; state: string }
-  | { kind: "push"; repo: GitHubRepo | null; ref: string; before: string; after: string; deleted: boolean; forced: boolean }
-  | { kind: "other"; event: string; action: string | null; repo: GitHubRepo | null };
+// `WebhookEvent` is the shared shape in @sdlc/adapter-git (both hosts reduce to it); re-exported above.
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : null);
@@ -101,8 +97,4 @@ export function parseWebhook(eventName: string, payload: unknown): WebhookEvent 
     default:
       return { kind: "other", event: eventName, action, repo };
   }
-}
-
-export function sameRepo(a: GitHubRepo | null, b: GitHubRepo | null): boolean {
-  return a !== null && b !== null && a.owner.toLowerCase() === b.owner.toLowerCase() && a.repo.toLowerCase() === b.repo.toLowerCase();
 }

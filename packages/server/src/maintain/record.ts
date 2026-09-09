@@ -1,5 +1,5 @@
-import { commitWritePlan, gitRaw, headSha, pushBranch } from "@sdlc/adapter-git";
-import { findOpenPull, gitHubCodeHostFrom, openPull } from "@sdlc/adapter-github";
+import { commitWritePlan, gitRaw, headSha, prNoun, pushBranch } from "@sdlc/adapter-git";
+import { hostedCodeHostFrom } from "../engine/codehost.js";
 import { recordDiagnosis, validateWritePlan, type DiagnosisRecord, type Repo } from "@sdlc/core";
 import { DEFAULT_AGENT_ID, readDiagnosisDraft, readRunbookRuns } from "@sdlc/mcp";
 import { SYSTEM_IDENTITY } from "../engine/codehost.js";
@@ -45,18 +45,17 @@ export async function recordBandSession(input: BandRecordInput, repo: Repo): Pro
     if (ahead.code === 0 && Number(ahead.stdout.trim()) > 0) {
       const head = await headSha(input.root, session.branch);
       proposal = { branch: session.branch, head };
-      if (repo.config.codeHost === "github") {
-        const host = gitHubCodeHostFrom(input.env ?? process.env);
+      if (repo.config.codeHost !== "local") {
+        const host = hostedCodeHostFrom(repo.config.codeHost, input.env ?? process.env);
         if (host) {
           try {
-            const repoGh = await host.repoFor(input.root);
             await pushBranch(input.root, session.branch);
-            const pull = (await findOpenPull(host.client, repoGh, session.branch)) ?? (await openPull(host.client, repoGh, { head: session.branch, base, title: `sdlc(${band.triageId}): ${draft?.title ?? `${band.metric} breached ${band.tier}σ`}`, body: [`Proposed by the 3σ propose job for ${band.metric} (${band.triageId}, session ${session.id}).`, "", draft ? `${draft.problem}\n\nProposed outcome: ${draft.proposedOutcome}` : "The session committed without reporting a diagnosis; see the triage item.", "", "The code owner decides by merging; the job never merges."].join("\n") }));
+            const pull = (await host.findOpenPr(input.root, session.branch)) ?? (await host.openHostedPr(input.root, { head: session.branch, base, title: `sdlc(${band.triageId}): ${draft?.title ?? `${band.metric} breached ${band.tier}σ`}`, body: [`Proposed by the 3σ propose job for ${band.metric} (${band.triageId}, session ${session.id}).`, "", draft ? `${draft.problem}\n\nProposed outcome: ${draft.proposedOutcome}` : "The session committed without reporting a diagnosis; see the triage item.", "", "The code owner decides by merging; the job never merges."].join("\n") }));
             proposal = { ...proposal, pr: { number: pull.number, url: pull.url } };
           } catch (e) {
             input.log?.(`${band.triageId}: branch ${session.branch} carries the proposal but the pull request was not opened: ${(e as Error).message}`);
           }
-        } else input.log?.(`${band.triageId}: config.codeHost is github but no token is set; ${session.branch} carries the proposal — push it and open the PR by hand`);
+        } else input.log?.(`${band.triageId}: config.codeHost is ${repo.config.codeHost} but no token is set; ${session.branch} carries the proposal — push it and open the ${prNoun(repo.config.codeHost)} by hand`);
       }
     }
   }

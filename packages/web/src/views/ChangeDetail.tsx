@@ -1,11 +1,14 @@
 import type { ChangeView } from "@sdlc/core";
 import { useEffect, useState } from "react";
 import { fetchArtifact, type Artifact } from "../api";
-import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, dotClass, ownsGate, relativeTime, riskLabel, viewerState, waitingFor, type Role } from "../lib/format";
+import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, dotClass, ownsGate, prLabel, prNoun, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
+import { HarnessChips } from "./Sessions";
 
 export interface ChangeDetailProps {
   view: ChangeView;
   role: Role;
+  /** `config.codeHost` (3.7): names artifact requests "PR #n" on GitHub, "MR !n" on GitLab. */
+  codeHost?: CodeHost;
   art: number | null;
   now: Date;
   /** Injected for server-side rendering tests; defaults to the HTTP fetch. */
@@ -31,6 +34,18 @@ export interface ChangeDetailProps {
   /** Deployment (3.6): deploy an environment / rehearse its rollback as the viewer; production is the gate's Deploy. */
   onDeploy?: (env: string) => void;
   onRehearse?: (env: string) => void;
+  /** The change's sessions from the registry (3.8): one line each with the harness and its unmet guarantees. */
+  sessions?: SessionLine[];
+}
+
+export interface SessionLine {
+  id: string;
+  kind: string;
+  mode: string;
+  status: string;
+  startedAt: string;
+  harness: { id: string; degraded: { guarantee: string; reason: string }[] } | null;
+  standIn: { guarantee: string; allowed: boolean; reason: string; rounds: number } | null;
 }
 
 export interface ReproDraftView {
@@ -113,7 +128,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
           <div className="viewer-head">
             <span className="file">{ARTIFACT_FILES[selected]}</span>
             <span className="chip gray">{viewerState(doc, view)}</span>
-            {selectedPr && !selectedPr.merged ? <a className="chip" href={selectedPr.url} target="_blank" rel="noreferrer">PR #{selectedPr.number}</a> : null}
+            {selectedPr && !selectedPr.merged ? <a className="chip" href={selectedPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, selectedPr.number)}</a> : null}
             {view.record ? (view.record.url ? <a className="chip" href={view.record.url} target="_blank" rel="noreferrer" title="external record">{view.record.system} {view.record.id}</a> : <span className="chip" title="external record">{view.record.system} {view.record.id}</span>) : null}
             {doc.record.writeback && doc.record.writeback.state !== "ok" ? (
               <>
@@ -139,9 +154,9 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <div className="eyebrow">Human gate · {waitingFor(gate.since, p.now)}</div>
               <h3>{gate.label}</h3>
               <div className="who">owner: {gate.ownerLabel}</div>
-              {reviewPr ? <div className="who">in review as <a href={reviewPr.url} target="_blank" rel="noreferrer">PR #{reviewPr.number}</a> · merging it is the decision</div> : null}
+              {reviewPr ? <div className="who">in review as <a href={reviewPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, reviewPr.number)}</a> · merging it is the decision</div> : null}
               {techLead ? (
-                <div className="waiting">Waiting on tech lead — approval happens via PR review on plan.md.{reviewPr ? <> <a href={reviewPr.url} target="_blank" rel="noreferrer">PR #{reviewPr.number}</a></> : null}</div>
+                <div className="waiting">Waiting on tech lead — approval happens via {prLabel(p.codeHost)} review on plan.md.{reviewPr ? <> <a href={reviewPr.url} target="_blank" rel="noreferrer">{prLabel(p.codeHost, reviewPr.number)}</a></> : null}</div>
               ) : owned ? (
                 <>
                   {view.recordBlock ? <div className="waiting" role="note">{view.recordBlock}</div> : null}
@@ -217,8 +232,8 @@ export function ChangeDetail(p: ChangeDetailProps) {
           ) : null}
           {view.pr ? (
             <div className="panel pr">
-              <div className="eyebrow">Pull request · {view.pr.provider}</div>
-              <h3>{view.pr.url ? <a href={view.pr.url} target="_blank" rel="noreferrer">#{view.pr.number} {view.pr.branch}</a> : view.pr.branch}</h3>
+              <div className="eyebrow">{prNoun(view.pr.provider)} · {view.pr.provider}</div>
+              <h3>{view.pr.url ? <a href={view.pr.url} target="_blank" rel="noreferrer">{prLabel(view.pr.provider, view.pr.number)} {view.pr.branch}</a> : view.pr.branch}</h3>
               <div className="who">→ {view.pr.baseBranch} · head {view.pr.headSha.slice(0, 7)}{view.pr.mergeSha ? ` · merged ${view.pr.mergeSha.slice(0, 7)}` : ""}</div>
               <ul className="activity">
                 {view.pr.checks.map((c) => <li key={c.name}><span className={`glyph ${c.verdict === "pass" ? "human" : "system"}`}>{c.verdict === "pass" ? "✓" : c.verdict === "fail" ? "✗" : "…"}</span><span>{c.name}</span><span className="when">{c.summary ? `${c.verdict} · ${c.summary}` : c.verdict}</span></li>)}
@@ -339,6 +354,20 @@ export function ChangeDetail(p: ChangeDetailProps) {
               <ul className="activity">{view.autoEligible.terms.map((t) => <li key={t.name}><span className={`glyph ${t.ok ? "human" : "system"}`}>{t.ok ? "✓" : "✗"}</span><span>{t.name}</span><span className="when">{t.detail}</span></li>)}</ul>
               {view.visual.warning ? <div className="warn">{view.visual.warning}</div> : null}
               {view.visual.mock ? <div className="card-status">mock {view.visual.mock.path.split("/").pop()}{view.visual.tool ? ` · visual tool ${view.visual.tool}` : " · no visual tool in CLAUDE.md"}</div> : null}
+            </div>
+          ) : null}
+          {p.sessions && p.sessions.length > 0 ? (
+            <div className="panel">
+              <div className="eyebrow">Sessions</div>
+              <ul className="activity">
+                {p.sessions.map((s) => (
+                  <li key={s.id}>
+                    <span className="glyph agent">⌁</span>
+                    <span><span className="mono">{s.id}</span> · {s.kind} · {s.mode} · {s.status}{s.standIn && !s.standIn.allowed ? ` — ${s.standIn.reason}` : ""} <HarnessChips harness={s.harness} /></span>
+                    <span className="when">{relativeTime(s.startedAt, p.now)}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
           <div className="panel">
