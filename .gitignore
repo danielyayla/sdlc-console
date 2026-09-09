@@ -1,7 +1,7 @@
 node_modules/
 dist/
-.sdlc-state/
 *.log
 .DS_Store
 *.tsbuildinfo
 .eslintcache
+.sdlc-state/

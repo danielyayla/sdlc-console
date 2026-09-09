@@ -3,7 +3,7 @@ import { defineConfig } from "vitest/config";
 
 // Tests import workspace packages from TypeScript source, so `pnpm test`
 // never needs a prior `pnpm build`. Runtime resolution of the built
-// `dist/` exports is proven separately (see sdlc/changes/CHG-0001/plan.md).
+// `dist/` exports is proven separately (see docs/bootstrap/plans/CHG-0001.md).
 const src = (dir: string): string =>
   fileURLToPath(new URL(`./packages/${dir}/src/index.ts`, import.meta.url));
 const fixtures = fileURLToPath(new URL("./fixtures/src/index.ts", import.meta.url));

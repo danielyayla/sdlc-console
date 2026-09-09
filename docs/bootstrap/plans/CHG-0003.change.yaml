@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0003
+title: "Parsers (build-order 0.3)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T10:24:35Z
+origin:
+  type: idea
+  ref: build-order 0.3
+record: null
+cycle: 1
+repro: null
+closed: null

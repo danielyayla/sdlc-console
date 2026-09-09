@@ -1,0 +1,30 @@
+schema: 1
+defaultRole: po
+codeHost: github
+identities:
+  - id: dkapper01@gmail.com
+    name: Daniel Kapper
+    roles:
+      - po
+      - eng
+      - tech_lead
+thresholds:
+  autoFilesMax: 12
+  maxLoopRounds: 5
+  sessionCeiling: 4
+  suiteMinSize: 20
+records:
+  intent: repo
+  spec: repo
+  plan: repo
+  evals: repo
+  pr: repo
+  incident: repo
+evals:
+  mode: continuous
+  threshold: 0.9
+eligibility:
+  coverage: lenient
+products:
+  - name: sdlc-console
+    path: .

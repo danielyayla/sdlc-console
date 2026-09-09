@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0015
+title: "Claude Code launcher + session observer; Sessions view (1.6)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T11:45:57Z
+origin:
+  type: idea
+  ref: build-order 1.6
+record: null
+cycle: 1
+repro: null
+closed: null

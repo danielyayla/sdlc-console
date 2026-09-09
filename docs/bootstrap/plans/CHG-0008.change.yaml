@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0008
+title: "CLI (build-order 0.8)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T10:55:20Z
+origin:
+  type: idea
+  ref: build-order 0.8
+record: null
+cycle: 1
+repro: null
+closed: null

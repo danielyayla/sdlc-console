@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0021
+title: "Webhooks with polling fallback (2.4)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T15:32:59Z
+origin:
+  type: idea
+  ref: build-order 2.4
+record: null
+cycle: 1
+repro: null
+closed: null

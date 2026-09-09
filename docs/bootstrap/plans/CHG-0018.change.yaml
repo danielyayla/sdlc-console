@@ -1,0 +1,15 @@
+schema: 1
+id: CHG-0018
+title: "GitHub adapter and GitHub-mode code PR (2.1)"
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-03T14:24:19Z
+origin:
+  type: idea
+  ref: build-order 2.1
+record: null
+cycle: 1
+repro: null
+closed: null
