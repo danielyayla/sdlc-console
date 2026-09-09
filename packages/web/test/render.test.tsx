@@ -365,12 +365,14 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(board).toContain("· staging");
   });
 
-  it("after the merge the production gate panel waits on the rehearsal with Deploy disabled, and queues for the engineer; after a rehearsed rollback the evidence shows verbatim and Deploy is live", () => {
+  it("after the merge the production gate is the Decision and waits on the rehearsal with Deploy disabled, and queues for the engineer; after a rehearsed rollback the evidence shows verbatim and Deploy is live", () => {
     const merged = renderTree(mergedTree(), { ...initialState("eng"), view: "detail", sel: "CHG-0017" });
-    expect(merged.html).toContain("Production gate · production");
+    expect(merged.html).toContain("Decision · waiting");
+    expect(merged.html).toContain('class="primary">Deploy c2e4d0b to production</div>');
+    expect(merged.html).toContain("Owned by the engineer");
     expect(merged.html).toContain("sdlc/rollback-rehearsed");
     expect(merged.html).toContain("no rollback rehearsal recorded");
-    expect(merged.html).toMatch(/<button class="btn text" disabled="" title="sdlc\/rollback-rehearsed is pending[^"]*">Deploy to production<\/button>/);
+    expect(merged.html).toMatch(/<button class="btn primary" disabled="" title="sdlc\/rollback-rehearsed is pending[^"]*">Deploy to production<\/button>/);
     expect(merged.html).toContain("Merged · production gate needs a rollback rehearsal");
     const gates = renderTree(mergedTree(), { ...initialState("eng"), view: "gates" });
     expect(gates.snap.queues.eng.yours).toContain("CHG-0017");
@@ -383,7 +385,7 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(ready.html).toContain("rollback staging to previous release\nrelease 1 live");
     expect(ready.html).toContain("deploy staging c2e4d0b\nrelease 2 live");
     expect(ready.html).toContain("rollback rehearsed on staging at c2e4d0b by claude-code@sdlc.local");
-    expect(ready.html).toMatch(/<button class="btn text" title="runs the declared deploy command for production[^"]*">Deploy to production<\/button>/);
+    expect(ready.html).toMatch(/<button class="btn primary" title="runs the declared deploy command for production[^"]*">Deploy to production<\/button>/);
     expect(ready.html).toContain("Rehearse rollback");
     expect(ready.snap.changes.find((c) => c.id === "CHG-0017")?.status).toBe("Merged · production gate — waiting on the engineer");
   });

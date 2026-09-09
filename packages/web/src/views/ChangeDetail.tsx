@@ -143,9 +143,25 @@ export function ChangeDetail(p: ChangeDetailProps) {
     : null;
   const switchRole = p.onSwitchRole ? <> <button className="btn text accent-text" onClick={p.onSwitchRole}>Switch role</button></> : null;
 
-  // ---- Decision: the one open gate (rule 2), lit amber when it is yours ----
-  const decisionEdge = gate ? (owned ? "amber" : "off") : view.agent ? "agent pulse" : "off";
-  const decision = (
+  // ---- Decision: the one open gate (rule 2), lit amber when it is yours; an open production gate *is* the decision ----
+  const prodDecides = production !== null && production.open && !gate;
+  const decisionEdge = gate ? (owned ? "amber" : "off") : prodDecides ? (ownsProduction ? "amber" : "off") : view.agent ? "agent pulse" : "off";
+  const decision = prodDecides && production ? (
+    <section className={`rail-section decision edge-lit ${decisionEdge}`} aria-label="decision">
+      <div className="eyebrow">Decision{production.since ? ` · ${waitingFor(production.since, p.now)}` : ""}</div>
+      <div className="primary">Deploy {production.sha ? shortSha(production.sha) : ""} to {production.env}</div>
+      <div className="line">Owned by the {production.ownerLabel}{production.authorized ? ` · authorized by ${production.authorized.by} ${relativeTime(production.authorized.at, p.now)}` : ""}</div>
+      <div className="line">{view.status}</div>
+      {ownsProduction ? (
+        <div className="decide">
+          {production.blocked ? <div className="line amber-text" role="note">{production.blocked}</div> : null}
+          <button className="btn primary" disabled={busy || !view.valid || production.blocked !== null || !p.onDeploy} title={production.blocked ?? `runs the declared deploy command for ${production.env} after the decision is committed`} onClick={() => { setBusy(true); p.onDeploy?.(production.env); }}>Deploy to {production.env}</button>
+        </div>
+      ) : (
+        <div className="line">Waiting on the {production.ownerLabel}.{switchRole}</div>
+      )}
+    </section>
+  ) : (
     <section className={`rail-section decision edge-lit ${decisionEdge}`} aria-label="decision">
       <div className="eyebrow">{gate ? `Decision · ${waitingFor(gate.since, p.now)}` : "No decision open"}</div>
       <div className="primary">{gate ? gate.label : view.status}</div>
@@ -277,7 +293,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
     ) : null;
     row(`env:${e.name}`, envGlyph(e.status), `${e.name} · ${e.kind}`, detail, actions);
   }
-  if (production && (production.open || production.deployment || production.authorized)) {
+  if (production && !prodDecides && (production.open || production.deployment || production.authorized)) {
     const d = production.deployment;
     const title = d?.status === "running" ? `Deploying ${shortSha(d.sha)} to ${production.env}` : d?.status === "succeeded" ? `Deployed ${shortSha(d.sha)} to ${production.env}` : d?.status === "failed" && !production.open ? `${production.env} deploy failed` : `Deploy ${production.sha ? shortSha(production.sha) : ""} to ${production.env}`;
     row(
@@ -292,6 +308,8 @@ export function ChangeDetail(p: ChangeDetailProps) {
       </>,
       production.open && ownsProduction ? <button className="btn text" disabled={busy || !view.valid || production.blocked !== null || !p.onDeploy} title={production.blocked ?? `runs the declared deploy command for ${production.env} after the decision is committed`} onClick={() => { setBusy(true); p.onDeploy?.(production.env); }}>Deploy to {production.env}</button> : null,
     );
+  }
+  if (production && (production.open || production.deployment || production.authorized)) {
     for (const c of production.checks) row(`prod-check:${c.name}`, verdictGlyph(c.verdict), c.name, `${c.verdict} · ${c.summary}`);
   }
 
