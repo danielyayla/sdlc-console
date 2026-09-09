@@ -105,8 +105,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
     <div className="detail">
       <button className="back" onClick={p.onBack}>← Pipeline</button>
       <div className="detail-head">
-        <span>{view.id} · {STAGE_NAMES[view.stage - 1]}{view.risk === "high" ? <> · <span className="amber-text">{riskLabel(view.risk)}</span></> : null}</span>
-        {view.cycle > 1 ? <span className="chip">cycle {view.cycle}</span> : null}
+        <span>{view.id} · {STAGE_NAMES[view.stage - 1]}{view.risk === "high" ? <> · <span className="amber-text">{riskLabel(view.risk)}</span></> : null}{view.cycle > 1 ? ` · cycle ${view.cycle}` : ""}</span>
         {!view.valid ? <span className="chip red">validation error</span> : null}
         {p.exportHref ? <a className="chip" href={p.exportHref} download={`${view.id}-export.json`} title="compliance export: change, every cycle, the ledger verbatim, gate decisions with their commits, PRs, runs and findings — JSON with a sha256 content hash">Export</a> : null}
       </div>
