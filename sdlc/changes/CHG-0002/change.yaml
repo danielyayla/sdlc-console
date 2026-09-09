@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0002
+title: hooks tests fail inside a launched session — scrub the launcher env
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-09T15:20:10Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null
