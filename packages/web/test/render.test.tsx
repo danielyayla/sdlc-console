@@ -212,6 +212,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toMatch(/class="trend mono green-text" title="[^"]*">[▲▼]/);
     expect(html).not.toContain('class="chip');
     expect(html).toContain("2 incidents open, none fixed in window");
+    expect(html).not.toContain('class="column');
   });
 });
 

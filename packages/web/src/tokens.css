@@ -137,9 +137,6 @@ a:hover { color: var(--accent-hover); }
 .pcol { border-top: 1px solid var(--border-subtle); padding-top: 10px; }
 .pcol-head { display: flex; justify-content: space-between; color: var(--text-secondary); }
 .pcol-caption { margin-bottom: 16px; }
-.column-head { display: flex; align-items: baseline; gap: 8px; color: var(--text-primary); font-weight: 500; }
-.column-num { font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-muted); }
-.column-count { color: var(--text-faint); font-weight: 400; margin-left: auto; font-family: var(--font-mono); font-size: var(--text-data); }
 .empty { color: var(--text-faintest); font-family: var(--font-mono); font-size: var(--text-data); padding: 10px 0; }
 .pcard { display: block; width: 100%; text-align: left; color: inherit; cursor: pointer; background: transparent; border: 0; border-radius: 0; padding: 12px 14px 12px 16px; margin-bottom: 8px; transition: background 0.12s; }
 .pcard.owned { background: var(--bg-panel); }
