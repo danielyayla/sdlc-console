@@ -87,6 +87,12 @@ a { color: inherit; }
 .card-title { color: var(--text-primary); font-weight: 500; font-size: 13px; margin: 6px 0 4px; }
 .card-status { color: var(--text-muted); font-size: 12px; }
 .gate-strip { margin-top: 8px; display: flex; align-items: center; gap: 6px; background: var(--amber-tint); border-radius: var(--radius-chip); padding: 3px 6px; font-size: 11px; color: var(--amber); }
+.env-strip { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.env-strip .env { font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border-radius: var(--radius-chip); border: 1px solid var(--border-default); color: var(--text-faint); }
+.env-strip .env.succeeded { color: var(--green); border-color: var(--green); }
+.env-strip .env.failed { color: var(--red); border-color: var(--red); }
+.env-strip .env.running { color: var(--amber); border-color: var(--amber); }
+.env-detail { margin-top: 8px; border-top: 1px solid var(--border-subtle); padding-top: 6px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dot.amber { background: var(--amber); }
 .dot.green { background: var(--green); }

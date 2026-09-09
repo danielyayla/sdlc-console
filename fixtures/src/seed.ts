@@ -264,6 +264,12 @@ export const CONFIG_YAML = stringifyYaml({
   evals: { mode: "continuous", threshold: 0.9 },
   eligibility: { coverage: "lenient" },
   products: [{ name: "invoicing", path: "." }],
+  // 3.6: preview and staging are agent-deployable; production sits behind the production gate (eng) and needs a rehearsed rollback
+  environments: [
+    { name: "preview", kind: "preview", description: "Per-change preview stack", deploy: { command: "echo deploy preview $SDLC_SHA" }, rollback: { command: "echo rollback preview to previous release" } },
+    { name: "staging", kind: "staging", description: "Shared staging", deploy: { command: "echo deploy staging $SDLC_SHA" }, rollback: { command: "echo rollback staging to previous release" }, healthcheck: { command: "echo staging healthy" } },
+    { name: "production", kind: "production", description: "Customer-facing", deploy: { command: "echo deploy production $SDLC_SHA" }, rollback: { command: "echo rollback production to previous release" }, healthcheck: { command: "echo production healthy" }, gate: { roles: ["eng"] } },
+  ],
 });
 
 /** Every file of the seed repository, path → content. Deterministic. */

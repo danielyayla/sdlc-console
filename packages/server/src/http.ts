@@ -35,6 +35,7 @@ import { intakeStatus, receiveIntake } from "./intake/index.js";
 import { clearRepro, downgradeSession, launchSession, markReproRejected, reproDraftFor, resumeAfterRepro, stopSession, verifyReproCommit, type LaunchDeps, type LaunchInput, type SessionRegistry } from "./sessions/index.js";
 import { acceptProposalAction } from "./proposals.js";
 import { linkRecordAction, retryWritebackAction, type WritebackDeps } from "./records.js";
+import { deployEnvironment, rehearseRollback, type DeployExec } from "./deploy/index.js";
 import { ActionError, type StateStore } from "./store.js";
 import type { Authenticator } from "./auth/index.js";
 import { parseCookies, SESSION_COOKIE } from "./auth/index.js";
@@ -189,6 +190,8 @@ export interface AppOptions {
   tracer?: Tracer;
   /** `OTEL_TRACE_URL_TEMPLATE`: where a trace id links to (`{traceId}` substituted); the UI shows trace links only with it. */
   traceUrlTemplate?: string;
+  /** Runs an environment's declared deploy/rollback command (3.6); a shell by default, a fake in tests. */
+  deployExec?: DeployExec;
   now?: () => Date;
 }
 
@@ -477,6 +480,17 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           const r = await retryWritebackAction(store, id, artifactOf(body), o.writeback ?? {});
           o.engine?.noteWriteback(r.run);
           reply(res, r);
+          return;
+        }
+        case "deploy": {
+          // 3.6: a person deploys an environment; production is the gate (role, merged commit, rehearsed rollback) and the command runs only after the decision is committed
+          const r = await deployEnvironment(store, id, str(body, "env"), { env: o.env ?? process.env, ...(options.deployExec ? { exec: options.deployExec } : {}), ...(options.now ? { now: options.now } : {}) });
+          reply(res, { commit: r.commit, snapshot: r.snapshot, toast: r.toast, changeId: r.changeId });
+          return;
+        }
+        case "rehearse-rollback": {
+          const r = await rehearseRollback(store, id, str(body, "env"), { env: o.env ?? process.env, ...(options.deployExec ? { exec: options.deployExec } : {}), ...(options.now ? { now: options.now } : {}) });
+          reply(res, { commit: r.commit, snapshot: r.snapshot, toast: r.toast, changeId: r.changeId });
           return;
         }
         default:

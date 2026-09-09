@@ -215,3 +215,32 @@ export function appendRunbookRun(root: string, session: string, run: RunbookRunD
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, `${JSON.stringify(run)}\n`, "utf8");
 }
+
+/**
+ * One deployment or rollback rehearsal a session made through `deploy_<env>`
+ * / `rehearse_rollback` (3.6): the declared command's outcome, output
+ * verbatim, kept beside the session. The engine records them on deploy.yaml
+ * (default branch, sdlc-bot) when the session ends; nothing here commits.
+ */
+export type SessionDeployDraft =
+  | { kind: "deploy"; env: string; sha: string; version?: string; startedAt: string; finishedAt: string; exitCode: number; output: string; healthcheck?: { command: string; exitCode: number; output: string } }
+  | { kind: "rehearsal"; env: string; sha: string; rehearsedAt: string; finishedAt: string; exitCode: number; output: string };
+
+export function deploysFile(root: string, session: string): string {
+  return join(root, ".sdlc-state", "sessions", session, "deploys.jsonl");
+}
+
+export function readSessionDeploys(root: string, session: string): SessionDeployDraft[] {
+  const file = deploysFile(root, session);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, "utf8")
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== "")
+    .map((l) => JSON.parse(l) as SessionDeployDraft);
+}
+
+export function appendSessionDeploy(root: string, session: string, draft: SessionDeployDraft): void {
+  const file = deploysFile(root, session);
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${JSON.stringify(draft)}\n`, "utf8");
+}

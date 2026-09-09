@@ -18,6 +18,7 @@ import { syncCommand } from "./commands/sync.js";
 import { triageAcceptCommand, triageDismissCommand } from "./commands/triage.js";
 import { loopCommand } from "./commands/loop.js";
 import { ingestCommand } from "./commands/ingest.js";
+import { deployCommand, productionGateCommand, rehearseCommand, renderProductionGate } from "./commands/deploy.js";
 import { mcpCommand } from "./commands/mcp.js";
 import { runCommand } from "./commands/run.js";
 import { formatDiagnostic, validateCommand } from "./commands/validate.js";
@@ -43,7 +44,10 @@ export const USAGE = `sdlc — console over a git repo running an AI-native SDLC
   sdlc security patch|escalate|dismiss <SEC> [--reason <text>]
   sdlc security import <file|->
   sdlc ingest security|channel <file.json|->             (3.5: a claude-security-delivery / claude-tag-delivery envelope → findings / a channel triage item, committed by sdlc-bot; the webhooks below do the same)
-  sdlc hook plan-sync|test-freeze|verify-before-done   (harness JSON on stdin; exit 2 blocks)
+  sdlc deploy <env> <CHG>                               (3.6: run the environment's declared deploy command as you; production is the gate — your role, the merged commit, a rehearsed rollback — and the decision is committed before the command runs)
+  sdlc rehearse-rollback <env> <CHG>                    (3.6: run a non-production environment's rollback command at what it has deployed; the record is the production gate's evidence)
+  sdlc production-gate [<CHG>] [--sha s] [--publish]    (3.6: the gate's required check sdlc/rollback-rehearsed from the committed records; exit 1 when red; --publish puts it on the commit in GitHub mode)
+  sdlc hook plan-sync|test-freeze|verify-before-done|production-gate   (harness JSON on stdin; exit 2 blocks)
   sdlc mcp                                              (agent tools over stdio)
   sdlc session start <CHG> [--kind k] [--task id] [--target t] [--mode m] [--detach]   (kinds: intent design plan build review diagnose propose)
   sdlc session list | stop <id> | downgrade <id> [--reason r]   (downgrade: AUTO → SUPERVISED, never upward)
@@ -111,6 +115,7 @@ const OPTIONS = {
   repo: { type: "string", multiple: true },
   format: { type: "string" },
   out: { type: "string" },
+  publish: { type: "boolean", default: false },
 } as const;
 
 function emit(io: Io, json: boolean, value: unknown, human: () => string): void {
@@ -241,6 +246,29 @@ export async function main(argv: string[], io: Io): Promise<number> {
         const r = await ingestCommand(ctx, sub, file);
         emit(io, json, r, () => (r.commit ? `${r.kind}: ${r.outcome} · ${r.commit.slice(0, 7)}` : `${r.kind}: no-op — ${r.outcome}`));
         return 0;
+      }
+      case "deploy": {
+        const ctx = await repoContext(io, json, values.product);
+        const id = rest[0];
+        if (!sub || !id) throw new CliError("usage: sdlc deploy <env> <CHG>");
+        const r = await deployCommand(ctx, sub, id);
+        emit(io, json, r, () => [`${r.id}: deploy ${r.env} ← ${r.sha.slice(0, 7)} ${r.status}${r.exitCode !== null ? ` (exit ${r.exitCode})` : ""} · ${r.commit.slice(0, 7)} · stage ${r.view.stage} (${r.view.status})`, "--- output ---", r.output.trimEnd()].join("\n"));
+        return r.status === "succeeded" ? 0 : 1;
+      }
+      case "rehearse-rollback": {
+        const ctx = await repoContext(io, json, values.product);
+        const id = rest[0];
+        if (!sub || !id) throw new CliError("usage: sdlc rehearse-rollback <env> <CHG>");
+        const r = await rehearseCommand(ctx, sub, id);
+        emit(io, json, r, () => [`${r.id}: rollback rehearsed on ${r.env} at ${r.sha.slice(0, 7)} ${r.status} (exit ${r.exitCode}) · ${r.commit.slice(0, 7)}${r.published.length > 0 ? ` · sdlc/rollback-rehearsed published on ${r.published.map((s) => s.slice(0, 7)).join(", ")}` : ""}`, "--- output ---", r.output.trimEnd()].join("\n"));
+        return r.status === "succeeded" ? 0 : 1;
+      }
+      case "production-gate": {
+        // read-only apart from --publish, which puts the derived check on the commit: anyone may run it, a CI job included
+        const ctx = await repoContext(io, json, values.product);
+        const r = await productionGateCommand(ctx, sub, { ...(values.sha ? { sha: values.sha } : {}), publish: values.publish === true, ...(values.ref ? { ref: values.ref } : {}) });
+        emit(io, json, r, () => renderProductionGate(r));
+        return r.exitCode;
       }
       case "run": {
         if (!sub) throw new CliError("usage: sdlc run <CHG>");

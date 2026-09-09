@@ -76,4 +76,19 @@ export function verifyBeforeDone(rounds: readonly RoundLike[]): CheckResult {
   return { allowed: true, reason: `round ${last.n} green with output`, offending: [] };
 }
 
-export const check = { planSync, testFreeze, verifyBeforeDone };
+/**
+ * production-gate (pre-deploy, block): a production environment is deployed
+ * only through the gate — by a person, at the merged commit, after a rollback
+ * rehearsal. The hook blocks an agent's attempt to run a production command;
+ * the verdict here is the gate's own check, from the committed records.
+ */
+export function productionGate(view: ChangeView): CheckResult & { verdict: "pass" | "fail" | "pending"; summary: string; evidence: string | null } {
+  const gate = view.deploy.productionGate;
+  if (!gate) return { allowed: false, reason: `no production environment is declared in sdlc/config.yaml for ${view.id}`, offending: [], verdict: "pending", summary: "no production environment declared", evidence: null };
+  const check = gate.checks[0];
+  if (!check) return { allowed: false, reason: "no check", offending: [], verdict: "pending", summary: "no check", evidence: null };
+  if (gate.sha === null) return { allowed: false, reason: `${view.id} is not merged (stage ${view.stage}); the production gate opens on the merge`, offending: [], verdict: "pending", summary: `${view.id} not merged yet`, evidence: null };
+  return { allowed: check.verdict === "pass", reason: `${check.name} ${check.verdict}: ${check.summary}`, offending: [], verdict: check.verdict, summary: check.summary, evidence: check.evidence };
+}
+
+export const check = { planSync, testFreeze, verifyBeforeDone, productionGate };

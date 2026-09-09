@@ -184,24 +184,31 @@ export const events = {
     z.strictObject({ severity, title: nonEmpty, path: z.string().optional(), detail: z.string().optional() }),
     actor,
   ),
+  /** The production gate decision (3.6): a person holding the gate role authorized `sha` into `env`. Human-only by schema, like `gate.accepted`. */
   "deploy.authorized": ev(
     "deploy.authorized",
-    z.strictObject({ env: nonEmpty, version: z.string().optional() }),
+    z.strictObject({ env: nonEmpty, version: z.string().optional(), sha: gitSha.optional(), note: z.string().optional() }),
     humanActor,
   ),
   "deploy.started": ev(
     "deploy.started",
-    z.strictObject({ env: nonEmpty, version: z.string().optional() }),
+    z.strictObject({ env: nonEmpty, version: z.string().optional(), sha: gitSha.optional() }),
     actor,
   ),
   "deploy.finished": ev(
     "deploy.finished",
-    z.strictObject({ env: nonEmpty, version: z.string().optional() }),
+    z.strictObject({ env: nonEmpty, version: z.string().optional(), sha: gitSha.optional() }),
     actor,
   ),
   "deploy.failed": ev(
     "deploy.failed",
-    z.strictObject({ env: nonEmpty, reason: z.string().optional() }),
+    z.strictObject({ env: nonEmpty, reason: z.string().optional(), sha: gitSha.optional() }),
+    actor,
+  ),
+  /** The rollback command was rehearsed against a non-production environment at `sha` (3.6); the record with the output is in deploy.yaml. */
+  "rollback.rehearsed": ev(
+    "rollback.rehearsed",
+    z.strictObject({ env: nonEmpty, sha: gitSha, status: z.enum(["succeeded", "failed"]) }),
     actor,
   ),
   /** A human linked the change to its external record (FR-16); `change.yaml.record` is written in the same commit. */
@@ -278,6 +285,7 @@ export const event = z.discriminatedUnion("event", [
   events["deploy.started"],
   events["deploy.finished"],
   events["deploy.failed"],
+  events["rollback.rehearsed"],
   events["record.linked"],
   events["record.writeback.ok"],
   events["record.writeback.failed"],

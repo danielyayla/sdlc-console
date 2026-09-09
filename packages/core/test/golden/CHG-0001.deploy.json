@@ -1,0 +1,152 @@
+{
+  "deploy": {
+    "schema": 1,
+    "env": "production",
+    "version": "b2b2b2b",
+    "at": "2026-09-08T10:01:00Z",
+    "status": "succeeded",
+    "rehearsals": [
+      {
+        "env": "staging",
+        "kind": "staging",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "status": "succeeded",
+        "command": "echo rollback staging",
+        "rehearsedAt": "2026-09-08T09:05:00Z",
+        "finishedAt": "2026-09-08T09:06:00Z",
+        "exitCode": 0,
+        "output": "rolling staging back to the previous release\nrelease 0 live\n",
+        "actor": {
+          "type": "agent",
+          "id": "claude-code@sdlc.local",
+          "session": "sess-dep"
+        }
+      }
+    ],
+    "environments": [
+      {
+        "env": "staging",
+        "kind": "staging",
+        "status": "succeeded",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "version": "b2b2b2b",
+        "command": "echo deploy staging",
+        "startedAt": "2026-09-08T09:00:00Z",
+        "finishedAt": "2026-09-08T09:02:00Z",
+        "exitCode": 0,
+        "output": "deploying staging\nrelease 1 live\n",
+        "actor": {
+          "type": "agent",
+          "id": "claude-code@sdlc.local",
+          "session": "sess-dep"
+        },
+        "healthcheck": {
+          "command": "curl staging/health",
+          "exitCode": 0,
+          "output": "ok"
+        }
+      },
+      {
+        "env": "production",
+        "kind": "production",
+        "status": "succeeded",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "version": "b2b2b2b",
+        "command": "echo deploy production",
+        "startedAt": "2026-09-08T10:00:00Z",
+        "output": "deploying production\nrelease 1 live\n",
+        "actor": {
+          "type": "human",
+          "id": "release@example.com"
+        },
+        "authorizedBy": "release@example.com",
+        "authorizedAt": "2026-09-08T10:00:00Z",
+        "finishedAt": "2026-09-08T10:01:00Z",
+        "exitCode": 0
+      }
+    ],
+    "authorizedBy": "release@example.com",
+    "authorizedAt": "2026-09-08T10:00:00Z"
+  },
+  "events": [
+    {
+      "event": "deploy.started",
+      "actor": {
+        "type": "agent",
+        "id": "claude-code@sdlc.local",
+        "session": "sess-dep"
+      },
+      "data": {
+        "env": "staging",
+        "version": "b2b2b2b",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+      }
+    },
+    {
+      "event": "deploy.finished",
+      "actor": {
+        "type": "agent",
+        "id": "claude-code@sdlc.local",
+        "session": "sess-dep"
+      },
+      "data": {
+        "env": "staging",
+        "version": "b2b2b2b",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+      }
+    },
+    {
+      "event": "rollback.rehearsed",
+      "actor": {
+        "type": "agent",
+        "id": "claude-code@sdlc.local",
+        "session": "sess-dep"
+      },
+      "data": {
+        "env": "staging",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "status": "succeeded"
+      }
+    },
+    {
+      "event": "deploy.authorized",
+      "actor": {
+        "type": "human",
+        "id": "release@example.com",
+        "role": "release"
+      },
+      "data": {
+        "env": "production",
+        "version": "b2b2b2b",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+        "note": "release 1"
+      }
+    },
+    {
+      "event": "deploy.started",
+      "actor": {
+        "type": "human",
+        "id": "release@example.com",
+        "role": "release"
+      },
+      "data": {
+        "env": "production",
+        "version": "b2b2b2b",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+      }
+    },
+    {
+      "event": "deploy.finished",
+      "actor": {
+        "type": "human",
+        "id": "release@example.com",
+        "role": "release"
+      },
+      "data": {
+        "env": "production",
+        "version": "b2b2b2b",
+        "sha": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+      }
+    }
+  ]
+}

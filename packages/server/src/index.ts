@@ -20,5 +20,6 @@ export * from "./sessions/index.js";
 export * from "./engine/index.js";
 export * from "./maintain/index.js";
 export * from "./intake/index.js";
+export * from "./deploy/index.js";
 export * from "./github/index.js";
 export * from "./otel.js";

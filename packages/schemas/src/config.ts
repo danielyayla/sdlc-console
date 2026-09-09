@@ -1,5 +1,27 @@
 import { z } from "zod";
 import { artifactName, nonEmpty, ratio, recordsMode, role, schemaVersion } from "./common.js";
+import { environmentKind } from "./deploy.js";
+
+const command = z.strictObject({ command: nonEmpty });
+
+/**
+ * A deployment environment (3.6). The commands are the only ones the console
+ * ever runs for it — an agent's `deploy_<env>` tool and a person's
+ * `sdlc deploy <env>` both run `deploy.command`, never a caller's string.
+ * `production` is the one kind behind a human gate: `gate.roles` names who
+ * may open it (default: gate 5's owner, `eng`); every other kind is
+ * agent-deployable and is where the rollback is rehearsed.
+ */
+export const environment = z.strictObject({
+  name: z.string().regex(/^[a-z][a-z0-9-]*$/, "expected an environment slug"),
+  kind: environmentKind,
+  description: z.string().optional(),
+  deploy: command,
+  rollback: command,
+  healthcheck: command.optional(),
+  /** Production only: roles that own the production gate (default `[eng]`). */
+  gate: z.strictObject({ roles: z.array(role).min(1) }).optional(),
+});
 
 export const identity = z.strictObject({
   id: nonEmpty,
@@ -109,11 +131,14 @@ export const config = z.strictObject({
     )
     .optional(),
   intentHome: z.string().optional(),
+  /** Deployment environments (3.6); absent = no deploy tools, no production gate. Names are unique (a core rule: Ajv validates the generated JSON Schema, which cannot say so). */
+  environments: z.array(environment).optional(),
   /** Artifact names whose acceptance is recorded elsewhere; informational. */
   artifacts: z.array(artifactName).optional(),
 });
 
 export type Config = z.infer<typeof config>;
 export type Identity = z.infer<typeof identity>;
+export type Environment = z.infer<typeof environment>;
 export type Thresholds = z.infer<typeof thresholds>;
 export type RecordsMapping = z.infer<typeof recordsMapping>;

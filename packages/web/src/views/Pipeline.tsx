@@ -38,6 +38,21 @@ export function Pipeline({ changes, now, onSelect }: PipelineProps) {
                     <span>{c.gate.label}</span>
                     <span className="owner">{gateOwnerLabel(c)} · {waitingFor(c.gate.since, now)}</span>
                   </div>
+                ) : c.deploy.productionGate?.open ? (
+                  <div className="gate-strip">
+                    <span className="dot amber" />
+                    <span>Deploy to {c.deploy.productionGate.env}</span>
+                    <span className="owner">{c.deploy.productionGate.ownerRoles.join("/").toUpperCase()} · {c.deploy.productionGate.blocked ? "rehearsal pending" : waitingFor(c.deploy.productionGate.since ?? c.createdAt, now)}</span>
+                  </div>
+                ) : null}
+                {(stage >= 5 || c.deploy.environments.some((e) => e.status !== "not-deployed")) && c.deploy.environments.length > 0 ? (
+                  <div className="env-strip" aria-label="environments">
+                    {c.deploy.environments.map((e) => (
+                      <span key={e.name} className={`env ${e.status}`} title={`${e.name}: ${e.status}${e.latest ? ` ${e.latest.sha.slice(0, 7)}` : ""}`}>
+                        {e.status === "succeeded" ? "✓" : e.status === "failed" ? "✗" : e.status === "running" ? "…" : "·"} {e.name}
+                      </span>
+                    ))}
+                  </div>
                 ) : null}
               </button>
             ))}

@@ -1,5 +1,6 @@
 import type { ArtifactName, Change, Diagnostic, Event, EvalCase, GateNumber, PerChangeRun, Pr, RecordsMode, VerificationContract, WritebackKind } from "@sdlc/schemas";
 import { activityFeed, type ActivityEntry } from "./activity.js";
+import { deriveDeploy, productionStatus, type DeployView, type ProductionGateView } from "./deploy.js";
 import { deriveEligibility, uiPaths, type Eligibility } from "./eligibility.js";
 import { eventsNamed, eventsOfCycle, firstEvent, indexOf, lastEvent, latestOf } from "./events.js";
 import { fingerprintMatches } from "./fingerprint.js";
@@ -135,6 +136,8 @@ export interface ChangeView {
   artifactPrs: Partial<Record<ArtifactIndex, ArtifactPrView>>;
   /** Review findings reported against the current code PR (this cycle, after it opened), most severe first. */
   findings: ReviewFindingView[];
+  /** Deployments per environment, rollback rehearsals and the production gate (3.6); derived from deploy.yaml and `config.environments`. */
+  deploy: DeployView;
   /** The eval case this change was harvested into (post-merge "Add as eval"), if any. */
   harvested: { id: string; status: "draft" | "active" | "retired" } | null;
   /** Visual check inputs (spec 5B): UI paths in the plan, the CLAUDE.md visual tool, the design mock, and the warning when UI work has no visual check. */
@@ -327,6 +330,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     config: repo.config,
   });
 
+  const deploy = deriveDeploy(repo.config, files, prMerged);
   const { agent, status } = deriveStatus({
     change,
     stage,
@@ -340,6 +344,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     fresh: change.cycle > 1 && !accepted.has(1) && !sentBackJustNow,
     incCaseId,
     incomplete,
+    production: deploy.productionGate,
   });
 
   const artifactPrs: Partial<Record<ArtifactIndex, ArtifactPrView>> = {};
@@ -391,6 +396,7 @@ export function deriveChange(repo: Repo, files: ChangeFiles): ChangeView {
     artifactPrs,
     pr: files.pr,
     findings,
+    deploy,
     visual: deriveVisual(files, planFiles, repo.verification),
     freezeLifts: eventsNamed(events, "freeze.lifted").map((e) => ({ path: e.data.path, reason: e.data.reason, by: e.actor.id, at: e.ts })),
     reproRejection: (() => {
@@ -451,6 +457,7 @@ function invalidView(files: ChangeFiles, errors: Diagnostic[]): ChangeView {
     pr: null,
     artifactPrs: {},
     findings: [],
+    deploy: { record: files.deploy, environments: [], rehearsals: [], productionGate: null },
     harvested: null,
     visual: { uiPaths: [], tool: null, mock: null, warning: null },
     freezeLifts: [],
@@ -551,6 +558,8 @@ interface StatusInputs {
   incCaseId: string | null;
   /** Required sections missing or empty in the current stage's artifact. */
   incomplete: string[];
+  /** The production gate (3.6) when a production environment is declared. */
+  production: ProductionGateView | null;
 }
 
 /** `agent` flag and status text per spec §5 / §4. */
@@ -589,8 +598,11 @@ function deriveStatus(i: StatusInputs): { agent: boolean; status: string } {
       }
     case 5:
       return { agent: true, status: "Opening PR" };
-    case 6:
-      return { agent: false, status: i.present.incident ? "Incident recorded" : "Deployed · monitoring" };
+    case 6: {
+      if (i.present.incident) return { agent: false, status: "Incident recorded" };
+      const production = i.production ? productionStatus(i.production) : null;
+      return { agent: false, status: production ?? "Deployed · monitoring" };
+    }
   }
 }
 

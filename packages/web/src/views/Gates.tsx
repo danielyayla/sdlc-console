@@ -11,14 +11,15 @@ export interface GatesProps {
 
 export function Gates({ changes, queues, role, now, onSelect }: GatesProps) {
   const byId = new Map(changes.map((c) => [c.id, c]));
+  // the production gate (3.6) queues like the artifact gates: its row names the environment
   const rows = (ids: string[], yours: boolean) =>
-    ids.map((id) => byId.get(id)).filter((c): c is ChangeView => c !== undefined && c.gate !== null).map((c) => (
+    ids.map((id) => byId.get(id)).filter((c): c is ChangeView => c !== undefined && (c.gate !== null || c.deploy.productionGate?.open === true)).map((c) => (
       <button className="row" key={c.id} onClick={() => onSelect(c.id)}>
         {yours ? <span className="dot amber" /> : <span className="dot inactive" />}
         <span className="id">{c.id}</span>
-        <span className="label">{c.gate?.label}</span>
-        <span className="meta">{c.title} · {STAGE_NAMES[c.stage - 1]}</span>
-        <span className="since">{c.gate ? waitingFor(c.gate.since, now) : ""}</span>
+        <span className="label">{c.gate ? c.gate.label : `Deploy to ${c.deploy.productionGate?.env ?? "production"}`}</span>
+        <span className="meta">{c.title} · {STAGE_NAMES[c.stage - 1]}{!c.gate && c.deploy.productionGate?.blocked ? " · rollback rehearsal pending" : ""}</span>
+        <span className="since">{c.gate ? waitingFor(c.gate.since, now) : c.deploy.productionGate?.since ? waitingFor(c.deploy.productionGate.since, now) : ""}</span>
         <span className="arrow">→</span>
       </button>
     ));

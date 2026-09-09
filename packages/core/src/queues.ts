@@ -7,13 +7,21 @@ export interface GateQueues {
   other: ChangeView[];
 }
 
-/** Open gates split by ownership of the active role, newest `since` first (spec §4.3). */
-export function gateQueues(changes: readonly ChangeView[], role: GateRole): GateQueues {
-  const open = changes.filter((c) => c.valid && c.gate !== null);
-  const bySince = (a: ChangeView, b: ChangeView) => (b.gate?.since ?? "").localeCompare(a.gate?.since ?? "");
+/** The production gate (3.6) when it is open and the change has no artifact gate open. */
+export function openProductionGate(c: ChangeView): ChangeView["deploy"]["productionGate"] {
+  const g = c.deploy.productionGate;
+  return c.valid && c.gate === null && g?.open ? g : null;
+}
+
+/** Open gates split by ownership of the active role, newest `since` first (spec §4.3). The production gate queues like the others (3.6). */
+export function gateQueues(changes: readonly ChangeView[], role: GateRole | string): GateQueues {
+  const open = changes.filter((c) => c.valid && (c.gate !== null || openProductionGate(c) !== null));
+  const since = (c: ChangeView) => c.gate?.since ?? openProductionGate(c)?.since ?? "";
+  const owned = (c: ChangeView) => (c.gate ? c.gate.ownerRole === role : (openProductionGate(c)?.ownerRoles.includes(role) ?? false));
+  const bySince = (a: ChangeView, b: ChangeView) => since(b).localeCompare(since(a));
   return {
-    yours: open.filter((c) => c.gate?.ownerRole === role).sort(bySince),
-    other: open.filter((c) => c.gate?.ownerRole !== role).sort(bySince),
+    yours: open.filter((c) => owned(c)).sort(bySince),
+    other: open.filter((c) => !owned(c)).sort(bySince),
   };
 }
 
