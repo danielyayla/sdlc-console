@@ -66,7 +66,6 @@ a:hover { color: var(--accent-hover); }
 .edge-lit.green  { --edge: var(--green); }
 .edge-lit.red    { --edge: var(--red); }
 .edge-lit.agent  { --edge: var(--agent); }
-.edge-lit.accent { --edge: var(--accent); }
 .edge-lit.off    { --edge: var(--text-faintest); }
 .edge-lit.off::before { box-shadow: none; }
 .edge-lit.pulse::before { animation: kilnpulse 2s ease-in-out infinite; }
@@ -108,7 +107,6 @@ a:hover { color: var(--accent-hover); }
 
 /* ---- component rules ---- */
 .eyebrow { font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-muted); }
-.id { font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-muted); }
 /* layout */
 .app { display: flex; flex-direction: column; height: 100%; }
 .topbar { position: fixed; top: 0; left: 0; right: 0; height: var(--topbar-h); display: flex; align-items: center; gap: var(--s-6); padding: 0 var(--s-6); background: var(--bg-app); border-bottom: 1px solid var(--border-subtle); z-index: 10; }
@@ -203,7 +201,6 @@ a:hover { color: var(--accent-hover); }
 .viewer-head .state { font-family: var(--font-mono); font-size: var(--text-data); color: var(--text-faint); }
 .viewer-body { font-family: var(--font-mono); font-size: var(--text-data); line-height: 1.7; white-space: pre-wrap; padding: 0; color: var(--text-secondary); margin: 0; }
 .viewer-empty { color: var(--text-faint); font-family: var(--font-ui); }
-.panel { background: var(--bg-panel); padding: 12px; }
 .actions { display: flex; gap: 8px; margin-top: 10px; }
 
 /* gates */
