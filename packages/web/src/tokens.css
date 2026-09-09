@@ -129,8 +129,8 @@ a:hover { color: var(--accent-hover); }
 .roles { display: flex; gap: 18px; }
 .main { margin-top: var(--topbar-h); flex: 1; overflow: auto; padding: var(--s-6) var(--s-6) 96px; }
 .connecting { color: var(--text-faint); padding: 40px; text-align: center; }
-.banner { border: 1px solid var(--amber); background: var(--amber-tint); color: var(--text-primary); padding: 8px 12px; border-radius: var(--radius-control); margin-bottom: 14px; }
-.banner.red { border-color: var(--red); background: rgba(217, 100, 89, 0.08); }
+.banner { font-family: var(--font-mono); font-size: var(--text-data); color: var(--amber); margin-bottom: var(--s-5); }
+.banner.red { color: var(--red); }
 
 /* pipeline */
 .pipeline { display: grid; grid-template-columns: repeat(6, minmax(200px, 1fr)); gap: 10px; min-width: 1280px; }
