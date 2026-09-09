@@ -1,5 +1,5 @@
 import type { ChangeView } from "@sdlc/core";
-import { OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, gateOwnerLabel, riskLabel, waitingFor, type Role } from "../lib/format";
+import { OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, gateOwnerLabel, waitingFor, type Role } from "../lib/format";
 
 /** The artifact each column commits; the Maintain caption names the loop-back. */
 const STAGE_CAPTIONS = ["intent.md", "spec.md", "plan.md", "evals", "PR + findings", "incident → intent.md"] as const;
@@ -52,12 +52,7 @@ export function Pipeline({ changes, role, now, onSelect }: PipelineProps) {
               const showEnvs = (stage >= 5 || c.deploy.environments.some((e) => e.status !== "not-deployed")) && c.deploy.environments.length > 0;
               return (
                 <button className={`pcard edge-lit ${edge}${mine ? " owned" : ""}`} key={c.id} onClick={() => onSelect(c.id)}>
-                  <div className="pline mono">
-                    <span className="muted">{c.id}</span>
-                    {c.agent ? <span className="agent-text pulse">agent</span> : null}
-                    {c.risk === "high" ? <span className="amber-text">{riskLabel(c.risk)}</span> : null}
-                    {!c.valid ? <span className="red-text">invalid</span> : null}
-                  </div>
+                  <div className="pline mono faint">{c.id}{c.risk === "high" ? <span className="amber-text"> · high risk</span> : null}{!c.valid ? <span className="red-text"> · invalid</span> : null}</div>
                   <div className="ptitle">{c.title}</div>
                   <div className="pline muted">{c.status}</div>
                   {c.gate ? (

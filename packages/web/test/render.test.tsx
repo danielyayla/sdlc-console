@@ -23,7 +23,9 @@ describe("Pipeline (spec §4)", () => {
     expect(html).toContain("Accept intent.md");
     expect(html).toContain("Merge PR");
     expect(html).toContain("TECH LEAD");
-    expect(html).toContain('<span class="agent-text pulse">agent</span>');
+    // the agent word left line 1: the orange pulsing edge carries it, line 3 keeps the status words
+    expect(html).not.toContain("agent-text pulse");
+    expect(html).not.toContain(">routine<");
     expect(html).toContain('class="pcard edge-lit amber owned"');
     expect(html).toContain('class="pcard edge-lit agent pulse"');
     expect(html).not.toContain('class="card');
