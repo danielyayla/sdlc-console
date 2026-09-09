@@ -218,6 +218,9 @@ a:hover { color: var(--accent-hover); }
 
 /* loop / security */
 .loop, .security { max-width: 920px; }
+.loop .primary { margin-bottom: var(--s-6); }
+.security .primary { margin-bottom: 4px; }
+.view-sub { margin-bottom: var(--s-6); }
 .view-head { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; margin-bottom: var(--s-5); }
 .view-head .primary { margin: 0; }
 .bands { margin-top: 48px; }

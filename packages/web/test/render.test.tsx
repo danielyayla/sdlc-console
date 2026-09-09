@@ -171,6 +171,7 @@ describe("Loop, Security, Metrics (spec §4)", () => {
   });
   it("Security shows severity as the item's lit edge and word, statuses, actions only while new, and the governance footer", () => {
     const html = render({ ...initialState("eng"), view: "security" });
+    expect(html).toContain("2 findings need a route."); // the seed has two new, unresolved findings — the same two that carry actions below
     expect(html).toContain("SEC-0118");
     expect(html).toContain("SEC-0120");
     expect(html).toContain("patch in PR gate");
@@ -356,6 +357,7 @@ describe("maintain intake in the views (3.5)", () => {
     expect(html).toContain("CWE-208");
     expect(html).toContain('href="https://security.example/runs/scan-2026-09-08-01"');
     expect(html).toContain("if (given == expected) return true;");
+    expect(html).toContain("3 findings need a route."); // the seed's two plus SEC-0121; SEC-0122 is resolved
     expect(html).toContain("last run 2026-09-08T06:04:12Z");
     expect(html).toContain("resolved by scanner · 2026-09-10T06:02:55Z");
     // actions: the three seed findings have one `new` (SEC-0118) plus SEC-0121; SEC-0122 is resolved and shows none

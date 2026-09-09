@@ -23,15 +23,18 @@ export function Security({ snapshot, onPatch, onEscalate, onDismiss, form, onFor
   const scans = findings.map((f) => f.run).filter((r): r is NonNullable<typeof r> => r !== undefined && r.at !== undefined);
   const latestScan = scans.length > 0 ? scans.reduce((a, b) => ((b.at ?? "") > (a.at ?? "") ? b : a)) : null;
   const latestRun = latestScan?.at ?? null;
+  const source = (latestScan && findings.find((f) => f.run === latestScan)?.source) || "recurring scans";
+  const n = findings.filter((f) => f.status === "new" && f.resolved === undefined).length;
   return (
     <div className="security">
-      <div className="view-head">
-        <h1 className="primary">Security</h1>
-        <span className="mono faint">
-          recurring scans · {repos} repo{repos === 1 ? "" : "s"} · last run {latestRun ? <>{latestRun}{latestScan?.url ? <> · <a href={latestScan.url} target="_blank" rel="noreferrer">{latestScan.id}</a></> : ` · ${latestScan?.id ?? ""}`}</> : "n/a · scanner not connected — POST /api/webhooks/claude-security or import a CSV/MD export"} · {validated} validated
-        </span>
+      <div className="primary">{n === 0 ? "No new findings." : n === 1 ? "1 finding needs a route." : `${n} findings need a route.`}</div>
+      <div className="mono faint view-sub">
+        {latestRun ? (
+          <>{source} · {repos} repo{repos === 1 ? "" : "s"} · last run {latestRun} · {latestScan?.url ? <a href={latestScan.url} target="_blank" rel="noreferrer">{latestScan.id}</a> : latestScan?.id ?? ""} · {validated} validated</>
+        ) : (
+          <>recurring scans · {repos} repo{repos === 1 ? "" : "s"} · last run n/a · scanner not connected — POST /api/webhooks/claude-security or import a CSV/MD export · {validated} validated</>
+        )}
       </div>
-      {findings.length === 0 ? <div className="empty">Nothing here</div> : null}
       <div className="items">
       {findings.map((f) => {
         const dismissed = f.status === "dismissed";
