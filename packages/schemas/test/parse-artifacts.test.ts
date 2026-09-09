@@ -118,7 +118,7 @@ describe("parsePlan", () => {
   });
 
   it("parses this repo's CHG-0001 plan: files, order, acceptance line", () => {
-    const r = parsePlan(read("sdlc/changes/CHG-0001/plan.md"), "sdlc/changes/CHG-0001/plan.md");
+    const r = parsePlan(read("docs/bootstrap/plans/CHG-0001.md"), "docs/bootstrap/plans/CHG-0001.md");
     expect(r.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
     expect(r.ok).toBe(true);
     expect(r.value?.files.length).toBeGreaterThan(30);
