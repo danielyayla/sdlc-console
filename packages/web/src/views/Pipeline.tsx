@@ -46,7 +46,6 @@ export function Pipeline({ changes, role, now, onSelect }: PipelineProps) {
           <section className="pcol" key={stage} aria-label={`${stage} ${name}`}>
             <div className="pcol-head mono"><span>{String(stage).padStart(2, "0")} {name}</span><span className="faint">{cards.length}</span></div>
             <div className="pcol-caption mono faint">{STAGE_CAPTIONS[i]}</div>
-            {cards.length === 0 ? <div className="empty">Nothing here</div> : null}
             {cards.map((c) => {
               const production = c.deploy.productionGate;
               const mine = owned(c, role);
