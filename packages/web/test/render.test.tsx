@@ -199,6 +199,9 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("67%");
     expect(html).toContain("PR metadata · git mirror");
     expect(html).toContain("incident records · git mirror");
+    expect(html).toContain("30-day window vs the 30 before");
+    expect(html).not.toContain("30 days");
+    expect(html).not.toContain("metrics-sources");
     expect(html).toContain('<span class="metric-sources">pr</span>');
     expect(html).toContain("review time per PR");
     expect(html).toContain("median of 1 · review job");

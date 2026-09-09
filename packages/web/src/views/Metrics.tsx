@@ -57,21 +57,14 @@ function via(s: SourceStatus): string {
 export function Metrics({ metrics, sources }: { metrics: StageMetrics[]; sources?: MetricSourcesStatus }) {
   return (
     <div className="metrics">
-      <div className="view-head metrics-head">
-        <h1 className="primary">Metrics</h1>
-        <span className="mono faint">30-day window vs the 30 days before</span>
+      <div className="primary">Metrics</div>
+      <div className="mono faint view-sub msub">
+        <span>30-day window vs the 30 before</span>
+        {sources ? FEEDS.map((f) => <span key={f.key} className={sources[f.key].via === "none" ? "amber-text" : ""}>{f.label} · {via(sources[f.key])}</span>) : null}
       </div>
-      {sources ? (
-        <div className="metrics-sources mono">
-          <span className="faint">sources</span>
-          {FEEDS.map((f) => (
-            <span key={f.key} className={sources[f.key].via === "none" ? "amber-text" : "muted"}>{f.label} · {via(sources[f.key])}</span>
-          ))}
-        </div>
-      ) : null}
       {metrics.map((s) => (
         <section className="stage-plane" key={s.stage}>
-          <div className="column-head"><span className="column-num">{String(s.stage).padStart(2, "0")}</span><span>{s.name}</span><span className="column-count">30 days</span></div>
+          <div className="column-head"><span className="column-num">{String(s.stage).padStart(2, "0")}</span><span>{s.name}</span></div>
           <div className="halves">
             <Half label="Leading" values={s.leading} />
             <Half label="Lagging" values={s.lagging} />

@@ -248,10 +248,8 @@ a:hover { color: var(--accent-hover); }
 .item .inline-reason { margin-top: 12px; }
 
 /* metrics */
-.metrics { max-width: 1020px; display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); }
-.metrics-head, .metrics-sources { grid-column: 1 / -1; }
-.metrics-head { margin-bottom: 0; }
-.metrics-sources { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; margin-bottom: var(--s-3); }
+.metrics { max-width: 1200px; display: block; }
+.msub { display: flex; gap: 16px; flex-wrap: wrap; }
 .stage-plane { background: var(--bg-panel); padding: 16px 20px; }
 .halves { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-4); margin-top: 10px; }
 .metric { padding: 8px 0; border-top: 1px solid var(--border-subtle); }
