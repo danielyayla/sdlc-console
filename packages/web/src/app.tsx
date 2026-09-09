@@ -169,7 +169,7 @@ export function App({ snapshot: injected = null, initial, now = new Date(), load
         onForm={onForm}
       />
     );
-  else if (state.view === "config") body = <Config snapshot={snapshot} role={state.role} onAcceptProposal={(id) => void run(`/proposals/${id}/accept`, {})} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} onRunSuite={() => void run("/evals/run", {})} form={state.form} onForm={onForm} />;
+  else if (state.view === "config") body = <Config snapshot={snapshot} role={state.role} onAcceptProposal={(id) => void run(`/proposals/${id}/accept`, {})} onDismissProposal={(id, reason) => void run(`/proposals/${id}/dismiss`, { reason })} onRunSuite={() => void run("/evals/run", {})} form={state.form} onForm={onForm} {...(canSwitchRole ? { onSwitchRole: () => dispatch({ type: "role", role: otherRole }) } : {})} />;
   else if (state.view === "loop")
     body = (
       <Loop

@@ -211,8 +211,8 @@ describe("Config (spec §4)", () => {
     expect(html).toContain("marketing@veri.example");
     expect(html).toContain("plan-sync");
     expect(html).toContain("verify-before-done");
-    expect(html).toContain("Managed hooks are deployed by the platform team");
-    expect(html).toContain("intent: repo");
+    expect(html).toContain("managed · engineers cannot switch them off");
+    expect(html).toContain("intent · repo");
     expect(html).toContain("PRP-0007");
     expect(html).toContain("Never filter invoice rows by truthiness");
     expect(html).toContain("under-sized · &lt; 20");
@@ -241,11 +241,15 @@ describe("Config (spec §4)", () => {
     expect(eng).toContain("plan-sync</span>");
     expect(eng).toContain("100%</span>");
     expect(eng).toContain("1 trigger test · RUN-0001");
-    expect(eng).toContain("Findings citing");
+    expect(eng).toContain("findings citing");
     expect(eng).toContain("threshold 80%");
+    // proposals come first and are the primary object; the product owner reads them and is offered the role switch
+    expect(eng.indexOf("PRP-0007")).toBeLessThan(eng.indexOf('aria-label="evals"'));
+    expect(eng).toContain('class="proposal edge-lit amber"');
     const po = render({ ...initialState("po"), view: "config" });
-    expect(po).toContain('title="eng or platform accepts a proposal"');
-    expect(po).toMatch(/<button class="btn primary" disabled="" title="eng or platform accepts a proposal"/);
+    expect(po).toContain("The engineer or platform decides.");
+    expect(po).toContain(">Switch role</button>");
+    expect(po).not.toContain("Accept · open PR");
   });
 
   it("a merged change shows the case it was harvested into (2.5)", () => {
@@ -266,8 +270,8 @@ describe("Records mode (2.9, FR-16, spec 5A.6)", () => {
     expect(html).toContain("incident.md · external");
     expect(html).not.toContain("write-back failed");
     const config = render({ ...initialState("eng"), view: "config" });
-    expect(config).toContain("incident: external");
-    expect(config).toContain("connector: records");
+    expect(config).toContain('<span class="amber-text">incident · external</span>');
+    expect(config).toContain("connector records");
     // a repo-mode artifact keeps the plain header
     const intent = render({ ...initialState("po"), view: "detail", sel: "CHG-0022" });
     expect(intent).toContain("pending review · authoritative");

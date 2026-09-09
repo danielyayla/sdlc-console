@@ -6,7 +6,7 @@ import { InlineReason } from "./InlineReason";
 
 export interface ConfigProps {
   snapshot: Snapshot;
-  /** Proposal accept/dismiss belong to eng (and platform); the PO sees the cards read-only. */
+  /** Proposal accept/dismiss belong to eng (and platform); the PO sees the proposals read-only. */
   role?: "po" | "eng";
   /** Accept opens the PR (or cuts the branch) for the code owners; the console never merges it. */
   onAcceptProposal: (id: string) => void;
@@ -16,11 +16,14 @@ export interface ConfigProps {
   /** The open inline reason form (rule 3): a dismissal reason is typed under its proposal. */
   form: FormState;
   onForm: (form: FormState) => void;
+  /** "Switch role" for the product owner when the identity also holds the engineer role. */
+  onSwitchRole?: () => void;
 }
 
-const ACTION_CLASS: Record<string, string> = { block: "red", ask: "amber", allow: "green" };
+const ACTION_TONE: Record<string, string> = { block: "red-text", ask: "amber-text", allow: "green-text" };
+const VERDICT_TONE: Record<string, string> = { pass: "green", fail: "amber", incomplete: "red" };
 
-export function Config({ snapshot, role = "po", onAcceptProposal, onDismissProposal, onRunSuite, form, onForm }: ConfigProps) {
+export function Config({ snapshot, role = "po", onAcceptProposal, onDismissProposal, onRunSuite, form, onForm, onSwitchRole }: ConfigProps) {
   const close = () => onForm(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "draft" | "retired">("all");
   const cm = snapshot.claudeMd;
@@ -35,7 +38,6 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
   const suiteMin = ev.suiteMinSize;
   const underSized = ev.underSized;
   const budget = ev.budget;
-  const passHistory = (caseId: string) => runs.slice(-30).map((r) => r.results.find((x) => x.caseId === caseId)?.pass ?? null);
   const filtered = statusFilter === "all" ? cases : cases.filter((c) => c.status === statusFilter);
   const records = snapshot.config.records;
   const skillThreshold = Math.round(snapshot.config.thresholds.skillPassThreshold * 100);
@@ -72,162 +74,166 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
         ))}
       </div>
 
-      <section className="panel">
-        <div className="eyebrow">CLAUDE.md</div>
-        {cm ? (
-          <>
-            <div className="card-status">
-              version {cm.version ?? "—"} · {cm.wordCount} words · <span className={`chip ${cm.overOnePage ? "amber" : "green"}`}>{cm.overOnePage ? `over one page (${ONE_PAGE_WORDS})` : "under one page"}</span> · freshness: {latest ? `last suite run ${latest.startedAt}` : "no suite run yet"}
-            </div>
-            <div className="card-status">working rule: {cm.workingRule ?? <span className="chip amber">none written down</span>}</div>
-            {cm.verification ? (
-              <table className="bands">
-                <thead><tr><th>Command</th><th>Runs</th><th>Healthy output</th><th>Single target</th></tr></thead>
-                <tbody>
-                  {cm.verification.commands.map((c) => (
-                    <tr key={c.name + c.cmd}><td>{c.label}</td><td className="mono">{c.cmd}</td><td className="muted">{c.healthyOutput ?? "—"}</td><td>{c.singleTarget ? <span className="chip green">yes</span> : <span className="chip amber">wrap in one target</span>}</td></tr>
-                  ))}
-                  {cm.verification.testGlobs.length > 0 ? <tr><td>test files</td><td className="mono" colSpan={3}>{cm.verification.testGlobs.join(", ")}</td></tr> : null}
-                  <tr><td>max rounds</td><td colSpan={3}>{cm.verification.maxLoopRounds}</td></tr>
-                </tbody>
-              </table>
-            ) : (
-              <div className="chip amber">no feedback loop — set up verification ("## Verifying your work")</div>
-            )}
-          </>
-        ) : (
-          <div className="chip amber">CLAUDE.md missing — all sessions run without a feedback loop</div>
-        )}
-        {warningsFor("CLAUDE.md").map((d, i) => <div className="warn" key={i}>⚠ {d.message}</div>)}
+      {/* Proposals — the primary object (rule 2): the same reason twice → a CLAUDE.md line; Accept opens a PR for the code owners, the console never edits CLAUDE.md */}
+      <section className="proposals" aria-label="proposals">
+        <div className="eyebrow">Proposals · the same reason twice → a CLAUDE.md line · accepting opens a PR for the code owners</div>
+        <div className="proposal-list">
+          {snapshot.proposalViews.length === 0 && unanswered.length === 0 ? <div className="empty mono">Nothing here</div> : null}
+          {unanswered.map((sig) => (
+            <article className="proposal edge-lit amber" key={`signal:${sig.reason}`}>
+              <div className="meta"><span className="muted">no proposal yet</span><span>from {sig.citations.join(", ")}</span><span title={sig.reason}>seen {sig.count}×</span></div>
+              <div className="text">{sig.display}</div>
+              <div className="line">The engine drafts a proposal (sdlc serve --engine).</div>
+            </article>
+          ))}
+          {snapshot.proposalViews.map((p) => {
+            const status = p.status === "open" ? <span className="amber-text">open</span> : p.status === "accepted" ? (p.landed ? <span className="green-text">merged · CLAUDE.md carries it</span> : p.pr?.url ? <a className="amber-text" href={p.pr.url} target="_blank" rel="noreferrer">pending review · PR #{p.pr.number}</a> : <span className="amber-text">pending review · {p.pr?.branch ?? "branch"}</span>) : <span>dismissed{p.dismissal ? ` by ${p.dismissal.by}: ${p.dismissal.reason}` : ""}</span>;
+            return (
+              <article className={`proposal edge-lit ${p.status === "open" ? "amber" : "off"}${p.status === "dismissed" ? " dismissed" : ""}`} key={p.id}>
+                <div className="meta"><span className="muted">{p.id}</span><span>{p.type}</span><span>from {p.citations.join(", ")}</span>{p.seen > 0 ? <span title={p.reason ?? ""}>seen {p.seen}×</span> : null}{status}</div>
+                <div className="text">{p.text}</div>
+                {p.reason ? <div className="line">reason "{p.reason}"</div> : null}
+                {p.status === "open" ? (
+                  canDecide ? (
+                    <>
+                      <div className="actions">
+                        <button className="btn primary" title="commit the line on a branch and open the PR for the code owners" onClick={() => onAcceptProposal(p.id)}>Accept · open PR</button>
+                        {formOpen(form, "dismiss-proposal", p.id) ? null : <button className="btn text" onClick={() => onForm({ kind: "dismiss-proposal", id: p.id })}>Dismiss</button>}
+                      </div>
+                      {formOpen(form, "dismiss-proposal", p.id) ? <InlineReason placeholder="Why this line should not be added — required" submitLabel="Dismiss proposal" onCancel={close} onSubmit={(v) => { close(); onDismissProposal(p.id, v["reason"] ?? ""); }} /> : null}
+                    </>
+                  ) : (
+                    <div className="line">The engineer or platform decides.{onSwitchRole ? <> <button className="btn text accent-text" onClick={onSwitchRole}>Switch role</button></> : null}</div>
+                  )
+                ) : null}
+              </article>
+            );
+          })}
+        </div>
       </section>
 
-      <section className="panel">
-        <div className="eyebrow">Skills &amp; subagents · advisory unless a hook backs them · pass % from trigger tests (threshold {skillThreshold}%)</div>
-        <table className="bands">
-          <thead><tr><th>Name</th><th>Trigger</th><th>Owner</th><th>Version</th><th>Backed by</th><th>Must hold</th><th>Pass %</th><th>Findings citing</th></tr></thead>
-          <tbody>
-            {snapshot.skillStatus.length === 0 ? <tr><td colSpan={8} className="empty">none under .claude/skills</td></tr> : null}
+      <div className="config-cols">
+        <div className="col">
+          <section aria-label="evals">
+            <div className="section-head">
+              <span className="secondary">Evals</span>
+              <span>{cases.length} cases · {runs.length} runs · {modeLine}</span>
+              <span className="spacer" />
+              <button className="btn text" onClick={onRunSuite} disabled={budget.exhausted} title={budget.exhausted ? "budget exhausted for this window" : "run every active case on the engine and commit the run file"}>Run suite</button>
+            </div>
+            <div className="strip-bars" aria-label="run history">
+              {ev.strip.map((r) => <span key={r.id} className={`bar-lit ${VERDICT_TONE[r.verdict] ?? "off"}`} title={`${r.id} · ${r.trigger} · ${r.verdict} ${Math.round(r.passRate * 100)}% · ${r.model} · ${r.changes.join(", ")}`} />)}
+              {runs.length === 0 ? <span className="mono faint">no runs yet</span> : null}
+            </div>
+            <div className="filters">
+              {(["all", "active", "draft", "retired"] as const).map((f) => <button key={f} className={`tab${statusFilter === f ? " active" : ""}`} onClick={() => setStatusFilter(f)}>{f}</button>)}
+            </div>
+            {filtered.length === 0 ? <div className="empty mono">Nothing here</div> : null}
+            {filtered.map((c) => (
+              <div className="crow evals" key={c.id}>
+                <span className="mono muted">{c.id}</span>
+                <span className="cbody">
+                  <span className="secondary">{c.prompt}</span>
+                  <span className="mono faint">{c.source.type}{c.source.ref ? ` ${c.source.ref}` : ""} · {c.owner}</span>
+                </span>
+                <span className={`mono ${c.status === "draft" ? "amber-text" : c.status === "active" ? "green-text" : "faint"}`}>{c.status === "draft" && c.checks.length === 0 ? "draft · checks missing" : c.status}</span>
+              </div>
+            ))}
+          </section>
+
+          <section aria-label="records">
+            <div className="section-head"><span className="secondary">Records</span><span>source of truth per artifact · connector {snapshot.config.recordsConnector ?? "none"}</span></div>
+            <div className="words">
+              {(["intent", "spec", "plan", "evals", "pr", "incident"] as const).map((k) => <span className={records[k] === "repo" ? "muted" : "amber-text"} key={k}>{k} · {records[k]}</span>)}
+            </div>
+          </section>
+        </div>
+
+        <div className="col">
+          <section aria-label="CLAUDE.md">
+            <div className="section-head"><span className="secondary">CLAUDE.md</span>{cm ? <span>v{cm.version ?? "—"} · {cm.wordCount} words · <span className={cm.overOnePage ? "amber-text" : ""}>{cm.overOnePage ? `over one page (${ONE_PAGE_WORDS})` : "under one page"}</span></span> : <span className="amber-text">missing — all sessions run without a feedback loop</span>}</div>
+            {cm ? (
+              <>
+                <div className="crow line">working rule · {cm.workingRule ?? <span className="amber-text">none written down</span>}</div>
+                {cm.verification ? (
+                  <>
+                    {cm.verification.commands.map((c) => (
+                      <div className="crow verify" key={c.name + c.cmd}>
+                        <span className="secondary">{c.label}</span>
+                        <span className="mono muted">{c.cmd}{c.healthyOutput ? <span className="faint"> · {c.healthyOutput}</span> : null}</span>
+                        <span className={`mono ${c.singleTarget ? "green-text" : "amber-text"}`}>{c.singleTarget ? "single target" : "no single target"}</span>
+                      </div>
+                    ))}
+                    <div className="crow mono faint">{cm.verification.testGlobs.length > 0 ? `${cm.verification.testGlobs.join(", ")} · ` : ""}max {cm.verification.maxLoopRounds} rounds</div>
+                  </>
+                ) : (
+                  <div className="crow amber-text">no feedback loop — set up verification ("## Verifying your work")</div>
+                )}
+                <div className="crow mono faint">freshness · {latest ? `last suite run ${latest.startedAt}` : "no suite run yet"}</div>
+              </>
+            ) : null}
+            {warningsFor("CLAUDE.md").map((d, i) => <div className="crow amber-text" key={i}>{d.message}</div>)}
+          </section>
+
+          <section aria-label="hooks">
+            <div className="section-head"><span className="secondary">Hooks</span><span>managed · engineers cannot switch them off</span></div>
+            {snapshot.hooks.length === 0 ? <div className="crow mono faint">no .claude/settings.json</div> : null}
+            {snapshot.hooks.map((h) => (
+              <div className="crow hooks" key={h.source + h.name + h.matcher}>
+                <span className="mono secondary">{h.name}</span>
+                <span className="muted">{h.description || h.script}{h.warnings.map((w) => <span className="amber-text block" key={w}>{w}</span>)}</span>
+                <span className={`mono ${ACTION_TONE[h.action] ?? "muted"}`}>{h.action} · {h.phase}{h.scope === "managed" ? "" : ` · ${h.scope}`}</span>
+              </div>
+            ))}
+            {harnessHealthy ? (
+              <div className="crow mono faint">harness {harnessIds.join(", ")} · every managed guarantee honoured</div>
+            ) : (
+              <>
+                <div className="crow eyebrow">Harness · what runs the sessions and which guarantees it cannot honour</div>
+                <table className="bands">
+                  <thead><tr><th>Harness</th><th>Session kinds</th><th>Process</th><th>Not honoured — stand-in</th></tr></thead>
+                  <tbody>
+                    {snapshot.config.harnesses.map((h) => (
+                      <tr key={h.id}>
+                        <td className="mono">{h.id}</td>
+                        <td>{h.jobs.length === 0 ? "all" : h.jobs.join(", ")}</td>
+                        <td className="mono">{h.kind === "claude-code" ? `${h.bin ?? "claude"} -p … --mcp-config … --allowedTools …` : [h.command ?? "", ...h.args].join(" ")}</td>
+                        <td>{h.degraded.length === 0 ? <span className="green-text">every managed guarantee honoured</span> : h.degraded.map((d) => <div className="warn" key={d.guarantee} title={d.reason}>⚠ {d.guarantee} — {d.reason}</div>)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="crow mono faint">Hooks not run by the harness are checked by the console where a real check exists (done at exit, plan-sync and test-freeze on the per-change run); production-gate has no in-process stand-in.</div>
+              </>
+            )}
+          </section>
+
+          <section aria-label="skills and subagents">
+            <div className="section-head"><span className="secondary">Skills &amp; subagents</span><span>advisory unless a hook backs them · threshold {skillThreshold}%</span></div>
+            {snapshot.skillStatus.length === 0 && snapshot.agents.length === 0 ? <div className="crow mono faint">none under .claude/skills or .claude/agents</div> : null}
             {snapshot.skillStatus.map((s) => (
-              <tr key={s.name}>
-                <td className="mono">{s.name}</td><td>{s.trigger}</td><td className="muted">{s.owner ?? "—"}</td>
-                <td className="mono">{s.version ?? "—"}</td>
-                <td>{s.backing === "hook" ? <span className={`chip ${s.backingScope === "managed" ? "agent" : "green"}`}>{s.backedBy}{s.backingScope === "managed" ? " · managed" : ""}</span> : s.backing === "unknown-hook" ? <span className="chip red" title="named in SKILL.md but not in .claude/settings.json">{s.backedBy} · not installed</span> : <span className="chip amber">advisory</span>}</td>
-                <td>{s.mustHold ? (s.mustHoldWithoutHook ? <span className="chip amber">must hold · no hook</span> : "yes") : "no"}</td>
-                <td title={s.passNote}>{s.passPct === null ? <span className="muted">{s.passNote}</span> : <span className={`chip ${s.belowThreshold ? "amber" : "green"}`}>{s.passPct}%{s.belowThreshold ? " · not triggering" : ""}</span>}<div className="muted">{s.triggerTests.active} trigger test{s.triggerTests.active === 1 ? "" : "s"}{s.run ? ` · ${s.run}` : ""}</div></td>
-                <td>{s.findingsCiting}</td>
-              </tr>
+              <div className="crow hooks" key={s.name}>
+                <span className="mono secondary">{s.name}{s.version ? ` ${s.version}` : ""}</span>
+                <span className="muted">
+                  {s.trigger}{s.owner ? ` · ${s.owner}` : ""}{s.mustHold ? " · must hold" : ""}{" · "}
+                  {s.backing === "hook" ? <>backed by <span className="green-text">{s.backedBy}</span>{s.backingScope === "managed" ? " · managed" : ""}</> : s.backing === "unknown-hook" ? <span className="red-text" title="named in SKILL.md but not in .claude/settings.json">{s.backedBy} · not installed</span> : <span className={s.mustHoldWithoutHook ? "amber-text" : ""}>advisory{s.mustHoldWithoutHook ? " · must hold without a hook" : ""}</span>}
+                </span>
+                <span className="mono" title={s.passNote}>
+                  {s.passPct === null ? <span className="faint">{s.passNote}</span> : <span className={s.belowThreshold ? "amber-text" : "green-text"}>{s.passPct}%</span>}{s.belowThreshold ? <span className="amber-text"> · not triggering</span> : null}
+                  <span className="faint block">{s.triggerTests.active} trigger test{s.triggerTests.active === 1 ? "" : "s"}{s.run ? ` · ${s.run}` : ""} · {s.findingsCiting} findings citing</span>
+                </span>
+              </div>
             ))}
             {snapshot.agents.map((a) => (
-              <tr key={`agent:${a.name}`}>
-                <td className="mono">{a.name}</td><td colSpan={5}>{a.description} · <span className="muted">{a.tools.join(", ") || "all tools"}</span></td><td colSpan={2} className="muted">{a.model ?? "subagent"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="panel">
-        <div className="eyebrow">Hooks</div>
-        <table className="bands">
-          <thead><tr><th>Name</th><th>Action</th><th>Description</th><th>Phase</th><th>Scope</th></tr></thead>
-          <tbody>
-            {snapshot.hooks.length === 0 ? <tr><td colSpan={5} className="empty">no .claude/settings.json</td></tr> : null}
-            {snapshot.hooks.map((h) => (
-              <tr key={h.source + h.name + h.matcher}>
-                <td className="mono">{h.name}</td>
-                <td><span className={`chip ${ACTION_CLASS[h.action] ?? ""}`}>{h.action}</span></td>
-                <td>{h.description || h.script}{h.warnings.map((w) => <div className="warn" key={w}>⚠ {w}</div>)}</td>
-                <td>{h.phase}</td>
-                <td><span className={`chip ${h.scope === "managed" ? "agent" : "gray"}`}>{h.scope}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="footer">Managed hooks are deployed by the platform team — engineers cannot switch them off.</div>
-        {harnessHealthy ? <div className="footer mono">harness {harnessIds.join(", ")} · every managed guarantee honoured</div> : null}
-      </section>
-
-      {harnessHealthy ? null : (
-      <section className="panel">
-        <div className="eyebrow">Harness · what runs the sessions and which guarantees it cannot honour</div>
-        <table className="bands">
-          <thead><tr><th>Harness</th><th>Session kinds</th><th>Process</th><th>Not honoured — stand-in</th></tr></thead>
-          <tbody>
-            {snapshot.config.harnesses.length === 0 ? <tr><td className="mono">claude-code</td><td>all</td><td className="mono">claude -p … --mcp-config … --allowedTools …</td><td><span className="chip green">every managed guarantee honoured</span></td></tr> : null}
-            {snapshot.config.harnesses.map((h) => (
-              <tr key={h.id}>
-                <td className="mono">{h.id}</td>
-                <td>{h.jobs.length === 0 ? "all" : h.jobs.join(", ")}</td>
-                <td className="mono">{h.kind === "claude-code" ? `${h.bin ?? "claude"} -p … --mcp-config … --allowedTools …` : [h.command ?? "", ...h.args].join(" ")}</td>
-                <td>{h.degraded.length === 0 ? <span className="chip green">every managed guarantee honoured</span> : h.degraded.map((d) => <div className="warn" key={d.guarantee} title={d.reason}>⚠ {d.guarantee} — {d.reason}</div>)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="footer">Hooks not run by the harness are checked by the console where a real check exists (done at exit, plan-sync and test-freeze on the per-change run); production-gate has no in-process stand-in.</div>
-      </section>
-      )}
-
-      <section className="panel">
-        <div className="eyebrow">Records · source of truth per artifact</div>
-        <div className="card-status">{(["intent", "spec", "plan", "evals", "pr", "incident"] as const).map((k) => <span className={`chip${records[k] === "repo" ? "" : " amber"}`} key={k}>{k}: {records[k]}</span>)}<span className="chip gray">connector: {snapshot.config.recordsConnector ?? "none"}</span></div>
-      </section>
-
-      <section className="panel">
-        <div className="eyebrow">Proposals · Accept opens a PR for the code owners; the console never edits CLAUDE.md</div>
-        {snapshot.proposalViews.length === 0 && unanswered.length === 0 ? <div className="empty">none</div> : null}
-        {unanswered.map((sig) => (
-          <div className="tcard" key={`signal:${sig.reason}`}>
-            <div className="card-head">
-              <span className="id">no proposal yet</span>
-              <span className="chip amber" title={sig.reason}>seen {sig.count}×</span>
-            </div>
-            <div className="card-title">{sig.display}</div>
-            <div className="card-status">from {sig.citations.join(", ")} · the engine drafts a proposal (sdlc serve --engine)</div>
-          </div>
-        ))}
-        {snapshot.proposalViews.map((p) => (
-          <div className={`tcard${p.status === "dismissed" ? " dismissed" : ""}`} key={p.id}>
-            <div className="card-head">
-              <span className="id">{p.id}</span><span className="chip">{p.type}</span><span className={`chip ${p.status === "open" ? "amber" : "gray"}`}>{p.status}</span>
-              {p.status === "accepted" ? (p.landed ? <span className="chip green">merged · CLAUDE.md carries it</span> : p.pr?.url ? <a className="chip amber" href={p.pr.url} target="_blank" rel="noreferrer">pending review · PR #{p.pr.number}</a> : <span className="chip amber">pending review · {p.pr?.branch ?? "branch"}</span>) : null}
-              {p.seen > 0 ? <span className="chip gray" title={p.reason ?? ""}>seen {p.seen}×</span> : null}
-            </div>
-            <div className="card-title">{p.text}</div>
-            <div className="card-status">from {p.citations.join(", ")}{p.reason ? ` · reason "${p.reason}"` : ""}{p.dismissal ? ` · dismissed by ${p.dismissal.by}: ${p.dismissal.reason}` : ""}</div>
-            {p.status === "open" ? (
-              <div className="actions">
-                <button className="btn primary" disabled={!canDecide} title={canDecide ? "commit the line on a branch and open the PR for the code owners" : "eng or platform accepts a proposal"} onClick={() => onAcceptProposal(p.id)}>Accept · open PR</button>
-                <button className="btn" disabled={!canDecide} onClick={() => onForm({ kind: "dismiss-proposal", id: p.id })}>Dismiss</button>
+              <div className="crow hooks" key={`agent:${a.name}`}>
+                <span className="mono secondary">{a.name}</span>
+                <span className="muted">{a.description} · {a.tools.join(", ") || "all tools"}</span>
+                <span className="mono faint">{a.model ?? "subagent"}</span>
               </div>
-            ) : null}
-            {p.status === "open" && formOpen(form, "dismiss-proposal", p.id) ? <InlineReason placeholder="Why this line should not be added — required" submitLabel="Dismiss proposal" onCancel={close} onSubmit={(v) => { close(); onDismissProposal(p.id, v["reason"] ?? ""); }} /> : null}
-          </div>
-        ))}
-      </section>
-
-      <section className="panel">
-        <div className="eyebrow section-head"><span className="secondary">Evals</span><span>{cases.length} cases · {runs.length} runs · {modeLine}</span><span className="spacer" /><button className="btn text" onClick={onRunSuite} disabled={budget.exhausted} title={budget.exhausted ? "budget exhausted for this window" : "run every active case on the engine and commit the run file"}>Run suite</button></div>
-        <div className="strip">{ev.strip.map((r) => <span key={r.id} className={`dot ${r.verdict === "pass" ? "green" : r.verdict === "fail" ? "amber" : "inactive"}`} title={`${r.id} · ${r.trigger} · ${r.verdict} ${Math.round(r.passRate * 100)}% · ${r.model} · ${r.changes.join(", ")}`} />)}{runs.length === 0 ? <span className="muted">no runs yet</span> : null}</div>
-        <div className="filters">
-          {(["all", "active", "draft", "retired"] as const).map((f) => <button key={f} className={`tab${statusFilter === f ? " active" : ""}`} onClick={() => setStatusFilter(f)}>{f}</button>)}
-        </div>
-        <table className="bands">
-          <thead><tr><th>Id</th><th>Prompt</th><th>Source</th><th>Owner</th><th>Status</th><th>History</th></tr></thead>
-          <tbody>
-            {filtered.map((c) => (
-              <tr key={c.id}>
-                <td className="mono">{c.id}</td>
-                <td>{c.prompt}</td>
-                <td><span className="chip gray">{c.source.type}{c.source.ref ? ` ${c.source.ref}` : ""}</span></td>
-                <td className="muted">{c.owner}</td>
-                <td>{c.status === "draft" && c.checks.length === 0 ? <span className="chip amber">draft · checks missing</span> : <span className={`chip ${c.status === "active" ? "green" : "gray"}`}>{c.status}</span>}</td>
-                <td className="spark">{passHistory(c.id).map((p, i) => <span key={i} className={`dot ${p === null ? "inactive" : p ? "green" : "amber"}`} />)}</td>
-              </tr>
             ))}
-          </tbody>
-        </table>
-      </section>
+          </section>
+        </div>
+      </div>
     </div>
   );
 }
