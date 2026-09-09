@@ -226,12 +226,13 @@ describe("Config (spec §4)", () => {
     expect(html).toContain("RUN-0001 · schedule · pass 100%");
   });
 
-  it("2.8: repeat signal with its proposal, proposal Accept for eng only, pending/merged chips, skills version · backed-by · pass % · findings citing", () => {
+  it("2.8: a repeat signal is the seen N× on its proposal, proposal Accept for eng only, pending/merged chips, skills version · backed-by · pass % · findings citing", () => {
     const eng = render({ ...initialState("eng"), view: "config" });
-    expect(eng).toContain("Repeat mistakes");
-    expect(eng).toContain("commit touches files outside plan.md&#x27;s file list");
+    // the Repeat-mistakes section is gone: the signal shows as "seen N×" on the proposal that answers it
+    expect(eng).not.toContain("Repeat mistakes");
+    expect(eng).toContain("commit touches files outside plan.md&#x27;s file list"); // the reason stays on the proposal card
     expect(eng).toContain("from CHG-0017, CHG-0018");
-    expect(eng).toContain("PRP-0008 open");
+    expect(eng).toContain("PRP-0008");
     expect(eng).toContain("seen 2×");
     expect(eng).toContain("Accept · open PR");
     expect(eng).not.toContain("no proposal yet");

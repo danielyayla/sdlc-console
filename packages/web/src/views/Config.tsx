@@ -43,6 +43,8 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
   // the harness table only earns its place when a guarantee is degraded; otherwise one sentence says so
   const harnessIds = snapshot.config.harnesses.length === 0 ? ["claude-code"] : snapshot.config.harnesses.map((h) => h.id);
   const harnessHealthy = snapshot.config.harnesses.every((h) => h.degraded.length === 0);
+  // a repeat signal nothing answers yet renders in the proposal's shape (removals log: the Repeat-mistakes section is gone)
+  const unanswered = snapshot.repeatSignals.filter((sig) => sig.proposal === null);
   const openProposals = snapshot.proposalViews.filter((p) => p.status === "open").length;
   // the status line: four figures, amber when the figure is a warning, green when it passes, neutral otherwise
   const figures: { label: string; value: string; note: string; tone: "amber-text" | "green-text" | "" }[] = [
@@ -172,18 +174,18 @@ export function Config({ snapshot, role = "po", onAcceptProposal, onDismissPropo
       </section>
 
       <section className="panel">
-        <div className="eyebrow">Repeat mistakes · the same reason twice across sessions → a CLAUDE.md line</div>
-        {snapshot.repeatSignals.length === 0 ? <div className="empty">none — no reason was cited twice</div> : null}
-        {snapshot.repeatSignals.map((sig) => (
-          <div className="card-status" key={sig.reason}>
-            <span className={`chip ${sig.proposal ? "gray" : "amber"}`}>{sig.count}×</span> "{sig.display}" · from {sig.citations.join(", ")} · {sig.proposal ? <span>{sig.proposal.id} {sig.proposal.status}</span> : <span className="chip amber">no proposal yet — the engine drafts one (sdlc serve --engine)</span>}
+        <div className="eyebrow">Proposals · Accept opens a PR for the code owners; the console never edits CLAUDE.md</div>
+        {snapshot.proposalViews.length === 0 && unanswered.length === 0 ? <div className="empty">none</div> : null}
+        {unanswered.map((sig) => (
+          <div className="tcard" key={`signal:${sig.reason}`}>
+            <div className="card-head">
+              <span className="id">no proposal yet</span>
+              <span className="chip amber" title={sig.reason}>seen {sig.count}×</span>
+            </div>
+            <div className="card-title">{sig.display}</div>
+            <div className="card-status">from {sig.citations.join(", ")} · the engine drafts a proposal (sdlc serve --engine)</div>
           </div>
         ))}
-      </section>
-
-      <section className="panel">
-        <div className="eyebrow">Proposals · Accept opens a PR for the code owners; the console never edits CLAUDE.md</div>
-        {snapshot.proposalViews.length === 0 ? <div className="empty">none</div> : null}
         {snapshot.proposalViews.map((p) => (
           <div className={`tcard${p.status === "dismissed" ? " dismissed" : ""}`} key={p.id}>
             <div className="card-head">
