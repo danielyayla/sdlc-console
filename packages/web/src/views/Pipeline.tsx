@@ -1,5 +1,8 @@
 import type { ChangeView } from "@sdlc/core";
-import { OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, gateOwnerLabel, waitingFor, type Role } from "../lib/format";
+import { OTHER_ROLES, ROLE_LABEL, STAGE_NAMES, waitingFor, type Role } from "../lib/format";
+
+/** The production gate's owner roles as lowercase words, the way core labels the artifact gates. */
+const ROLE_WORD: Record<string, string> = { po: "product owner", eng: "engineer", tech_lead: "tech lead" };
 
 /** The artifact each column commits; the Maintain caption names the loop-back. */
 const STAGE_CAPTIONS = ["intent.md", "spec.md", "plan.md", "evals", "PR + findings", "incident → intent.md"] as const;
@@ -54,21 +57,20 @@ export function Pipeline({ changes, role, now, onSelect }: PipelineProps) {
                 <button className={`pcard edge-lit ${edge}${mine ? " owned" : ""}`} key={c.id} onClick={() => onSelect(c.id)}>
                   <div className="pline mono faint">{c.id}{c.risk === "high" ? <span className="amber-text"> · high risk</span> : null}{!c.valid ? <span className="red-text"> · invalid</span> : null}</div>
                   <div className="ptitle">{c.title}</div>
-                  <div className="pline muted">{c.status}</div>
-                  {c.gate ? (
-                    <div className="gate-line mono amber-text">{c.gate.label} · {gateOwnerLabel(c)} · {waitingFor(c.gate.since, now)}</div>
-                  ) : production?.open ? (
-                    <div className="gate-line mono amber-text">Deploy to {production.env} · {production.ownerRoles.join("/").toUpperCase()} · {production.blocked ? "rehearsal pending" : waitingFor(production.since ?? c.createdAt, now)}</div>
-                  ) : null}
-                  {showEnvs ? (
-                    <div className="env-strip mono" aria-label="environments">
-                      {c.deploy.environments.map((e) => (
-                        <span key={e.name} className={ENV_TONE[e.status] ?? "faint"} title={`${e.name}: ${e.status}${e.latest ? ` ${e.latest.sha.slice(0, 7)}` : ""}`}>
-                          {ENV_GLYPH[e.status] ?? "·"} {e.name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
+                  <div className={`pline mono ${mine ? "amber-text" : "faint"}`}>
+                    {c.gate
+                      ? `${c.gate.label} · ${c.gate.ownerLabel} · ${waitingFor(c.gate.since, now)}`
+                      : production?.open
+                        ? `Deploy to ${production.env} · ${production.ownerRoles.map((r) => ROLE_WORD[r] ?? r).join(" or ")} · ${production.blocked ? "rehearsal pending" : waitingFor(production.since ?? c.createdAt, now)}`
+                        : c.status}
+                    {showEnvs ? (
+                      <span aria-label="environments">
+                        {c.deploy.environments.map((e) => (
+                          <span key={e.name}> · <span className={ENV_TONE[e.status] ?? "faint"} title={`${e.name}: ${e.status}${e.latest ? ` ${e.latest.sha.slice(0, 7)}` : ""}`}>{ENV_GLYPH[e.status] ?? "·"} {e.name}</span></span>
+                        ))}
+                      </span>
+                    ) : null}
+                  </div>
                 </button>
               );
             })}

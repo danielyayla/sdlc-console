@@ -22,7 +22,8 @@ describe("Pipeline (spec §4)", () => {
     expect(html).not.toContain('class="column');
     expect(html).toContain("Accept intent.md");
     expect(html).toContain("Merge PR");
-    expect(html).toContain("TECH LEAD");
+    expect(html).toContain("· tech lead ·");
+    expect(html).not.toContain("env-strip");
     // the agent word left line 1: the orange pulsing edge carries it, line 3 keeps the status words
     expect(html).not.toContain("agent-text pulse");
     expect(html).not.toContain(">routine<");
@@ -393,9 +394,9 @@ describe("Deployment (3.6): environments, the production gate and the board", ()
     expect(html).toContain("not deployed");
     expect(html).toContain("production");
     expect(html).toContain("succeeded");
-    // the board: Deploy-stage cards carry the environment strip
+    // the board: Deploy-stage cards carry the environments as words on line 3
     const board = render();
-    expect(board).toContain('class="env-strip mono"');
+    expect(board).toContain('aria-label="environments"');
     expect(board).toContain("· staging");
   });
 

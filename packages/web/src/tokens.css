@@ -145,8 +145,6 @@ a:hover { color: var(--accent-hover); }
 .pcard.owned { background: var(--bg-panel); }
 .pcard:hover { background: var(--bg-raised); }
 .ptitle { color: var(--text-primary); font-weight: 500; line-height: 1.35; margin: 4px 0; }
-.gate-line { margin-top: 8px; }
-.env-strip { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 12px; }
 
 /* detail */
 .detail { max-width: 1200px; margin: 0 auto; }
