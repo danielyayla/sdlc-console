@@ -232,7 +232,11 @@ a:hover { color: var(--accent-hover); }
 .footer .btn.text { font: inherit; }
 .items { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
 .item { background: var(--bg-panel); padding: 20px 24px 20px 28px; }
-.item.dismissed { opacity: 0.5; }
+.item.dismissed { opacity: 0.6; }
+.security .item { background: transparent; padding: 14px 24px; }
+.security .item .item-title { font-size: var(--text-body); font-weight: 500; }
+.security .item.primary-row { background: var(--bg-panel); padding: 20px 24px; }
+.security .item.primary-row .item-title { font-size: var(--text-primary-size); line-height: 1.2; }
 .item-meta { display: flex; gap: 16px; flex-wrap: wrap; color: var(--text-faint); }
 .item-meta .when { margin-left: auto; }
 .item-title { color: var(--text-primary); font-weight: 500; margin: 8px 0 4px; text-wrap: pretty; }

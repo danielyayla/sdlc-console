@@ -175,13 +175,19 @@ describe("Loop, Security, Metrics (spec §4)", () => {
     expect(html).toContain("SEC-0118");
     expect(html).toContain("SEC-0120");
     expect(html).toContain("patch in PR gate");
-    expect(html).toContain('class="item edge-lit red"');
+    expect(html).toContain('class="item edge-lit red new primary-row"');
     expect(html).not.toContain('class="chip');
     expect(html).toContain("Patch → PR gate");
     expect(html).toContain("Wider than one patch → intent.md");
     expect(html).toContain("Dismiss with reason");
     expect((html.match(/Wider than one patch/g) ?? []).length).toBe(2);
     expect(html).toContain("the proposing agent cannot approve its own fix");
+  });
+  it("the first new finding is the only primary row", () => {
+    const html = render({ ...initialState("eng"), view: "security" });
+    expect((html.match(/primary-row/g) ?? []).length).toBe(1);
+    const at = html.indexOf('primary-row"');
+    expect(html.slice(at, html.indexOf("</article>", at))).toContain("SEC-0118");
   });
   it("Metrics renders six stage planes with leading/lagging halves, source words, the feeds line and trend words with %", () => {
     const html = render({ ...initialState("po"), view: "metrics" });

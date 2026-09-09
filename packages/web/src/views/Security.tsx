@@ -25,6 +25,8 @@ export function Security({ snapshot, onPatch, onEscalate, onDismiss, form, onFor
   const latestRun = latestScan?.at ?? null;
   const source = (latestScan && findings.find((f) => f.run === latestScan)?.source) || "recurring scans";
   const n = findings.filter((f) => f.status === "new" && f.resolved === undefined).length;
+  // the first finding still needing a route is the primary object (rule 2); the rest are plain rows
+  const primaryId = findings.find((f) => f.status === "new" && f.resolved === undefined)?.id;
   return (
     <div className="security">
       <div className="primary">{n === 0 ? "No new findings." : n === 1 ? "1 finding needs a route." : `${n} findings need a route.`}</div>
@@ -39,15 +41,18 @@ export function Security({ snapshot, onPatch, onEscalate, onDismiss, form, onFor
       {findings.map((f) => {
         const dismissed = f.status === "dismissed";
         const resolved = f.resolved !== undefined;
+        const isNew = f.status === "new" && !resolved;
         const where = f.location ? `${f.location.path}${f.location.startLine ? `:${f.location.startLine}${f.location.endLine && f.location.endLine !== f.location.startLine ? `-${f.location.endLine}` : ""}` : ""}` : null;
+        // the edge colour follows severity even once dismissed; the glow (step 16) and the panel follow status
+        const edge = f.sev === "high" ? "red" : f.sev === "medium" ? "amber" : "off";
         return (
-          <article className={`item edge-lit ${dismissed || resolved ? "off dismissed" : f.sev === "high" ? "red" : f.sev === "medium" ? "amber" : "off"}`} key={f.id}>
+          <article className={`item edge-lit ${edge}${isNew ? " new" : ""}${dismissed || resolved ? " dismissed" : ""}${f.id === primaryId ? " primary-row" : ""}`} key={f.id}>
             <div className="item-meta mono">
               <span className={f.sev === "high" ? "red-text" : f.sev === "medium" ? "amber-text" : "muted"}>{f.sev}</span>
               <span className="muted">{f.id}</span>
               {f.source ? <span title={f.scannerId}>{f.source}</span> : null}
               <span title="confidence">{f.validated ? "validated · " : ""}{f.conf.toFixed(2)}</span>
-              <span className={f.status === "new" ? "amber-text" : "muted"}>{STATUS_LABEL[f.status] ?? f.status}{f.escalatedTo ? ` ${f.escalatedTo}` : ""}</span>
+              <span className={`when ${f.status === "new" ? "amber-text" : "muted"}`}>{STATUS_LABEL[f.status] ?? f.status}{f.escalatedTo ? ` ${f.escalatedTo}` : ""}</span>
               {resolved ? <span className="green-text" title={`run ${f.resolved?.run ?? ""}`}>resolved by scanner · {f.resolved?.at ?? ""}</span> : null}
             </div>
             <div className="item-title">{f.url ? <a href={f.url} target="_blank" rel="noreferrer">{f.title}</a> : f.title}</div>
