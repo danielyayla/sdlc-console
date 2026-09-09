@@ -26,6 +26,7 @@ identities:
   - { id: po@example.com, roles: [po] }
   - { id: eng@example.com, roles: [eng, tech_lead] }
   - { id: release@example.com, roles: [release] }
+  - { id: ops@example.com, roles: [po, release] }
 thresholds: { autoFilesMax: 3 }
 environments:
   - { name: staging, kind: staging, deploy: { command: "echo deploy staging" }, rollback: { command: "echo rollback staging" }, healthcheck: { command: "curl staging/health" } }
@@ -199,6 +200,20 @@ describe("startDeployment / finishDeployment (3.6): the production gate", () => 
     expect(rule(startDeployment(ready.repo, ready.view, { env: "production", sha: MERGE, actor: human("eng@example.com") }, ctxFor("eng@example.com")))).toBe("production.not-owner");
   });
 
+  it("deploy.finished is recorded under the role deploy.authorized was — the gate role the person holds, not their first role (exit run 2026-09-09)", () => {
+    let tree = rehearsed(merged());
+    const before = viewOf(tree, "CHG-0001");
+    const started = startDeployment(before.repo, before.view, { env: "production", sha: MERGE, actor: { type: "human", id: "ops@example.com" } }, ctxFor("ops@example.com"));
+    expect(plan(started).events.map((e) => [e.event.event, e.event.actor.role])).toEqual([["deploy.authorized", "release"], ["deploy.started", "release"]]);
+    tree = apply(tree, started);
+    const running = viewOf(tree, "CHG-0001");
+    const ok = finishDeployment(running.repo, running.view, { env: "production", sha: MERGE, exitCode: 0, output: "live\n" }, ctxFor("ops@example.com"));
+    expect(plan(ok).events.map((e) => [e.event.event, e.event.actor.role])).toEqual([["deploy.finished", "release"]]);
+    expect(plan(ok).actor).toEqual({ type: "human", id: "ops@example.com", role: "release" });
+    const failed = finishDeployment(running.repo, running.view, { env: "production", sha: MERGE, exitCode: 1, output: "boom\n" }, ctxFor("ops@example.com"));
+    expect(plan(failed).events.map((e) => [e.event.event, e.event.actor.role])).toEqual([["deploy.failed", "release"]]);
+  });
+
   it("golden (Phase 3 exit): a change deploys through the production gate with a deploy.yaml record and a rehearsed rollback — the decision and deploy.started go first, the command's outcome second", () => {
     let tree = rehearsed(merged());
     const before = viewOf(tree, "CHG-0001");
@@ -216,7 +231,7 @@ describe("startDeployment / finishDeployment (3.6): the production gate", () => 
 
     const finished = finishDeployment(running.repo, running.view, { env: "production", sha: MERGE, exitCode: 0, output: "deploying production\nrelease 1 live\n" }, ctxFor("release@example.com", "2026-09-08T10:01:00Z"));
     const p2 = plan(finished);
-    expect(p2.events.map((e) => [e.event.event, e.event.actor.id])).toEqual([["deploy.finished", "release@example.com"]]);
+    expect(p2.events.map((e) => [e.event.event, e.event.actor.id, e.event.actor.role])).toEqual([["deploy.finished", "release@example.com", "release"]]);
     tree = apply(tree, finished);
     const { repo, view, files } = viewOf(tree, "CHG-0001");
     expect(view.status).toBe("Deployed · monitoring");

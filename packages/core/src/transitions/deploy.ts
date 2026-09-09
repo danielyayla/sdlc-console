@@ -98,11 +98,27 @@ export function appendRehearsal(record: Deploy, entry: RollbackRehearsal): Deplo
   return { ...record, rehearsals: [...(record.rehearsals ?? []), entry] };
 }
 
-function eventFor(ev: EventBuilder, ctx: TransitionContext, repo: Repo, actor: DeployActorInput, cycle: number, name: Event["event"], data: Record<string, unknown>): Event {
+function eventFor(ev: EventBuilder, ctx: TransitionContext, repo: Repo, actor: DeployActorInput, cycle: number, name: Event["event"], data: Record<string, unknown>, role?: string | null): Event {
   if (actor.type === "agent") return ev.agent(name as never, cycle, data as never, { id: actor.id, session: actor.session ?? "mcp" });
   if (actor.type === "system") return ev.system(name as never, cycle, data as never);
-  const role = rolesOf(repo.config, actor.id)[0] ?? null;
-  return ev.human(name as never, role, cycle, data as never);
+  return ev.human(name as never, role ?? rolesOf(repo.config, actor.id)[0] ?? null, cycle, data as never);
+}
+
+/**
+ * The role a finished deployment is recorded under is the one its start was
+ * recorded under: for production that is the gate role the person holds (the
+ * `deploy.authorized` role), never the person's first configured role or
+ * whatever the role switcher shows when the command ends.
+ */
+function finishingRole(repo: Repo, running: Deployment, actor: DeployActorInput): string | null {
+  if (actor.type !== "human") return null;
+  const held = rolesOf(repo.config, actor.id);
+  if (running.kind === "production") {
+    const env = environmentByName(repo.config, running.env);
+    const gateRole = env?.gateRoles.find((r) => held.includes(r));
+    if (gateRole) return gateRole;
+  }
+  return held[0] ?? null;
 }
 
 function trailers(events: readonly Event[], actor: DeployActorInput): Record<string, string> {
@@ -215,8 +231,8 @@ export function finishDeployment(repo: Repo, view: ChangeView, input: FinishDepl
   const actor: DeployActorInput = { type: running.actor.type, id: running.actor.id, ...(running.actor.session ? { session: running.actor.session } : {}) };
   const version = running.version ?? short(running.sha);
   const reason = status === "failed" ? (input.exitCode !== 0 ? `${running.command} exited ${input.exitCode}` : `healthcheck exited ${input.healthcheck?.exitCode ?? "?"}`) : null;
-  const events = [status === "succeeded" ? eventFor(ev, ctx, repo, actor, cycle, "deploy.finished", { env: running.env, version, sha: running.sha }) : eventFor(ev, ctx, repo, actor, cycle, "deploy.failed", { env: running.env, reason, sha: running.sha })];
-  const role = actor.type === "human" ? (rolesOf(repo.config, actor.id)[0] ?? null) : null;
+  const role = finishingRole(repo, running, actor);
+  const events = [status === "succeeded" ? eventFor(ev, ctx, repo, actor, cycle, "deploy.finished", { env: running.env, version, sha: running.sha }, role) : eventFor(ev, ctx, repo, actor, cycle, "deploy.failed", { env: running.env, reason, sha: running.sha }, role)];
   const plan: WritePlan = {
     changeId: view.id,
     files: [{ path, content: stringifyYaml(replaceDeployment(record, index, entry)) }],
