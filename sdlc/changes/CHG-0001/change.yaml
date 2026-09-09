@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0001
+title: Cybercab step 6 — finish Pipeline, Gates, Loop, Security and Metrics to the handoff
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-09T13:18:07Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null
