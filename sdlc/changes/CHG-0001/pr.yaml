@@ -1,0 +1,17 @@
+schema: 1
+provider: github
+number: 41
+url: https://github.com/danielyayla/sdlc-console/pull/41
+branch: CHG-0001/packages-web-src-views
+baseBranch: main
+headSha: 7142038e1bb4627a2719a7af4ce02bc0e8396f47
+openedAt: 2026-09-09T15:52:23Z
+reviewers: []
+checks:
+  - name: evidence
+    verdict: pass
+    summary: per-change run 1 green · 3/3 verification commands passed
+  - name: evals
+    verdict: pass
+    summary: per-change run 1 · no eval cases intersect the diff
+planMatches: true
