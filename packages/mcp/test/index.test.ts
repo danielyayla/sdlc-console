@@ -7,7 +7,7 @@ describe("@sdlc/mcp", () => {
   it("exports its package name and exactly fourteen agent tools, none of which accepts anything", () => {
     expect(PACKAGE_NAME).toBe("@sdlc/mcp");
     expect(AGENT_TOOL_NAMES).toHaveLength(14);
-    expect(AGENT_TOOL_NAMES.some((n) => /accept|merge|approve|lift|confirm/.test(n))).toBe(false);
+    expect(AGENT_TOOL_NAMES.some((n) => /accept|merge|approve|lift|confirm|ingest|import/.test(n))).toBe(false);
   });
   it("identity and session come from the launcher's environment", () => {
     expect(agentIdentity({})).toEqual({ id: "claude-code@sdlc.local", name: "claude-code" });

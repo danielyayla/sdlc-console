@@ -12,7 +12,8 @@
   },
   "files": [
     "dist",
-    "seed"
+    "seed",
+    "payloads"
   ],
   "scripts": {
     "generate": "node scripts/generate.mjs"

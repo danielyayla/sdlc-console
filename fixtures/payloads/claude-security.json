@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "source": "claude-security",
+  "deliveryId": "cs-delivery-0001",
+  "run": {
+    "id": "scan-2026-09-08-01",
+    "url": "https://security.example/runs/scan-2026-09-08-01",
+    "startedAt": "2026-09-08T06:00:00Z",
+    "finishedAt": "2026-09-08T06:04:12Z"
+  },
+  "repo": {
+    "name": "invoicing",
+    "commit": "9c1f2e7d4b8a6f5e3d2c1b0a9f8e7d6c5b4a3f2e"
+  },
+  "findings": [
+    {
+      "id": "7f3a91",
+      "status": "open",
+      "title": "SQL injection in invoice filter",
+      "severity": "high",
+      "confidence": 0.97,
+      "validated": true,
+      "description": "User-supplied `sort` reaches the query builder unescaped in src/invoice/list.ts.",
+      "evidence": "src/invoice/list.ts:41\n  const order = req.query.sort;\n  db.raw(`SELECT * FROM invoices ORDER BY ${order}`)\nvalidated: payload `sort=id;--` altered the query plan",
+      "location": { "path": "src/invoice/list.ts", "startLine": 41, "endLine": 43 },
+      "rule": "sql-injection/raw-query",
+      "cwe": "CWE-89",
+      "url": "https://security.example/findings/7f3a91"
+    },
+    {
+      "id": "a41c07",
+      "status": "open",
+      "title": "Webhook secret compared with ==",
+      "severity": "medium",
+      "confidence": 0.88,
+      "validated": true,
+      "description": "The webhook receiver compares the signature with a non-constant-time equality in src/webhooks/verify.ts.",
+      "evidence": "src/webhooks/verify.ts:18\n  if (given == expected) return true;",
+      "location": { "path": "src/webhooks/verify.ts", "startLine": 18 },
+      "rule": "crypto/timing-unsafe-compare",
+      "cwe": "CWE-208",
+      "url": "https://security.example/findings/a41c07"
+    }
+  ]
+}

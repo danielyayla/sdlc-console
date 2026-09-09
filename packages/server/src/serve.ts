@@ -65,7 +65,7 @@ export interface RunningServer {
   registry: SessionRegistry;
   engine: Engine | null;
   jobs: JobStore;
-  /** Webhook deliveries (null without the engine). */
+  /** Webhook deliveries: GitHub (engine only) and the Claude Security / Claude Tag intake (3.5). */
   deliveries: DeliveryLog | null;
   facts: FactsCache;
   /** Hosted mode (3.1): the identity provider the console signs people in with; null in local mode. */
@@ -101,7 +101,8 @@ async function startProduct(spec: ProductSpec, opts: ServeOptions, who: GitIdent
   const engine = opts.sdlcBin
     ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, facts, tracer, ...(log ? { log } : {}), ...(opts.env ? { env: opts.env } : {}) })
     : null;
-  const deliveries = engine ? new DeliveryLog(registry.database) : null;
+  // the delivery log serves the GitHub receiver (engine only) and the intake receivers (3.5, no engine needed)
+  const deliveries = new DeliveryLog(registry.database);
   const watcher = opts.watch === false ? null : watchRepo(spec.home, () => void store.refresh().catch(() => undefined));
   return {
     ...spec,

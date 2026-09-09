@@ -14,26 +14,42 @@ export function Security({ snapshot, onPatch, onEscalate, onDismiss, prompt = (t
   const findings = snapshot.findings;
   const validated = findings.filter((f) => f.validated).length;
   const repos = new Set(findings.map((f) => f.repo)).size;
-  const latestRun = snapshot.evalRuns.at(-1)?.startedAt ?? null;
+  // the last scan the intake (3.5) recorded on a finding; a CSV/MD import leaves no run behind
+  const scans = findings.map((f) => f.run).filter((r): r is NonNullable<typeof r> => r !== undefined && r.at !== undefined);
+  const latestScan = scans.length > 0 ? scans.reduce((a, b) => ((b.at ?? "") > (a.at ?? "") ? b : a)) : null;
+  const latestRun = latestScan?.at ?? null;
   return (
     <div className="security">
       <div className="subhead muted">
-        recurring scans · {repos} repo{repos === 1 ? "" : "s"} · last run {latestRun ?? "n/a · scanner not connected — import a CSV/MD export"} · {validated} validated
+        recurring scans · {repos} repo{repos === 1 ? "" : "s"} · last run {latestRun ? <>{latestRun}{latestScan?.url ? <> · <a href={latestScan.url} target="_blank" rel="noreferrer">{latestScan.id}</a></> : ` · ${latestScan?.id ?? ""}`}</> : "n/a · scanner not connected — POST /api/webhooks/claude-security or import a CSV/MD export"} · {validated} validated
       </div>
       {findings.length === 0 ? <div className="empty">No findings on file.</div> : null}
       {findings.map((f) => {
         const dismissed = f.status === "dismissed";
+        const resolved = f.resolved !== undefined;
+        const where = f.location ? `${f.location.path}${f.location.startLine ? `:${f.location.startLine}${f.location.endLine && f.location.endLine !== f.location.startLine ? `-${f.location.endLine}` : ""}` : ""}` : null;
         return (
-          <article className={`tcard${dismissed ? " dismissed" : ""}`} key={f.id}>
+          <article className={`tcard${dismissed || resolved ? " dismissed" : ""}`} key={f.id}>
             <div className="card-head">
               <span className={`chip ${f.sev === "high" ? "red" : f.sev === "medium" ? "amber" : "gray"}`}>{f.sev}</span>
               <span className="id">{f.id}</span>
-              <span className="mono muted">{f.validated ? "validated · " : ""}{f.conf.toFixed(2)}</span>
+              {f.source ? <span className="chip gray" title={f.scannerId}>{f.source}</span> : null}
+              <span className="mono muted" title="confidence">{f.validated ? "validated · " : ""}{f.conf.toFixed(2)}</span>
               <span className="chip">{STATUS_LABEL[f.status] ?? f.status}{f.escalatedTo ? ` ${f.escalatedTo}` : ""}</span>
+              {resolved ? <span className="chip" title={`run ${f.resolved?.run ?? ""}`}>resolved by scanner · {f.resolved?.at ?? ""}</span> : null}
             </div>
-            <div className="card-title">{f.title}</div>
+            <div className="card-title">{f.url ? <a href={f.url} target="_blank" rel="noreferrer">{f.title}</a> : f.title}</div>
             <div className="card-status">{f.desc} · {f.repo}</div>
-            {f.status === "new" ? (
+            {where || f.rule || f.cwe || f.run ? (
+              <div className="card-status mono muted">
+                {where ? <span>{where}</span> : null}
+                {f.rule ? <span> · {f.rule}</span> : null}
+                {f.cwe ? <span> · {f.cwe}</span> : null}
+                {f.run ? <span> · run {f.run.url ? <a href={f.run.url} target="_blank" rel="noreferrer">{f.run.id}</a> : f.run.id}{f.run.at ? ` at ${f.run.at}` : ""}</span> : null}
+              </div>
+            ) : null}
+            {f.evidence ? <pre className="evidence">{f.evidence}</pre> : null}
+            {f.status === "new" && !resolved ? (
               <div className="actions">
                 <button className="btn primary" onClick={() => onPatch(f.id)}>Patch → PR gate</button>
                 <button className="btn" onClick={() => onEscalate(f.id)}>Wider than one patch → intent.md</button>

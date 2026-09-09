@@ -77,8 +77,10 @@ export function Loop({ snapshot, onAccept, onDismiss, onDetect, jobs = [], promp
               <span className={`chip ${t.data.tier === "incident" ? "red" : "amber"}`}>{t.data.tier}</span>
               <span className="mono muted">{t.data.src}</span>
               {t.data.job ? <span className="chip" title={t.data.job}>{job ? `${job.kind} ${job.state}` : "job"}{job?.sessionId ? ` · ${job.sessionId}` : t.data.session ? ` · ${t.data.session}` : ""}</span> : null}
+              {t.data.channel ? <span className="mono muted" title={`message ${t.data.channel.messageId}`}>{t.data.channel.author} · <a href={t.data.channel.permalink} target="_blank" rel="noreferrer">message</a>{t.data.channel.postedAt ? ` · ${t.data.channel.postedAt}` : ""}</span> : null}
             </div>
             <div className="card-title">{t.data.title}</div>
+            {t.data.channel?.tags && t.data.channel.tags.length > 0 ? <div className="card-status">{t.data.channel.tags.map((tag) => <span className="chip gray" key={tag}>{tag}</span>)}</div> : null}
             <pre className="evidence">{t.data.evidence}</pre>
             {runs.length > 0 ? <div className="card-status">runbooks: {runs.map((r) => `${r.id} ${r.runbook} (exit ${r.exitCode})`).join(" · ")}</div> : null}
             <div className="actions">

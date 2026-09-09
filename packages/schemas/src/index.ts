@@ -16,6 +16,7 @@ export * from "./pr.js";
 export * from "./deploy.js";
 export * from "./triage.js";
 export * from "./finding.js";
+export * from "./intake.js";
 export * from "./proposal.js";
 export * from "./frontmatter.js";
 export * from "./bands.js";

@@ -23,6 +23,18 @@ export const triage = z.strictObject({
   job: nonEmpty.optional(),
   /** The headless session whose diagnosis or proposal the body carries. */
   session: nonEmpty.optional(),
+  /** The channel message a `channel` item came from (3.5, Claude Tag); one item per `messageId`. */
+  channel: z
+    .strictObject({
+      name: nonEmpty,
+      workspace: nonEmpty.optional(),
+      messageId: nonEmpty,
+      permalink: z.url(),
+      author: nonEmpty,
+      postedAt: isoTimestamp.optional(),
+      tags: z.array(nonEmpty).optional(),
+    })
+    .optional(),
 });
 
 export type Triage = z.infer<typeof triage>;
