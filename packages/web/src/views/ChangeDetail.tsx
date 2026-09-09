@@ -4,7 +4,7 @@ import { fetchArtifact, type Artifact } from "../api";
 import { ARTIFACT_FILES, ARTIFACT_NAMES, ROLE_LABEL, STAGE_NAMES, acceptVerb, barCaption, barClass, ownsGate, prLabel, relativeTime, riskLabel, viewerState, waitingFor, type CodeHost, type Role } from "../lib/format";
 import { formOpen, type FormState } from "../state";
 import { InlineReason } from "./InlineReason";
-import { HarnessChips } from "./Sessions";
+import { HarnessWords } from "./Sessions";
 
 export interface ChangeDetailProps {
   view: ChangeView;
@@ -350,7 +350,7 @@ export function ChangeDetail(p: ChangeDetailProps) {
     <section className="rail-section" aria-label="history">
       <div className="section-head">History</div>
       {(p.sessions ?? []).map((s) => (
-        <HistoryRow key={s.id} actor="agent" pulse={s.status === "running"} text={<><span className="mono">{s.id}</span> · {s.kind} · {s.mode} · {s.status}{s.standIn && !s.standIn.allowed ? ` — ${s.standIn.reason}` : ""} <HarnessChips harness={s.harness} /></>} when={relativeTime(s.startedAt, p.now)} />
+        <HistoryRow key={s.id} actor="agent" pulse={s.status === "running"} text={<><span className="mono">{s.id}</span> · {s.kind} · {s.mode} · {s.status}{s.standIn && !s.standIn.allowed ? ` — ${s.standIn.reason}` : ""} <HarnessWords harness={s.harness} /></>} when={relativeTime(s.startedAt, p.now)} />
       ))}
       {view.activity.slice(0, 20).map((a, i) => (
         <HistoryRow key={a.id} actor={a.actor} pulse={a.actor === "agent" && view.agent && i === firstAgent} text={<>{a.actor === "human" ? `${a.role ? ROLE_LABEL[a.role as Role] ?? a.role : a.actorId} ` : ""}{a.text}</>} when={relativeTime(a.ts, p.now)} />
