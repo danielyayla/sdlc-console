@@ -1,0 +1,91 @@
+schema: 1
+changeId: CHG-0007
+cycle: 1
+tasks:
+  - id: packages-server-src-sessions
+    title: Work in packages/server/src/sessions
+    files:
+      - packages/server/src/sessions/install.ts
+      - packages/server/src/sessions/index.ts
+      - packages/server/src/sessions/launcher.ts
+      - packages/server/src/sessions/registry.ts
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/packages-server-src-sessions
+    branch: CHG-0007/packages-server-src-sessions
+    state: confirmed
+  - id: packages-server-src-maintain
+    title: Work in packages/server/src/maintain
+    files:
+      - packages/server/src/maintain/session.ts
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/packages-server-src-maintain
+    branch: CHG-0007/packages-server-src-maintain
+    state: confirmed
+  - id: packages-schemas-src
+    title: Work in packages/schemas/src
+    files:
+      - packages/schemas/src/event.ts
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/packages-schemas-src
+    branch: CHG-0007/packages-schemas-src
+    state: confirmed
+  - id: packages-schemas-json
+    title: Work in packages/schemas/json
+    files:
+      - packages/schemas/json/event.schema.json
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/packages-schemas-json
+    branch: CHG-0007/packages-schemas-json
+    state: confirmed
+  - id: packages-cli-src-commands
+    title: Work in packages/cli/src/commands
+    files:
+      - packages/cli/src/commands/init.ts
+      - packages/cli/src/commands/session.ts
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/packages-cli-src-commands
+    branch: CHG-0007/packages-cli-src-commands
+    state: confirmed
+  - id: packages-web-src-views
+    title: Work in packages/web/src/views
+    files:
+      - packages/web/src/views/Sessions.tsx
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/packages-web-src-views
+    branch: CHG-0007/packages-web-src-views
+    state: confirmed
+  - id: packages-server-test
+    title: Work in packages/server/test
+    files:
+      - packages/server/test/install.test.ts
+      - packages/server/test/sessions.test.ts
+      - packages/server/test/maintain.test.ts
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/packages-server-test
+    branch: CHG-0007/packages-server-test
+    state: confirmed
+  - id: packages-web-test
+    title: Work in packages/web/test
+    files:
+      - packages/web/test/render.test.tsx
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/packages-web-test
+    branch: CHG-0007/packages-web-test
+    state: confirmed
+  - id: docs
+    title: Work in docs
+    files:
+      - docs/decisions.md
+    sequential: false
+    target: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
+    worktree: CHG-0007/docs
+    branch: CHG-0007/docs
+    state: confirmed
