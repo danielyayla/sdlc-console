@@ -1,0 +1,13 @@
+schema: 1
+changeId: CHG-0004
+cycle: 1
+tasks:
+  - id: root
+    title: Root files
+    files:
+      - eslint.config.js
+    sequential: false
+    target: "On the PR head `git diff main --stat` lists eslint.config.js only (9 insertions, 1 deletion) with commit subject `sdlc(lint): root eslint ignores .sdlc-state (session worktrees carry their own tsconfig)`; from the root checkout with `ls .sdlc-state/worktrees` non-empty, `pnpm lint` exits 0 and `pnpm lint 2>&1 | grep -c 'multiple candidate TSConfigRootDirs'` prints 0 (it printed >0 before the change); inside the installed build worktree `pnpm build`, `pnpm test` and `pnpm lint` each exit 0."
+    worktree: CHG-0004/root
+    branch: CHG-0004/root
+    state: confirmed

@@ -4,8 +4,8 @@ artifact: plan
 cycle: 1
 spec_sha: 750ffc571fc9631097d179427d3f73e8f05acad9
 rev: 2
-accepted_by: null
-accepted_at: null
+accepted_by: dkapper01@gmail.com
+accepted_at: 2026-09-10T11:27:56Z
 acceptance_line: "On the PR head `git diff main --stat` lists eslint.config.js only (9 insertions, 1 deletion) with commit subject `sdlc(lint): root eslint ignores .sdlc-state (session worktrees carry their own tsconfig)`; from the root checkout with `ls .sdlc-state/worktrees` non-empty, `pnpm lint` exits 0 and `pnpm lint 2>&1 | grep -c 'multiple candidate TSConfigRootDirs'` prints 0 (it printed >0 before the change); inside the installed build worktree `pnpm build`, `pnpm test` and `pnpm lint` each exit 0."
 context_manifest: sha256:f96a49cb4af5083f3f3cfd90201291ddce0cc55562c569aa7fcb59a5eb3a26dd
 schema: 1
