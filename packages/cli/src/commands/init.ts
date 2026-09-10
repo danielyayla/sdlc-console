@@ -7,7 +7,7 @@ import { installFromLockfile } from "@sdlc/server";
 import { stringifyYaml } from "@sdlc/schemas";
 import { CliError, type Io } from "../io.js";
 import { TEMPLATES } from "../templates.js";
-import { GITLAB_CI_FILE, WORKFLOW_FILES, detectWorkflow, evalsWorkflow, gitlabCi, productionGateWorkflow, validateWorkflow, type InstallStep } from "../workflows.js";
+import { GITLAB_CI_FILE, WORKFLOW_FILES, detectWorkflow, evalsWorkflow, gitlabCi, productionGateWorkflow, validateWorkflow } from "../workflows.js";
 
 export interface InitOptions {
   product?: string;

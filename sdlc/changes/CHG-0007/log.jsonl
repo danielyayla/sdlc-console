@@ -32,3 +32,6 @@
 {"schema":1,"id":"01M25P9FTHX2X9RQM3PT84ATVA","ts":"2026-09-10T12:57:10Z","seq":33,"cycle":1,"actor":{"type":"agent","id":"claude-code","session":"sess-xmx6sz41t2"},"event":"hook.allowed","data":{"hook":"plan-sync"}}
 {"schema":1,"id":"01M25PB01HTGNQMWFQCF0XZEMJ","ts":"2026-09-10T12:58:00Z","seq":34,"cycle":1,"actor":{"type":"agent","id":"claude-code","session":"sess-xmx6sz41t2"},"event":"hook.allowed","data":{"hook":"plan-sync"}}
 {"schema":1,"id":"01M25PD6EXNA33XBXWEKZ2TH45","ts":"2026-09-10T12:59:12Z","seq":35,"cycle":1,"actor":{"type":"agent","id":"claude-code","session":"sess-xmx6sz41t2"},"event":"hook.allowed","data":{"hook":"plan-sync"}}
+{"schema":1,"id":"01M25PEA4Z9DYZZD2QPV0W398K","ts":"2026-09-10T12:59:48Z","seq":36,"cycle":1,"actor":{"type":"agent","id":"claude-code","session":"sess-xmx6sz41t2"},"event":"hook.allowed","data":{"hook":"plan-sync"}}
+{"schema":1,"id":"01M25PFWHPSRCQEYR8EJSSC7HJ","ts":"2026-09-10T13:00:40Z","seq":37,"cycle":1,"actor":{"type":"agent","id":"claude-code","session":"sess-xmx6sz41t2"},"event":"hook.allowed","data":{"hook":"plan-sync"}}
+{"schema":1,"id":"01M25PHG6XGJ0R8SHPPREZ3P6P","ts":"2026-09-10T13:01:33Z","seq":38,"cycle":1,"actor":{"type":"agent","id":"claude-code","session":"sess-xmx6sz41t2"},"event":"hook.allowed","data":{"hook":"plan-sync"}}
