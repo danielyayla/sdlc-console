@@ -1,0 +1,2 @@
+{"schema":1,"id":"01M259SA67Y33752KS2DH6EEFP","ts":"2026-09-10T09:18:37Z","seq":1,"cycle":1,"actor":{"type":"human","id":"dkapper01@gmail.com"},"event":"change.created","data":{"origin":"idea"}}
+{"schema":1,"id":"01M259SA67GSTXNF67H0YBGPQK","ts":"2026-09-10T09:18:37Z","seq":2,"cycle":1,"actor":{"type":"human","id":"dkapper01@gmail.com"},"event":"artifact.committed","data":{"artifact":0,"path":"sdlc/changes/CHG-0005/intent.md","sha":"53a83536fc39a1cc915b5768322f17ec765b41ec"}}
