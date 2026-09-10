@@ -447,7 +447,12 @@ describe("artifact PRs as gates in GitHub mode (2.2)", () => {
     expect(launched.map((j) => j.kind)).toEqual(["plan-session"]);
     expect(launched[0]?.error ?? null).toBeNull();
     void snap;
-    cleanups.push(() => new Promise((r3) => setTimeout(r3, 300)));
+    // the plan session runs the (fake) harness in the background and its exit lands on the plan branch as a ledger commit;
+    // close() waits for that, so nothing writes into the clone after it — the cleanup's rmSync would otherwise race the commit (ENOTEMPTY)
+    await engine.close();
+    const planSession = registry.get(launched[0]?.sessionId ?? "");
+    expect(planSession?.status).toBe("done");
+    expect(await git(dir, ["log", "-1", "--format=%s", "sdlc/CHG-0022/plan"])).toContain(`session ${planSession?.id} done`);
   }, 60_000);
 
   it("a PR merged on GitHub is recorded under the identity mapped to the merger; an unmapped merger is not guessed", async () => {

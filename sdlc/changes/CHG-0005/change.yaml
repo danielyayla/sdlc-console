@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0005
+title: Engine close awaits spawned sessions so test cleanup does not race the ledger commit
+kind: feature
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-10T09:18:37Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null
