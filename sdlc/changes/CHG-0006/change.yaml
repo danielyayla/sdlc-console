@@ -11,4 +11,6 @@ origin:
 record: null
 cycle: 1
 repro: null
-closed: null
+closed:
+  at: 2026-09-10T11:50:49Z
+  reason: fix merged to main from CHG-0006/engine-close-drains-exits ahead of its plan and build artifacts; nothing left to do
