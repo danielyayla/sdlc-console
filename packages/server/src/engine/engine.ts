@@ -73,7 +73,8 @@ export interface WebhookOutcome {
  * session per PR head at stage 5 and its findings mirrored when it ends.
  */
 export class Engine {
-  private ticking = false;
+  /** The pass in flight (with the one queued behind it, if any); null between passes. */
+  private running: Promise<void> | null = null;
   private pending = false;
   private lastSync = 0;
   private lastDelivery = 0;
@@ -87,6 +88,8 @@ export class Engine {
   private readonly unsubscribe: () => void;
   private detectTimer: NodeJS.Timeout | null = null;
   private lastDetect = 0;
+  /** Work this engine set off that still writes to the repo: spawned sessions until their exit is on the ledger, and the exit handling that follows. */
+  private readonly outstanding = new Set<Promise<void>>();
 
   constructor(private readonly opts: EngineOptions) {
     this.unsubscribe = opts.store.subscribe(() => void this.tick());
@@ -100,11 +103,28 @@ export class Engine {
     this.opts.log?.(`[engine] ${line}`);
   }
 
-  close(): void {
+  /**
+   * Stop reacting to the store and the detection schedule, then wait for the
+   * sessions this engine spawned to exit — their `session.stopped` ledger
+   * commit included — and for their exit handling to settle. Nothing this
+   * engine started writes to the repository once the promise resolves, so a
+   * caller may remove the checkout afterwards. Sessions are not killed.
+   */
+  async close(): Promise<void> {
     this.closed = true;
     this.unsubscribe();
     if (this.detectTimer) clearTimeout(this.detectTimer);
     this.detectTimer = null;
+    // a pass or a code-host sync in flight finishes first: it may still be launching a session or committing what the host reported
+    await this.running?.catch(() => undefined);
+    await this.inflight?.catch(() => undefined);
+    while (this.outstanding.size > 0) await Promise.all([...this.outstanding]);
+  }
+
+  /** Keep a promise in `outstanding` until it settles; failures are the launcher's and the observer's to report, not the engine's. */
+  private track(work: Promise<unknown>): void {
+    const p: Promise<void> = work.then(() => undefined, () => undefined).finally(() => this.outstanding.delete(p));
+    this.outstanding.add(p);
   }
 
   /** Last detection pass (epoch ms), 0 when none ran in this process. */
@@ -207,8 +227,9 @@ export class Engine {
         const status = this.opts.store.current?.bandStatus.find((x) => x.metric === b.band.metric);
         const r = await launchBandSession(
           { band: b.band, snapshot: b.snapshot, tier, triageId: item.id, job: b.job, status: status ?? { metric: b.band.metric, baseline: b.band.baseline, unit: b.band.unit ?? null, source: b.band.source ?? null, current: b.snapshot.current, sigma: b.snapshot.sigma, tier: b.snapshot.tier, breached: true, action: tier === 3 ? "propose" : "diagnose", ts: b.snapshot.ts, samples: 0, status: "", triage: [item.id], job: b.job }, history: history[b.band.metric] ?? [] },
-          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, harness: harnessFromConfig(harnessFor(repo.config.harnesses, tier === 3 ? "propose" : "diagnose"), this.opts.claudeBin ?? this.opts.env?.["SDLC_CLAUDE_BIN"] ?? "claude"), ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
+          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, harness: harnessFromConfig(harnessFor(repo.config.harnesses, tier === 3 ? "propose" : "diagnose"), this.opts.claudeBin ?? this.opts.env?.["SDLC_CLAUDE_BIN"] ?? "claude"), ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => this.track(this.onSessionExit(s)) },
         );
+        this.track(r.finished);
         this.opts.jobs.update(b.job, { sessionId: r.session.id, state: "running", note: `${item.id} raised · ${r.session.kind} session on ${r.session.branch}` }, this.now());
         this.log(`[detect] ${b.band.metric} ${tier}σ → ${item.id}, ${r.session.kind} session ${r.session.id}`);
       } catch (e) {
@@ -242,45 +263,56 @@ export class Engine {
     return this.opts.jobs.get(key);
   }
 
-  /** One pass over the current snapshot; coalesces overlapping calls. */
-  async tick(): Promise<void> {
-    if (this.closed) return;
-    if (this.ticking) {
+  /**
+   * One pass over the current snapshot; coalesces overlapping calls. A call
+   * that arrives while a pass is in flight queues one more pass behind it (the
+   * running one may have read older state) and resolves once that pass is
+   * done — so `await tick()` always means a pass over state at least as new
+   * as the call has finished, including the sessions it launched.
+   */
+  tick(): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    if (this.running) {
       this.pending = true;
-      return;
+      return this.running;
     }
-    this.ticking = true;
-    try {
-      const repo = this.opts.store.currentRepo;
-      if (!repo) return;
-      // the snapshot lays unmerged artifact branches over the default branch; a decision committed on a PR branch
-      // shows there before the merge lands on the default branch, and sessions launch from the default branch
-      const pending = new Set((this.opts.store.current?.branches ?? []).map((b) => b.changeId));
-      const committed = pending.size > 0 ? loadRepo(await readTree(this.opts.store.root, "HEAD")) : null;
-      for (const files of repo.changes.values()) {
-        const view = deriveChange(repo, files);
-        if (!view.valid || view.closed) continue;
-        if (committed && pending.has(view.id)) {
-          const onBase = committed.changes.get(view.id);
-          const baseStage = onBase ? deriveChange(committed, onBase).stage : null;
-          if (baseStage !== view.stage) {
-            this.log(`${view.id}: stage ${view.stage} on an unmerged branch, ${baseStage ?? "absent"} on ${repo.config.defaultBranch} — waiting for the merge`);
-            continue;
-          }
+    this.running = (async () => {
+      try {
+        do {
+          this.pending = false;
+          await this.pass();
+        } while (this.pending && !this.closed);
+      } finally {
+        this.running = null;
+      }
+    })();
+    return this.running;
+  }
+
+  private async pass(): Promise<void> {
+    const repo = this.opts.store.currentRepo;
+    if (!repo) return;
+    // the snapshot lays unmerged artifact branches over the default branch; a decision committed on a PR branch
+    // shows there before the merge lands on the default branch, and sessions launch from the default branch
+    const pending = new Set((this.opts.store.current?.branches ?? []).map((b) => b.changeId));
+    const committed = pending.size > 0 ? loadRepo(await readTree(this.opts.store.root, "HEAD")) : null;
+    for (const files of repo.changes.values()) {
+      const view = deriveChange(repo, files);
+      if (!view.valid || view.closed) continue;
+      if (committed && pending.has(view.id)) {
+        const onBase = committed.changes.get(view.id);
+        const baseStage = onBase ? deriveChange(committed, onBase).stage : null;
+        if (baseStage !== view.stage) {
+          this.log(`${view.id}: stage ${view.stage} on an unmerged branch, ${baseStage ?? "absent"} on ${repo.config.defaultBranch} — waiting for the merge`);
+          continue;
         }
-        await this.forChange(repo, view).catch((e: unknown) => this.log(`${view.id}: ${(e as Error).message}`));
       }
-      await this.forWritebacks(repo).catch((e: unknown) => this.log(`write-backs: ${(e as Error).message}`));
-      if (this.opts.autoLaunch) await this.forProposals(repo).catch((e: unknown) => this.log(`proposals: ${(e as Error).message}`));
-      // a poll is redundant while a pass is in flight: that pass reads the same state (a webhook's pass still queues behind it, see sync())
-      if (repo.config.codeHost !== "local" && !this.inflight && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`${repo.config.codeHost} sync: ${(e as Error).message}`));
-    } finally {
-      this.ticking = false;
-      if (this.pending) {
-        this.pending = false;
-        await this.tick();
-      }
+      await this.forChange(repo, view).catch((e: unknown) => this.log(`${view.id}: ${(e as Error).message}`));
     }
+    await this.forWritebacks(repo).catch((e: unknown) => this.log(`write-backs: ${(e as Error).message}`));
+    if (this.opts.autoLaunch) await this.forProposals(repo).catch((e: unknown) => this.log(`proposals: ${(e as Error).message}`));
+    // a poll is redundant while a pass is in flight: that pass reads the same state (a webhook's pass still queues behind it, see sync())
+    if (repo.config.codeHost !== "local" && !this.inflight && Date.now() - this.lastSync >= this.pollInterval()) await this.sync().catch((e: unknown) => this.log(`${repo.config.codeHost} sync: ${(e as Error).message}`));
   }
 
   /** Poll every `syncIntervalMs` — unless deliveries are arriving, then every `webhookQuietMs` as the fallback. */
@@ -625,8 +657,9 @@ export class Engine {
     try {
       const r = await launchSession(
         { changeId: view.id, kind: sessionKind, ...(sessionKind === "build" ? { mode: view.autoEligible.value ? ("AUTO" as const) : ("SUPERVISED" as const) } : {}), ...(signal ? { reason: signal.reason } : {}) },
-        { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
+        { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => this.track(this.onSessionExit(s)) },
       );
+      this.track(r.finished);
       this.opts.jobs.update(key, { sessionId: r.session.id, state: r.session.mode === "SUPERVISED" ? "done" : "running", note: r.session.mode === "SUPERVISED" ? "prepared for the engineer" : null }, this.now());
       this.log(`${view.id}: ${kind} → session ${r.session.id} (${r.session.mode})`);
       this.opts.store.rebuild();
@@ -789,8 +822,9 @@ export class Engine {
           try {
             const r = await launchSession(
               { changeId: session.changeId, kind: "build", taskId: session.taskId ?? undefined, target: session.target ?? undefined, mode: session.mode, resume: { sessionId: session.id, guidance: `The per-change run ${outcome.run.n} is red. Fix these failures, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when green:\n${failing}` } },
-              { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
+              { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => this.track(this.onSessionExit(s)) },
             );
+            this.track(r.finished);
             this.opts.jobs.update(resumeKey, { state: "running", sessionId: r.session.id }, this.now());
           } catch (e) {
             this.opts.jobs.update(resumeKey, { state: "failed", error: (e as Error).message }, this.now());
