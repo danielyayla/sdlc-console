@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CodeHostError, git, initRepo, isAncestor, readTree } from "@sdlc/adapter-git";
+import { CodeHostError, git, initRepo, isAncestor, listWorktrees, readTree } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo } from "@sdlc/core";
 import { PO, realizeSeedRepro, writeSeed } from "@sdlc/fixtures";
 import { appendFinding } from "@sdlc/mcp";
@@ -605,3 +605,158 @@ async function gitRawShow(dir: string, spec: string): Promise<string | null> {
     return null;
   }
 }
+
+describe("hosted-mode sync with the project root on a task branch (CHG-0008)", () => {
+  /** A second clone that moves origin's `main`, the way a merge done on the host does. */
+  async function advanceOrigin(dir: string, gh: FakeGitHub, file: string): Promise<string> {
+    const other = join(dirname(dir), `other-${file}`);
+    await git(dirname(dir), ["clone", "-q", gh.bare, other]);
+    await git(other, ["config", "user.name", "Someone Else"]);
+    await git(other, ["config", "user.email", "else@veri.example"]);
+    await git(other, ["config", "commit.gpgsign", "false"]);
+    writeFileSync(join(other, file), `${file}\n`);
+    await git(other, ["add", file]);
+    await git(other, ["commit", "-q", "-m", `feat: ${file}`]);
+    await git(other, ["push", "-q", "origin", "main"]);
+    return (await git(other, ["rev-parse", "HEAD"])).trim();
+  }
+  const rev = async (dir: string, ref: string) => (await git(dir, ["rev-parse", ref])).trim();
+  const branchOf = async (dir: string) => (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+
+  it("fast-forwards main with `fetch origin main:main`: no checkout, no merge commit, the root stays on its branch", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const { engine } = harness(dir, env);
+    await engine.sync(); // drain the first poll
+    await git(dir, ["checkout", "-q", "-b", "CHG-0018/elsewhere"]);
+    const before = await rev(dir, "main");
+    const remote = await advanceOrigin(dir, gh, "a.txt");
+    const sync = await engine.sync();
+    expect(sync?.errors).toEqual([]);
+    expect(sync?.records.error).toBeUndefined();
+    expect(await rev(dir, "main")).toBe(remote);
+    expect(await branchOf(dir)).toBe("CHG-0018/elsewhere");
+    expect((await git(dir, ["log", "--merges", "--format=%H", `${before}..main`])).trim()).toBe("");
+    expect((await git(dir, ["status", "--porcelain", "--untracked-files=no"])).trim()).toBe("");
+    expect((await listWorktrees(dir)).map((w) => w.branch)).toEqual(["CHG-0018/elsewhere"]);
+  }, 40_000);
+
+  it("when main carries local lifecycle commits origin lacks, the merge runs in a temporary worktree on main and the root is untouched", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const { engine } = harness(dir, env);
+    await engine.sync();
+    writeFileSync(join(dir, "README.md"), "# widgets\n\nlocal record\n");
+    await git(dir, ["add", "README.md"]);
+    await git(dir, ["commit", "-q", "-m", "sdlc(CHG-0018): a local lifecycle record"]);
+    const local = await rev(dir, "main");
+    await git(dir, ["checkout", "-q", "-b", "CHG-0018/elsewhere"]);
+    const remote = await advanceOrigin(dir, gh, "b.txt");
+    const sync = await engine.sync();
+    expect(sync?.errors).toEqual([]);
+    expect(sync?.records).toMatchObject({ pushed: true }); // main is ahead of origin again: the records PR carries the local commit
+    const head = await rev(dir, "main");
+    expect((await git(dir, ["log", "-1", "--format=%s", head])).trim()).toBe("sdlc: sync origin/main");
+    expect(await isAncestor(dir, local, head)).toBe(true);
+    expect(await isAncestor(dir, remote, head)).toBe(true);
+    expect((await git(dir, ["show", "-s", "--format=%an <%ae>", head])).trim()).toBe("Eli Ng <eng@veri.example>");
+    expect(await branchOf(dir)).toBe("CHG-0018/elsewhere");
+    expect((await git(dir, ["status", "--porcelain", "--untracked-files=no"])).trim()).toBe("");
+    expect((await listWorktrees(dir)).map((w) => w.branch)).toEqual(["CHG-0018/elsewhere"]); // the temporary worktree is gone
+  }, 40_000);
+
+  it("when main is checked out in another worktree, the merge runs there and that worktree's files move with it", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const { engine } = harness(dir, env);
+    await engine.sync();
+    await git(dir, ["checkout", "-q", "-b", "CHG-0018/elsewhere"]);
+    const mainWt = join(dirname(dir), "main-wt");
+    await git(dir, ["worktree", "add", "-q", mainWt, "main"]);
+    const remote = await advanceOrigin(dir, gh, "c.txt");
+    const sync = await engine.sync();
+    expect(sync?.errors).toEqual([]);
+    expect(await rev(dir, "main")).toBe(remote);
+    expect(await rev(mainWt, "HEAD")).toBe(remote);
+    expect(existsSync(join(mainWt, "c.txt"))).toBe(true);
+    expect(await branchOf(dir)).toBe("CHG-0018/elsewhere");
+  }, 40_000);
+
+  it("refuses to merge into a dirty worktree on main: nothing is stashed or reset, the error names the path, main does not move", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const { engine } = harness(dir, env);
+    await engine.sync();
+    writeFileSync(join(dir, "README.md"), "# widgets\n\nlocal record\n");
+    await git(dir, ["add", "README.md"]);
+    await git(dir, ["commit", "-q", "-m", "sdlc(CHG-0018): a local lifecycle record"]); // main ahead of origin: the fast-forward is refused
+    const local = await rev(dir, "main");
+    await git(dir, ["checkout", "-q", "-b", "CHG-0018/elsewhere"]);
+    const mainWt = join(dirname(dir), "main-wt");
+    await git(dir, ["worktree", "add", "-q", mainWt, "main"]);
+    writeFileSync(join(mainWt, "README.md"), "# widgets\n\nhalf-written edit\n");
+    await advanceOrigin(dir, gh, "d.txt");
+    const sync = await engine.sync();
+    expect(sync?.records.error).toContain("main is checked out at");
+    expect(sync?.records.error).toContain("with uncommitted changes; commit them or check out main in the project root");
+    expect(sync?.records.pushed).toBe(false);
+    expect(await rev(dir, "main")).toBe(local);
+    expect(await rev(mainWt, "HEAD")).toBe(local);
+    expect(readFileSync(join(mainWt, "README.md"), "utf8")).toBe("# widgets\n\nhalf-written edit\n");
+    expect((await git(mainWt, ["status", "--porcelain"])).trim()).toBe("M README.md");
+    expect(await branchOf(dir)).toBe("CHG-0018/elsewhere");
+  }, 40_000);
+
+  it("a PR merged on the host while the root is on a task branch is recorded on main, not on that branch; the next pass says already recorded", async () => {
+    const { dir, gh, env } = await githubSeed();
+    mapLogin(dir, PO, "priya-gh");
+    await git(dir, ["commit", "-q", "-am", "sdlc(config): map priya-gh"]);
+    await git(dir, ["push", "-q", "origin", "main"]);
+    const { engine } = harness(dir, env);
+    const po = new StateStore({ root: dir, identity: PO_ID });
+    await acceptGate(po, "CHG-0022", 1, env);
+    const intentSha = (await viewOf(dir, "CHG-0022")).docs[0].sha ?? "";
+    await draftSpec(dir, intentSha);
+    await engine.sync(); // spec PR #1 opened, gate 1 in the records PR #2
+    // the developer checks a task branch out in the project root, then the owner merges the spec on GitHub
+    await git(dir, ["checkout", "-q", "-b", "CHG-0022/elsewhere"]);
+    const taskHead = await rev(dir, "HEAD");
+    await mergeOnGitHub(gh, 1, "priya-gh");
+    const sync = await engine.sync();
+    expect(sync?.merges).toEqual([{ changeId: "CHG-0022", gate: 2, number: 1, mergedBy: "priya-gh", recorded: true }]);
+    expect(sync?.errors).toEqual([]);
+    // the decision is on main, authored by the merger, on top of origin's merge — which fast-forwarded: the spec branch
+    // was cut from main after gate 1, so origin's history already contains the local decision and no sync commit is made
+    expect(await git(dir, ["show", "main:sdlc/changes/CHG-0022/log.jsonl"])).toContain('"gate":2');
+    expect((await git(dir, ["log", "-2", "--format=%s", "main"])).trim().split("\n")).toEqual(["sdlc(CHG-0022): accept spec.md (gate 2)", "Merge pull request #1"]);
+    expect((await git(dir, ["show", "-s", "--format=%an <%ae>", "main"])).trim()).toBe("Priya Owens <po@veri.example>");
+    expect((await git(dir, ["log", "--merges", "--grep=sync origin/main", "--format=%H", "main"])).trim()).toBe("");
+    // … and not on the task branch, which did not move
+    expect(await rev(dir, "HEAD")).toBe(taskHead);
+    expect(await branchOf(dir)).toBe("CHG-0022/elsewhere");
+    expect(await git(dir, ["show", "HEAD:sdlc/changes/CHG-0022/log.jsonl"])).not.toContain('"gate":2');
+    expect((await listWorktrees(dir)).filter((w) => w.path.includes("/tmp-"))).toEqual([]);
+    // the next pass has nothing to record: the PR is on main as merged, so it is no longer a candidate, and nothing reopens
+    const again = await engine.sync();
+    expect(again?.merges).toEqual([]);
+    expect(again?.opened).toEqual([]);
+    expect(again?.errors).toEqual([]);
+  }, 60_000);
+
+  it("accepting an artifact PR in the console works from a task branch: the decision rides the PR branch, the PR merges, main takes origin's merge", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const { engine } = harness(dir, env);
+    const po = new StateStore({ root: dir, identity: PO_ID });
+    await acceptGate(po, "CHG-0022", 1, env);
+    const intentSha = (await viewOf(dir, "CHG-0022")).docs[0].sha ?? "";
+    await draftSpec(dir, intentSha);
+    await engine.sync();
+    await git(dir, ["checkout", "-q", "-b", "CHG-0022/elsewhere"]);
+    const taskHead = await rev(dir, "HEAD");
+    const r = await acceptGate(po, "CHG-0022", 2, env);
+    expect(r.toast).toContain("merged");
+    expect(gh.state.pulls[0]).toMatchObject({ head: "sdlc/CHG-0022/spec", merged: true });
+    expect(await git(dir, ["show", "main:sdlc/changes/CHG-0022/log.jsonl"])).toContain('"gate":2');
+    expect(await git(dir, ["show", "main:sdlc/changes/CHG-0022/spec.md"])).toContain("CHG-0022");
+    expect(await rev(dir, "main")).toBe((await git(gh.bare, ["rev-parse", "main"])).trim()); // main took origin's merge
+    expect(await rev(dir, "HEAD")).toBe(taskHead);
+    expect(await branchOf(dir)).toBe("CHG-0022/elsewhere");
+    expect((await listWorktrees(dir)).filter((w) => w.path.includes("/tmp-"))).toEqual([]);
+  }, 60_000);
+});
