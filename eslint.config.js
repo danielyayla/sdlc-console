@@ -11,7 +11,8 @@ const nodeBuiltins = builtinModules.filter((name) => !name.startsWith("_"));
 
 export default defineConfig([
   // A change's design/ folder holds exports (a Claude Design page, its support script), not code that ships.
-  globalIgnores(["**/dist/**", "**/node_modules/**", "**/*.tsbuildinfo", "fixtures/seed/**", "sdlc/changes/*/design/**"]),
+  // .sdlc-state/ is the disposable cache holding session worktrees (each a full checkout with its own tsconfig.json).
+  globalIgnores(["**/dist/**", "**/node_modules/**", "**/*.tsbuildinfo", ".sdlc-state/**", "fixtures/seed/**", "sdlc/changes/*/design/**"]),
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
