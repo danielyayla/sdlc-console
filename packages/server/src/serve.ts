@@ -115,7 +115,8 @@ async function startProduct(spec: ProductSpec, opts: ServeOptions, who: GitIdent
     committer,
     close: () => {
       watcher?.close();
-      engine?.close();
+      // shutdown stops the engine's timers now; the sessions it spawned are not waited for (nor killed) here
+      void engine?.close();
       registry.close();
     },
   };
