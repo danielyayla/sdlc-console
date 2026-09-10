@@ -1,5 +1,5 @@
 import { fileURLToPath } from "node:url";
-import { downgradeSession, enrich, launchSession, SessionRegistry, StateStore, stopSession, type LaunchInput, type StoredSession } from "@sdlc/server";
+import { ActionError, downgradeSession, enrich, launchSession, SessionRegistry, StateStore, stopSession, type LaunchInput, type StoredSession } from "@sdlc/server";
 import { actingIdentity, assertHuman, loadCommitted, repoContext, type CliContext } from "../context.js";
 import { CliError, type Io } from "../io.js";
 
@@ -34,6 +34,10 @@ export async function sessionStart(ctx: CliContext, changeId: string, opts: Sess
     const code = await r.finished;
     const final = registry.get(r.session.id) ?? r.session;
     return { session: final, exitCode: code };
+  } catch (e) {
+    // a refused launch (a failed dependency install, CHG-0007) prints its diagnostics — the manager's whole output — on stderr, not only the one-line message
+    if (e instanceof ActionError) throw new CliError(e.message, 1, e.diagnostics);
+    throw e;
   } finally {
     registry.close();
   }
