@@ -1,2 +1,4 @@
 {"schema":1,"id":"01M25DNB2SGA1344EVN2NQJ2T0","ts":"2026-09-10T10:26:21Z","seq":1,"cycle":1,"actor":{"type":"human","id":"dkapper01@gmail.com"},"event":"change.created","data":{"origin":"idea"}}
 {"schema":1,"id":"01M25DNB2VP9E4WWYWQM8YW0Q4","ts":"2026-09-10T10:26:21Z","seq":2,"cycle":1,"actor":{"type":"human","id":"dkapper01@gmail.com"},"event":"artifact.committed","data":{"artifact":0,"path":"sdlc/changes/CHG-0007/intent.md","sha":"da96a60afc6b876e42e82669884ce6a8b584c12b"}}
+{"schema":1,"id":"01M25DPPXC84VEBWZH3TFZ63Q4","ts":"2026-09-10T10:27:06Z","seq":3,"cycle":1,"actor":{"type":"human","id":"dkapper01@gmail.com","role":"po"},"event":"gate.accepted","data":{"gate":1,"artifactSha":"da96a60afc6b876e42e82669884ce6a8b584c12b","source":"console"}}
+{"schema":1,"id":"01M25DPPXD16KHC77HRCB7VDE5","ts":"2026-09-10T10:27:06Z","seq":4,"cycle":1,"actor":{"type":"system","id":"sdlc-bot"},"event":"stage.entered","data":{"stage":2}}
