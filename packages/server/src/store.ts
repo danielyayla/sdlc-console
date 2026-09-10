@@ -75,6 +75,12 @@ export class StateStore {
     return new StateStore({ ...this.opts, identity: who }, this.s);
   }
 
+  /** The same options reading `ref` instead of the root's HEAD, with its own tree and snapshot: the view of the default branch while the project root is checked out elsewhere (CHG-0008). */
+  at(ref: string): StateStore {
+    if (ref === (this.opts.ref ?? "HEAD")) return this;
+    return new StateStore({ ...this.opts, ref });
+  }
+
   get root(): string {
     return this.opts.root;
   }

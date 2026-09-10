@@ -15,16 +15,26 @@ export async function fetchRemote(dir: string, remote = "origin", ref?: string):
   await git(dir, ref ? ["fetch", "--quiet", remote, ref] : ["fetch", "--quiet", remote]);
 }
 
+export type FastForwardResult = { refused: false; head: string; moved: boolean } | { refused: true; reason: string };
+
 /**
- * Fast-forward local `branch` to `remote`'s without a checkout: `git fetch
- * <remote> <branch>:<branch>`. Git refuses a non-fast-forward (never `+`, so
- * local commits are never discarded) and a branch checked out in any
- * worktree; both come back as `{ ok: false }` for the caller to merge instead.
+ * Fast-forward local `branch` to `remote`'s without a checkout. The plain
+ * fetch runs first so a network or auth failure throws as it does everywhere
+ * else; then `git fetch <remote> <branch>:<branch>` moves the ref. Git refuses
+ * that update — returned as `{ refused: true }`, never thrown — when it is not
+ * a fast-forward (the refspec has no `+`, so local commits are never
+ * discarded) and when the branch is checked out in this or any linked
+ * worktree. Never `--update-head-ok`, never `update-ref`: git's refusal is
+ * what keeps a checked-out branch and its index together.
  */
-export async function fastForwardBranch(dir: string, branch: string, remote = "origin"): Promise<{ ok: true; head: string } | { ok: false; reason: string }> {
-  const r = await gitRaw(dir, ["fetch", "--quiet", remote, `refs/heads/${branch}:refs/heads/${branch}`]);
-  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `fetch ${remote} ${branch}:${branch} failed (${r.code})` };
-  return { ok: true, head: (await git(dir, ["rev-parse", `refs/heads/${branch}`])).trim() };
+export async function fastForwardBranch(dir: string, branch: string, remote = "origin"): Promise<FastForwardResult> {
+  await fetchRemote(dir, remote, branch);
+  const ref = `refs/heads/${branch}`;
+  const before = (await git(dir, ["rev-parse", ref])).trim();
+  const r = await gitRaw(dir, ["fetch", remote, `${branch}:${branch}`]); // not --quiet: the refusal's reason is on stderr
+  if (r.code !== 0) return { refused: true, reason: r.stderr.trim() || `fetch ${remote} ${branch}:${branch} failed (${r.code})` };
+  const head = (await git(dir, ["rev-parse", ref])).trim();
+  return { refused: false, head, moved: head !== before };
 }
 
 /**

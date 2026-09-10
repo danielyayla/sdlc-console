@@ -92,9 +92,25 @@ export async function syncBase(mode: HostedMode, root: string, base: string, mes
   const merge = (dir: string) => mergeRemoteBranch(dir, base, message, mode.identity, "origin", mode.committer);
   if ((await currentBranch(root)) === base) return merge(root);
   const ff = await fastForwardBranch(root, base);
-  if (ff.ok) return ff.head;
-  mode.log?.(`${base} is not checked out here and does not fast-forward (${ff.reason}); merging in a worktree`);
+  if (!ff.refused) {
+    if (ff.moved) mode.log?.(`${base}: fast-forwarded to ${ff.head.slice(0, 7)}`);
+    return ff.head;
+  }
+  await assertCleanWorktreeOn(root, base);
   return withBranchWorktree(root, base, merge);
+}
+
+/**
+ * A pre-existing worktree with `base` checked out is someone's working copy:
+ * the console merges or commits there only when it is clean. Nothing is
+ * stashed or reset; a dirty one is refused with its path. No worktree on
+ * `base` means `withBranchWorktree` makes a temporary one, which is always clean.
+ */
+async function assertCleanWorktreeOn(root: string, base: string): Promise<void> {
+  const existing = (await listWorktrees(root)).find((w) => w.branch === base);
+  if (!existing) return;
+  const status = (await git(existing.path, ["status", "--porcelain"])).trim();
+  if (status) throw new ActionError(409, `${base} is checked out at ${existing.path} with uncommitted changes; commit them or check out ${base} in the project root`);
 }
 
 export interface OpenedArtifactPr {
@@ -273,9 +289,17 @@ export interface DetectedMerge {
  */
 export async function detectMergedPrs(mode: HostedMode, store: StateStore): Promise<DetectedMerge[]> {
   await store.refresh();
-  let repo = store.currentRepo;
+  const rootRepo = store.currentRepo;
+  if (!rootRepo) return [];
+  const base = rootRepo.config.defaultBranch;
+  // the decision a merge on the host records belongs on the default branch (decisions 1.7, 2.2), whichever branch the
+  // project root has checked out: with the root elsewhere the candidates, the view accepted against and the commit all
+  // come from `base`, while the console's own snapshot keeps following the root's HEAD (1.1)
+  const onBase = (await currentBranch(store.root)) === base;
+  const recorder = onBase ? store : store.at(base);
+  if (!onBase) await recorder.refresh();
+  let repo = recorder.currentRepo;
   if (!repo) return [];
-  const base = repo.config.defaultBranch;
   const candidates: { id: string; gate: GateNumber; number: number; mergeSha?: string }[] = [];
   for (const files of repo.changes.values()) {
     const view = deriveChange(repo, files);
@@ -300,8 +324,8 @@ export async function detectMergedPrs(mode: HostedMode, store: StateStore): Prom
     if (!synced) {
       await syncBase(mode, store.root, base, `sdlc: sync origin/${base}`);
       synced = true;
-      await store.refresh(true);
-      repo = store.currentRepo;
+      await recorder.refresh(true);
+      repo = recorder.currentRepo;
       if (!repo) return out;
     }
     const view = viewFor(repo, c.id);
@@ -323,9 +347,14 @@ export async function detectMergedPrs(mode: HostedMode, store: StateStore): Prom
       out.push({ changeId: c.id, gate: c.gate, number: c.number, mergedBy: login, recorded: false, reason: report.diagnostics.filter((d) => d.blocking).map((d) => d.message).join("; ") });
       continue;
     }
-    await commitWritePlan(store.root, result.plan, { identity: actor, ...(mode.committer ? { committer: mode.committer } : {}) });
-    await store.refresh(true);
-    repo = store.currentRepo ?? repo;
+    if (onBase) await commitWritePlan(store.root, result.plan, { identity: actor, ...(mode.committer ? { committer: mode.committer } : {}) });
+    else {
+      // on `base`, never on the root's task branch: outside the records PR a decision would be deletable with the branch
+      await assertCleanWorktreeOn(store.root, base);
+      await commitOnBranch(store.root, base, result.plan, actor, mode.committer);
+    }
+    await recorder.refresh(true);
+    repo = recorder.currentRepo ?? repo;
     out.push({ changeId: c.id, gate: c.gate, number: c.number, mergedBy: login, recorded: true });
     mode.log?.(`${c.id}: gate ${c.gate} recorded from ${label} merged by ${login}`);
   }
