@@ -3,11 +3,11 @@ id: CHG-0004
 artifact: plan
 cycle: 1
 spec_sha: 750ffc571fc9631097d179427d3f73e8f05acad9
-rev: 1
+rev: 2
 accepted_by: null
 accepted_at: null
-acceptance_line: ""
-context_manifest: sha256:3211380310e586ae83020d58d18f1d0885eb5d296bf54961413973f0ee972315
+acceptance_line: "On the PR head `git diff main --stat` lists eslint.config.js only (9 insertions, 1 deletion) with commit subject `sdlc(lint): root eslint ignores .sdlc-state (session worktrees carry their own tsconfig)`; from the root checkout with `ls .sdlc-state/worktrees` non-empty, `pnpm lint` exits 0 and `pnpm lint 2>&1 | grep -c 'multiple candidate TSConfigRootDirs'` prints 0 (it printed >0 before the change); inside the installed build worktree `pnpm build`, `pnpm test` and `pnpm lint` each exit 0."
+context_manifest: sha256:f96a49cb4af5083f3f3cfd90201291ddce0cc55562c569aa7fcb59a5eb3a26dd
 schema: 1
 ---
 # Plan: Root eslint ignores .sdlc-state session worktrees (from spec.md 750ffc57)
@@ -52,7 +52,7 @@ eslint.config.js
        "**/.sdlc-state/**",
      ]),
    ```
-   This is the spec's D2 block verbatim: the five existing patterns unchanged and in the same order, one new pattern `**/.sdlc-state/**` last, one new comment line naming why (spec R5). The leading `**/` matches how `dist/` and `node_modules/` are written and covers a product home under a subdirectory (spec C1; equivalent to `.sdlc-state/**` in this single-product repository). No new import: `globalIgnores` is already imported from `eslint/config` on line 3. Do not reformat any other line of the file; the diff is one comment line plus the array reflowed onto one entry per line.
+   This is the spec's D2 block verbatim: the five existing patterns unchanged and in the same order, one new pattern `**/.sdlc-state/**` last, one new comment line naming why (spec R5). The leading `**/` matches how `dist/` and `node_modules/` are written and covers a product home under a subdirectory (spec C1; equivalent to `.sdlc-state/**` in this single-product repository). No new import: `globalIgnores` is already imported from `eslint/config` on line 3. Do not reformat any other line of the file. Note on counts: spec D5 says "two lines added, nothing removed", but the D2 block it prescribes reflows the array onto one entry per line, so `git diff --stat` shows 9 insertions and 1 deletion; the D2 block wins because it is the text the spec fixes, and the semantic change is still one pattern plus one comment.
 
 3. **Verify inside the build worktree (session).** From the worktree root run `pnpm build`, `pnpm test`, `pnpm lint`; all three must exit 0 with output. `pnpm lint` here is the R2 proxy: this checkout has a `.sdlc-state/` (only `sessions/`), no nested worktree, and no CI job runs lint (see Risks), so a green lint here shows the new pattern is well-formed and does not over-match. Also run `pnpm exec eslint --print-config eslint.config.js | head -3` and confirm it prints a config object, not `undefined`: that proves the root config file itself is not swallowed by the new ignore.
 
@@ -81,7 +81,7 @@ eslint.config.js
 - **Uninstalled session worktree.** If step 0 is skipped, the Stop hook's round is red for `command not found` or a global ESLint 8, and `report_done` blocks on an environment failure that says nothing about this change (spec C4). The tech lead has agreed the root-checkout evidence is the done signal for R1; step 0 exists so the session's own round can still be green.
 - **`--debug` grep from spec R3 is not the primary proof.** ESLint's debug log may print ignored directories while enumerating, so a non-zero `grep -c '\.sdlc-state/'` would be ambiguous. Step 5 uses the explicit-file lint instead: ESLint reports a matching ignore pattern by name, which is unambiguous. The debug grep may be run additionally; if it is non-zero, inspect the lines and confirm none is a "Linting" or "Processing" line for a path under `.sdlc-state/`.
 - **Dotfile matching.** The fix relies on flat config matching ignore patterns with `dot: true`. ESLint's default `**/.git/` ignore and the existing `**/node_modules/**` rely on the same behaviour, so this is a documented property, not an assumption; step 5's grep returning `0` is the check. If it does not, the pattern is wrong, not the environment: re-read the D2 block, do not add a second spelling.
-- **Scope creep.** Anything beyond the two lines is outside the spec: no `--ignore-pattern` in the `lint` script, no `includeIgnoreFile` from `@eslint/compat`, no `.gitignore` edit, no `tsconfig` or `parserOptions` change. plan-sync blocks a commit that touches any other tracked file; the ledger under `sdlc/changes/` is exempt.
+- **Scope creep.** Anything beyond the D2 block is outside the spec: no `--ignore-pattern` in the `lint` script, no `includeIgnoreFile` from `@eslint/compat`, no `.gitignore` edit, no `tsconfig` or `parserOptions` change. plan-sync blocks a commit that touches any other tracked file; the ledger under `sdlc/changes/` is exempt.
 - **Root checkout state.** Step 5 switches the engineer's checkout to a detached head briefly. The plan requires a clean tree first and gives the `git show` fallback; either path leaves the checkout exactly as found.
 
 ## Proof
@@ -93,4 +93,4 @@ Evidence, all pasted verbatim (CLAUDE.md non-negotiable):
 1. Before (root checkout, step 1): `ls .sdlc-state/worktrees` non-empty; `pnpm lint 2>&1 | grep -c 'multiple candidate TSConfigRootDirs'` greater than 0.
 2. Session round (build worktree, step 3): `pnpm build`, `pnpm test`, `pnpm lint` each exit 0 with output; `pnpm exec eslint --version` is `v10.9.1`.
 3. After (root checkout, step 5): `ls .sdlc-state/worktrees` non-empty; `pnpm lint` exit 0 with no findings (R1); the grep count is `0`; `pnpm exec eslint .sdlc-state/worktrees/<name>/eslint.config.js` prints "File ignored because of a matching ignore pattern" (R3).
-4. Diff: `git diff main --stat` on the PR head lists `eslint.config.js` only, 8 insertions and 1 deletion (the reflowed array), commit subject exactly `sdlc(lint): root eslint ignores .sdlc-state (session worktrees carry their own tsconfig)` (R4).
+4. Diff: `git diff main --stat` on the PR head lists `eslint.config.js` only, 9 insertions and 1 deletion (the reflowed array), commit subject exactly `sdlc(lint): root eslint ignores .sdlc-state (session worktrees carry their own tsconfig)` (R4).
