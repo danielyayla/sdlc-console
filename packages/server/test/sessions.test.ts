@@ -14,6 +14,14 @@ afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c();
 });
 
+async function waitFor(pred: () => boolean, ms = 15_000): Promise<void> {
+  const until = Date.now() + ms;
+  while (!pred()) {
+    if (Date.now() > until) throw new Error("timed out waiting for the engine");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 async function seeded(): Promise<string> {
   const dir = mkdtempSync(join(tmpdir(), "sdlc-sess-"));
   cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
@@ -107,7 +115,7 @@ describe("launchSession", () => {
 
   it("enrich merges rounds, waiting and test-edit attempts; the server snapshot lists sessions and the routes work", async () => {
     const dir = await seeded();
-    const server = await startServer({ cwd: dir, identity: { id: "eng@veri.example", name: "Eli Ng" }, sdlcBin: "/opt/sdlc/bin.js", claudeBin: FAKE, watch: false });
+    const server = await startServer({ cwd: dir, identity: { id: "eng@veri.example", name: "Eli Ng" }, sdlcBin: "/opt/sdlc/bin.js", claudeBin: FAKE, exec: () => Promise.resolve({ exitCode: 0, output: "ok" }), watch: false });
     cleanups.push(() => server.close());
     const registry = server.registry;
     const r = await launchSession({ changeId: "CHG-0022" }, { root: dir, registry, sdlcBin: "/opt/sdlc/bin.js", identity: { id: "eng@veri.example", name: "Eli Ng" }, claudeBin: FAKE });
@@ -128,8 +136,12 @@ describe("launchSession", () => {
     expect(started.status).toBe(200);
     const body = (await started.json()) as { session: { id: string; mode: string; status: string } };
     expect(body.session).toMatchObject({ mode: "AUTO", status: "running" });
-    await new Promise((r2) => setTimeout(r2, 800));
+    // the fake harness exits on its own and the engine handles the exit — the per-change run it claims is the proof; then close() waits for the
+    // tail of that handling and for the session's ledger commit, so nothing touches the registry or the checkout after the server closes them
+    await waitFor(() => server.jobs.list().some((j) => j.kind === "per-change-run" && j.state !== "running"));
+    await server.engine?.close();
     expect(server.registry.get(body.session.id)?.status).toBe("done");
+    expect(server.jobs.list().filter((j) => j.kind === "per-change-run").map((j) => j.state)).toEqual(["done"]);
     expect((await fetch(`${server.url}/api/sessions/nope/stop`, { method: "POST" })).status).toBe(404);
   }, 20_000);
 });
