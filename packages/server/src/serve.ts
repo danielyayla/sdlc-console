@@ -4,7 +4,7 @@ import { gitHubCodeHostFrom } from "@sdlc/adapter-github";
 import { resolveConfig } from "@sdlc/core";
 import { readSnapshots } from "@sdlc/detect";
 import { SnapshotCache } from "./cache.js";
-import { Engine, JobStore } from "./engine/index.js";
+import { Engine, JobStore, type Exec } from "./engine/index.js";
 import { collectSources, FactsCache } from "./metrics/index.js";
 import { DeliveryLog } from "./github/webhooks.js";
 import { createApp, type ProductApp } from "./http.js";
@@ -31,6 +31,8 @@ export interface ServeOptions {
   sdlcBin?: string;
   /** Harness executable (default `claude`); tests point it at a fake. */
   claudeBin?: string;
+  /** Command runner for the engine's per-change runs, suites and detection (default: a shell in the worktree); tests inject a fake. */
+  exec?: Exec;
   /** Run the lifecycle engine: launch sessions and per-change runs on transitions. */
   engine?: boolean;
   log?: (line: string) => void;
@@ -53,7 +55,7 @@ export interface ProductRuntime extends ProductSpec {
   deliveries: DeliveryLog | null;
   /** The GitHub App's bot user when the product commits on behalf of people; null in token or local mode. */
   committer: GitIdentity | null;
-  close: () => void;
+  close: () => Promise<void>;
 }
 
 export interface RunningServer {
@@ -99,7 +101,7 @@ async function startProduct(spec: ProductSpec, opts: ServeOptions, who: GitIdent
   const jobs = new JobStore(registry.database, tracer);
   const log = opts.log ? (line: string) => opts.log?.(`[${spec.name}] ${line}`) : undefined;
   const engine = opts.sdlcBin
-    ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), autoLaunch: opts.engine === true, facts, tracer, ...(log ? { log } : {}), ...(opts.env ? { env: opts.env } : {}) })
+    ? new Engine({ store, registry, jobs, sdlcBin: opts.sdlcBin, identity: who, ...(opts.claudeBin ? { claudeBin: opts.claudeBin } : {}), ...(opts.exec ? { exec: opts.exec } : {}), autoLaunch: opts.engine === true, facts, tracer, ...(log ? { log } : {}), ...(opts.env ? { env: opts.env } : {}) })
     : null;
   // the delivery log serves the GitHub receiver (engine only) and the intake receivers (3.5, no engine needed)
   const deliveries = new DeliveryLog(registry.database);
@@ -113,10 +115,10 @@ async function startProduct(spec: ProductSpec, opts: ServeOptions, who: GitIdent
     engine,
     deliveries,
     committer,
-    close: () => {
+    close: async () => {
       watcher?.close();
-      // shutdown stops the engine's timers now; the sessions it spawned are not waited for (nor killed) here
-      void engine?.close();
+      // shutdown waits for the session-exit handling in flight, not for the sessions themselves (neither waited for nor killed); the registry closes after it
+      await engine?.settle();
       registry.close();
     },
   };
@@ -170,7 +172,7 @@ export async function startServer(opts: ServeOptions): Promise<RunningServer> {
     tracer,
     close: async () => {
       await app.close();
-      for (const p of products) p.close();
+      for (const p of products) await p.close();
       // telemetry leaves last; a failing exporter is logged, never awaited beyond its own request
       await tracer.shutdown().catch(() => undefined);
     },

@@ -41,9 +41,10 @@ export function clearRepro(owner: DraftOwner): void {
  * input mid-run). Returns the resumed session, or null when it is still
  * running or no launcher is available.
  */
-export async function resumeAfterRepro(owner: DraftOwner, guidance: string, deps: LaunchDeps | null): Promise<StoredSession | null> {
+export async function resumeAfterRepro(owner: DraftOwner, guidance: string, deps: LaunchDeps | null, watch?: (finished: Promise<number | null>) => void): Promise<StoredSession | null> {
   const s = owner.session;
   if (!deps || s.status === "running" || s.status === "awaiting_engineer") return null;
   const r = await launchSession({ changeId: s.changeId, kind: "build", ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: s.id, guidance } }, deps);
+  watch?.(r.finished);
   return r.session;
 }

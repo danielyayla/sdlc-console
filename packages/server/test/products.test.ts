@@ -191,7 +191,7 @@ describe("shared, disposable cache (3.2)", () => {
       const store = new StateStore({ root: dir, identity: ENG, cache, sessions: () => registry.list() });
       const jobs = new JobStore(registry.database);
       const engine = new Engine({ store, registry, jobs, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE, exec, autoLaunch, now: () => new Date("2026-09-08T09:00:00Z") });
-      return { registry, cache, store, jobs, engine, close: () => { engine.close(); registry.close(); } };
+      return { registry, cache, store, jobs, engine, close: async () => { await engine.close(); registry.close(); } };
     };
     // gate 1 accepted on CHG-0022 → the engine owes a design pass, keyed on the intent's sha in git
     const tree = loadRepo(await readTree(dir, "HEAD"));
@@ -215,7 +215,7 @@ describe("shared, disposable cache (3.2)", () => {
     const view = (s: Snapshot) => ({ changes: s.changes.map((c) => [c.id, c.stage, c.status]), queues: s.queues, badges: s.badges, branches: s.branches?.map((b) => b.branch) });
     expect(a.cache.keys()).toHaveLength(1);
     expect(snapA.revision).toBeGreaterThan(1);
-    a.close();
+    await a.close();
 
     // another process (a restart, a second operator's server) on the same cache serves the last derivation as is
     const b = harness(false);
@@ -223,7 +223,7 @@ describe("shared, disposable cache (3.2)", () => {
     expect(snapB.revision).toBe(snapA.revision);
     expect(view(snapB)).toEqual(view(snapA));
     expect(b.jobs.list().map((j) => j.key).sort()).toEqual(keysA);
-    b.close();
+    await b.close();
 
     // the cache is disposable: without it the same view derives from git, the queue is empty, and the engine re-derives
     // the work whose result is not in git — the design pass under the same key (its session left no spec behind)
@@ -238,7 +238,7 @@ describe("shared, disposable cache (3.2)", () => {
     await waitFor(() => c.jobs.list().some((j) => j.kind === "design-pass" && j.state !== "running"));
     expect(c.jobs.list().find((j) => j.kind === "design-pass")?.key).toBe(design?.key);
     await waitFor(() => c.registry.list().every((s) => s.status !== "running"));
-    c.close();
+    await c.close();
     cleanups.push(() => new Promise((res) => setTimeout(res, 300)));
   }, 60_000);
 });
