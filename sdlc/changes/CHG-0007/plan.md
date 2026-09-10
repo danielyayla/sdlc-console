@@ -4,8 +4,8 @@ artifact: plan
 cycle: 1
 spec_sha: b2bd73517ccc8f3f32fcfbe48e44ffb46c1ee0f3
 rev: 2
-accepted_by: null
-accepted_at: null
+accepted_by: dkapper01@gmail.com
+accepted_at: 2026-09-10T11:41:32Z
 acceptance_line: pnpm build, env -u SDLC_CHANGE -u SDLC_SESSION pnpm test and pnpm lint green in the build worktree (install.test.ts plus the three new sessions.test.ts cases, the maintain.test.ts band case and the two render.test.tsx cases included); a SUPERVISED session started from the built CLI on a scratch repo with pnpm-lock.yaml prints a record whose install.exitCode is 0 and whose worktree runs node -e "require('better-sqlite3')" with exit 0; the same start with an outdated lockfile exits 1 printing ERR_PNPM_OUTDATED_LOCKFILE on stderr and leaves no session record.
 context_manifest: sha256:8afdb9dbf58f05258aaae4fea6c1de3301af6e691900b1ac0d4188ae5ec4c7c4
 schema: 1
