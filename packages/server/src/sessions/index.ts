@@ -6,3 +6,4 @@ export * from "./launcher.js";
 export * from "./capacity.js";
 export * from "./downgrade.js";
 export * from "./repro.js";
+export * from "./install.js";
