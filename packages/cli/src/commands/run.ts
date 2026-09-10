@@ -14,7 +14,7 @@ export async function runCommand(io: Io, changeId: string): Promise<Job> {
     await store.refresh();
     const engine = new Engine({ store, registry, jobs: new JobStore(registry.database), sdlcBin: sdlcBinPath(), identity: who, autoLaunch: false, log: (l) => io.stderr(`${l}\n`) });
     const job = await engine.runForChange(changeId);
-    engine.close();
+    await engine.close();
     if (!job) throw new CliError(`no build session or task worktree for ${changeId}; start one with sdlc session start ${changeId}`, 2);
     return job;
   } finally {

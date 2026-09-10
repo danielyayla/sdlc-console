@@ -88,8 +88,10 @@ export class Engine {
   private readonly unsubscribe: () => void;
   private detectTimer: NodeJS.Timeout | null = null;
   private lastDetect = 0;
-  /** Work this engine set off that still writes to the repo: spawned sessions until their exit is on the ledger, and the exit handling that follows. */
-  private readonly outstanding = new Set<Promise<void>>();
+  /** Sessions in flight — the engine's own launches and those handed over by `watchSession` — until their exit is on the ledger and handled. */
+  private readonly sessions = new Set<Promise<void>>();
+  /** Session-exit handling in flight (`onSessionExit`): still reading the repo and writing the registry. */
+  private readonly exits = new Set<Promise<void>>();
 
   constructor(private readonly opts: EngineOptions) {
     this.unsubscribe = opts.store.subscribe(() => void this.tick());
@@ -105,12 +107,26 @@ export class Engine {
 
   /**
    * Stop reacting to the store and the detection schedule, then wait for the
-   * sessions this engine spawned to exit — their `session.stopped` ledger
+   * sessions this engine knows about to exit — their `session.stopped` ledger
    * commit included — and for their exit handling to settle. Nothing this
    * engine started writes to the repository once the promise resolves, so a
    * caller may remove the checkout afterwards. Sessions are not killed.
    */
   async close(): Promise<void> {
+    await this.settle();
+    while (this.sessions.size > 0) await Promise.all([...this.sessions]);
+    // a session that exited while we waited handed its exit over synchronously; a closed engine takes no new ones
+    while (this.exits.size > 0) await Promise.all([...this.exits]);
+  }
+
+  /**
+   * Stop accepting work and wait only for what is half-way through the registry
+   * and the repo: the pass or code-host sync in flight, and the session-exit
+   * handling in flight (which stops at its next checkpoint once closed). The
+   * sessions themselves keep running: `sdlc serve` shuts down without waiting
+   * for — or killing — the harnesses it launched, and closes the registry after this.
+   */
+  async settle(): Promise<void> {
     this.closed = true;
     this.unsubscribe();
     if (this.detectTimer) clearTimeout(this.detectTimer);
@@ -118,13 +134,18 @@ export class Engine {
     // a pass or a code-host sync in flight finishes first: it may still be launching a session or committing what the host reported
     await this.running?.catch(() => undefined);
     await this.inflight?.catch(() => undefined);
-    while (this.outstanding.size > 0) await Promise.all([...this.outstanding]);
+    while (this.exits.size > 0) await Promise.all([...this.exits]);
   }
 
-  /** Keep a promise in `outstanding` until it settles; failures are the launcher's and the observer's to report, not the engine's. */
-  private track(work: Promise<unknown>): void {
-    const p: Promise<void> = work.then(() => undefined, () => undefined).finally(() => this.outstanding.delete(p));
-    this.outstanding.add(p);
+  /** A session launched outside the engine (the HTTP routes) whose exit the engine handles: `close()` waits for it like for the engine's own launches. */
+  watchSession(finished: Promise<unknown>): void {
+    this.track(this.sessions, finished);
+  }
+
+  /** Keep a promise in `set` until it settles; failures are the launcher's and the observer's to report, not the engine's. */
+  private track(set: Set<Promise<void>>, work: Promise<unknown>): void {
+    const p: Promise<void> = work.then(() => undefined, () => undefined).finally(() => set.delete(p));
+    set.add(p);
   }
 
   /** Last detection pass (epoch ms), 0 when none ran in this process. */
@@ -227,9 +248,9 @@ export class Engine {
         const status = this.opts.store.current?.bandStatus.find((x) => x.metric === b.band.metric);
         const r = await launchBandSession(
           { band: b.band, snapshot: b.snapshot, tier, triageId: item.id, job: b.job, status: status ?? { metric: b.band.metric, baseline: b.band.baseline, unit: b.band.unit ?? null, source: b.band.source ?? null, current: b.snapshot.current, sigma: b.snapshot.sigma, tier: b.snapshot.tier, breached: true, action: tier === 3 ? "propose" : "diagnose", ts: b.snapshot.ts, samples: 0, status: "", triage: [item.id], job: b.job }, history: history[b.band.metric] ?? [] },
-          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, harness: harnessFromConfig(harnessFor(repo.config.harnesses, tier === 3 ? "propose" : "diagnose"), this.opts.claudeBin ?? this.opts.env?.["SDLC_CLAUDE_BIN"] ?? "claude"), ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => this.track(this.onSessionExit(s)) },
+          { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, defaultBranch: repo.config.defaultBranch, harness: harnessFromConfig(harnessFor(repo.config.harnesses, tier === 3 ? "propose" : "diagnose"), this.opts.claudeBin ?? this.opts.env?.["SDLC_CLAUDE_BIN"] ?? "claude"), ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.env ? { env: this.opts.env } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
         );
-        this.track(r.finished);
+        this.watchSession(r.finished);
         this.opts.jobs.update(b.job, { sessionId: r.session.id, state: "running", note: `${item.id} raised · ${r.session.kind} session on ${r.session.branch}` }, this.now());
         this.log(`[detect] ${b.band.metric} ${tier}σ → ${item.id}, ${r.session.kind} session ${r.session.id}`);
       } catch (e) {
@@ -244,6 +265,7 @@ export class Engine {
   /** A band session finished (3.4): its diagnosis, runbook records and proposal branch go onto the triage item, once per session. */
   async recordBandForSession(session: StoredSession): Promise<Job | null> {
     await this.opts.store.refresh(true);
+    if (this.closed) return null;
     const repo = this.opts.store.currentRepo;
     if (!repo || !session.band) return null;
     const key = `band-record:${session.id}`;
@@ -657,9 +679,9 @@ export class Engine {
     try {
       const r = await launchSession(
         { changeId: view.id, kind: sessionKind, ...(sessionKind === "build" ? { mode: view.autoEligible.value ? ("AUTO" as const) : ("SUPERVISED" as const) } : {}), ...(signal ? { reason: signal.reason } : {}) },
-        { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => this.track(this.onSessionExit(s)) },
+        { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
       );
-      this.track(r.finished);
+      this.watchSession(r.finished);
       this.opts.jobs.update(key, { sessionId: r.session.id, state: r.session.mode === "SUPERVISED" ? "done" : "running", note: r.session.mode === "SUPERVISED" ? "prepared for the engineer" : null }, this.now());
       this.log(`${view.id}: ${kind} → session ${r.session.id} (${r.session.mode})`);
       this.opts.store.rebuild();
@@ -687,9 +709,21 @@ export class Engine {
     }
   }
 
-  /** A build session finished: run the per-change run; green → PR; red → resume once, then wait. */
-  async onSessionExit(session: StoredSession): Promise<void> {
-    if (this.closed) return;
+  /**
+   * A session finished: its job is closed, then what its kind owes — band record, deploy record, review
+   * mirror, proposal file, or for a build session the per-change run (green → PR; red → resume once, then
+   * wait). Every launcher discards this promise, so it never rejects: a failure is logged, and a closed
+   * engine stops at its next checkpoint instead of touching a registry or a repo the server is tearing
+   * down. `settle()` and `close()` wait for it.
+   */
+  onSessionExit(session: StoredSession): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    const work = this.handleSessionExit(session).catch((e: unknown) => this.log(`${session.id}: session exit not processed${this.closed ? " (engine closed)" : ""}: ${(e as Error).message}`));
+    this.track(this.exits, work);
+    return work;
+  }
+
+  private async handleSessionExit(session: StoredSession): Promise<void> {
     // the job that launched this session is finished with it
     for (const job of this.opts.jobs.list()) {
       if (job.sessionId === session.id && job.state === "running") {
@@ -705,6 +739,7 @@ export class Engine {
     }
     // 3.6: what the session deployed and rehearsed goes onto deploy.yaml before anything else reads the change
     if (session.changeId && readSessionDeploys(session.worktreePath, session.id).length > 0) await this.recordDeploysForSession(session);
+    if (this.closed) return;
     if (session.kind === "review" && session.status === "done") {
       await this.mirrorForSession(session);
       return;
@@ -724,6 +759,7 @@ export class Engine {
   /** A session finished (3.6): its `deploy_<env>` and `rehearse_rollback` outcomes become the change's deploy.yaml record, once per session, committed by sdlc-bot with the job trailer. */
   async recordDeploysForSession(session: StoredSession): Promise<Job | null> {
     await this.opts.store.refresh(true);
+    if (this.closed) return null;
     const repo = this.opts.store.currentRepo;
     if (!repo || !session.changeId) return null;
     const key = `deploy-record:${session.id}`;
@@ -745,6 +781,7 @@ export class Engine {
   /** A review session finished: mirror its findings into the change and onto the PR (once per session) — also when the PR merged while it ran. */
   async mirrorForSession(session: StoredSession): Promise<Job | null> {
     await this.opts.store.refresh(true);
+    if (this.closed) return null;
     const repo = this.opts.store.currentRepo;
     const files = repo?.changes.get(session.changeId);
     if (!repo || !files) return null;
@@ -769,6 +806,7 @@ export class Engine {
   /** A propose session finished: the line it drafted becomes `sdlc/proposals/PRP-NNNN.yaml` (once per session). */
   async fileProposalForSession(session: StoredSession): Promise<Job | null> {
     await this.opts.store.refresh(true);
+    if (this.closed) return null;
     const repo = this.opts.store.currentRepo;
     if (!repo) return null;
     const key = `proposal-mirror:${session.id}`;
@@ -791,6 +829,7 @@ export class Engine {
   /** `trigger` names a run outside the session-exit path (`manual`, `webhook`); it is part of the job key. */
   async runForSession(session: StoredSession, trigger: string | null = null): Promise<Job | null> {
     await this.opts.store.refresh(true);
+    if (this.closed) return null;
     const repo = this.opts.store.currentRepo;
     if (!repo) return null;
     const files = repo.changes.get(session.changeId);
@@ -815,16 +854,16 @@ export class Engine {
       this.log(`${view.id}: run ${outcome.run.n} ${outcome.run.verdict}`);
       this.opts.registry.patch(session.id, { reviewed: outcome.run.verdict === "green" });
       await this.opts.store.refresh(true);
-      if (outcome.run.verdict === "red" && outcome.consecutiveReds === 1 && this.opts.autoLaunch && session.mode !== "SUPERVISED") {
+      if (outcome.run.verdict === "red" && outcome.consecutiveReds === 1 && this.opts.autoLaunch && session.mode !== "SUPERVISED" && !this.closed) {
         const failing = [...outcome.run.commandResults.filter((r) => !r.pass).map((r) => `--- ${r.name}: ${r.cmd} (exit ${r.exitCode})\n${r.output.slice(-3000)}`), ...outcome.run.results.filter((r) => !r.pass).map((r) => `--- eval ${r.caseId}\n${r.output.slice(-3000)}`)].join("\n");
         const resumeKey = `${session.changeId}:${view.cycle}:4:run-${outcome.run.n}:resume`;
         if (this.opts.jobs.claim({ key: resumeKey, kind: "resume-session", changeId: session.changeId, cycle: view.cycle, stage: 4 }, this.now())) {
           try {
             const r = await launchSession(
               { changeId: session.changeId, kind: "build", taskId: session.taskId ?? undefined, target: session.target ?? undefined, mode: session.mode, resume: { sessionId: session.id, guidance: `The per-change run ${outcome.run.n} is red. Fix these failures, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when green:\n${failing}` } },
-              { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => this.track(this.onSessionExit(s)) },
+              { root: this.opts.store.root, registry: this.opts.registry, sdlcBin: this.opts.sdlcBin, identity: this.opts.identity, ...(this.opts.claudeBin ? { claudeBin: this.opts.claudeBin } : {}), ...(this.opts.now ? { now: this.opts.now } : {}), ...(this.opts.tracer ? { tracer: this.opts.tracer } : {}), onExit: (s) => void this.onSessionExit(s) },
             );
-            this.track(r.finished);
+            this.watchSession(r.finished);
             this.opts.jobs.update(resumeKey, { state: "running", sessionId: r.session.id }, this.now());
           } catch (e) {
             this.opts.jobs.update(resumeKey, { state: "failed", error: (e as Error).message }, this.now());

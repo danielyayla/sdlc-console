@@ -442,7 +442,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           let resumed: string | null = null;
           if (owner) {
             clearRepro(owner);
-            const s = await resumeAfterRepro(owner, `The engineer confirmed the repro test ${input.testPath} at ${input.sha.slice(0, 7)}: it fails for the right reason. The test freeze is active — fix the code without editing files under the test globs (propose test changes with mcp__sdlc__request_input), run the verification commands, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when the repro test and everything else are green.`, launchDeps(options, store, o.registry ?? null));
+            const s = await resumeAfterRepro(owner, `The engineer confirmed the repro test ${input.testPath} at ${input.sha.slice(0, 7)}: it fails for the right reason. The test freeze is active — fix the code without editing files under the test globs (propose test changes with mcp__sdlc__request_input), run the verification commands, record rounds with mcp__sdlc__report_round, and call mcp__sdlc__report_done when the repro test and everything else are green.`, launchDeps(options, store, o.registry ?? null), (finished) => options.engine?.watchSession(finished));
             resumed = s?.id ?? null;
             store.rebuild();
           }
@@ -458,7 +458,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
           let resumed: string | null = null;
           if (owner) {
             markReproRejected(owner, reason, new Date().toISOString().replace(/\.\d{3}Z$/, "Z"));
-            const s = await resumeAfterRepro(owner, `The engineer sent the repro test ${testPath} back — wrong failure: ${reason}. Rewrite the test so it fails for the right reason, run it, and call mcp__sdlc__report_repro again with the verbatim output. Do not fix the code yet.`, launchDeps(options, store, o.registry ?? null));
+            const s = await resumeAfterRepro(owner, `The engineer sent the repro test ${testPath} back — wrong failure: ${reason}. Rewrite the test so it fails for the right reason, run it, and call mcp__sdlc__report_repro again with the verbatim output. Do not fix the code yet.`, launchDeps(options, store, o.registry ?? null), (finished) => options.engine?.watchSession(finished));
             resumed = s?.id ?? null;
             store.rebuild();
           }
@@ -586,6 +586,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
       if (!id) {
         const input: LaunchInput = { changeId: str(body, "changeId"), ...(typeof body["kind"] === "string" ? { kind: body["kind"] as LaunchInput["kind"] } : {}), ...(typeof body["taskId"] === "string" ? { taskId: body["taskId"] } : {}), ...(typeof body["target"] === "string" && body["target"].trim() !== "" ? { target: body["target"] } : {}), ...(typeof body["mode"] === "string" ? { mode: body["mode"] as LaunchInput["mode"] } : {}), ...(typeof body["reason"] === "string" && body["reason"].trim() !== "" ? { reason: body["reason"] } : {}) };
         const r = await launchSession(input, { root: store.root, registry, sdlcBin: o.sdlcBin, identity: store.who, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}), ...(o.tracer ? { tracer: o.tracer } : {}), onExit: (s) => (o.engine ? void o.engine.onSessionExit(s) : store.rebuild()) });
+        o.engine?.watchSession(r.finished);
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: r.session.mode === "SUPERVISED" ? `${r.session.id} prepared — run the command from the card` : `${r.session.id} started (${r.session.mode}) on ${r.session.branch}`, revision: store.current?.revision ?? 0 });
         return;
@@ -617,6 +618,7 @@ export function createApp(baseStore: StateStore, options: AppOptions = {}): Http
         if (!s) throw new ActionError(404, `${id} not found`);
         if (s.status === "running") throw new ActionError(409, "the session is still running; guidance is delivered by resuming a finished or stalled session");
         const r = await launchSession({ changeId: s.changeId, kind: s.kind, ...(s.taskId ? { taskId: s.taskId } : {}), ...(s.target ? { target: s.target } : {}), mode: s.mode, resume: { sessionId: id, guidance: str(body, "text") } }, { root: store.root, registry, sdlcBin: o.sdlcBin, identity: store.who, ...(o.claudeBin ? { claudeBin: o.claudeBin } : {}), ...(o.tracer ? { tracer: o.tracer } : {}), onExit: (s) => (o.engine ? void o.engine.onSessionExit(s) : store.rebuild()) });
+        o.engine?.watchSession(r.finished);
         store.rebuild();
         json(res, 200, { ok: true, session: r.session, toast: `guidance sent — ${id} resumed`, revision: store.current?.revision ?? 0 });
         return;

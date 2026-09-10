@@ -202,3 +202,50 @@ describe("per-change run → PR → stage 5 → merge → stage 6 → loop (acce
     cleanups.push(() => new Promise((r3) => setTimeout(r3, 300)));
   }, 30_000);
 });
+
+describe("session exit after the engine closed (CHG-0006)", () => {
+  function quiet(dir: string, lines: string[]) {
+    const registry = new SessionRegistry(dir);
+    cleanups.push(() => registry.close());
+    const store = new StateStore({ root: dir, identity: ENG, sessions: () => registry.list() });
+    const jobs = new JobStore(registry.database);
+    const engine = new Engine({ store, registry, jobs, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE, exec: () => Promise.resolve({ exitCode: 0, output: "ok" }), autoLaunch: false, now: () => new Date("2026-09-04T09:00:00Z"), log: (l) => lines.push(l) });
+    cleanups.push(() => engine.close());
+    return { registry, store, jobs, engine };
+  }
+
+  async function doneBuild(dir: string, registry: SessionRegistry) {
+    const launched = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, { root: dir, registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE });
+    registry.patch(launched.session.id, { status: "done" });
+    return { ...launched.session, status: "done" as const };
+  }
+
+  it("close() waits for an exit in flight, which stops at its next checkpoint: no run claimed, nothing rejects; a later exit is not handled", async () => {
+    const dir = await seeded();
+    const lines: string[] = [];
+    const h = quiet(dir, lines);
+    await h.store.refresh();
+    const session = await doneBuild(dir, h.registry);
+    // the launcher discards this promise; close() arrives while the exit handling awaits its first refresh
+    const exit = h.engine.onSessionExit(session);
+    await h.engine.close();
+    await expect(exit).resolves.toBeUndefined();
+    expect(h.jobs.list().filter((j) => j.kind === "per-change-run")).toEqual([]);
+    await expect(h.engine.onSessionExit(session)).resolves.toBeUndefined();
+    expect(h.jobs.list().filter((j) => j.kind === "per-change-run")).toEqual([]);
+    expect(lines.filter((l) => l.includes("session exit not processed"))).toEqual([]);
+  });
+
+  it("a failing exit chain is logged with the session id, never an unhandled rejection", async () => {
+    const dir = await seeded();
+    const lines: string[] = [];
+    const h = quiet(dir, lines);
+    await h.store.refresh();
+    const session = await doneBuild(dir, h.registry);
+    // the repository is gone before the exit is handled: the refresh inside the chain throws
+    rmSync(join(dir, ".git"), { recursive: true, force: true });
+    await expect(h.engine.onSessionExit(session)).resolves.toBeUndefined();
+    expect(lines.filter((l) => l.startsWith(`[engine] ${session.id}: session exit not processed: `))).toHaveLength(1);
+    expect(h.jobs.list().filter((j) => j.kind === "per-change-run")).toEqual([]);
+  });
+});
