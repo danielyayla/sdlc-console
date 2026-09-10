@@ -11,4 +11,6 @@ origin:
 record: null
 cycle: 1
 repro: null
-closed: null
+closed:
+  at: 2026-09-10T11:18:02Z
+  reason: design principles doc merged to main as PR #65 ahead of its spec, plan and build artifacts; nothing left to do
