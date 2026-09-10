@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { identity as gitIdentity, installMergeUnion, isRepo, repoRoot } from "@sdlc/adapter-git";
 import { installHooks } from "@sdlc/hooks";
+import { installFromLockfile } from "@sdlc/server";
 import { stringifyYaml } from "@sdlc/schemas";
 import { CliError, type Io } from "../io.js";
 import { TEMPLATES } from "../templates.js";
@@ -15,14 +16,6 @@ export interface InitOptions {
   sdlcBin?: string;
   /** `config.codeHost` (default local). `gitlab` writes `.gitlab-ci.yml` with the same jobs instead of the GitHub Actions workflows (3.7). */
   codeHost?: "local" | "github" | "gitlab";
-}
-
-/** The Install step follows the lockfile present when init runs; none means no step (the team adds one if `bin` needs it). */
-export function installFromLockfile(root: string): InstallStep {
-  if (existsSync(join(root, "pnpm-lock.yaml"))) return "pnpm";
-  if (existsSync(join(root, "package-lock.json")) || existsSync(join(root, "npm-shrinkwrap.json"))) return "npm";
-  if (existsSync(join(root, "yarn.lock"))) return "yarn";
-  return null;
 }
 
 export interface InitResult {
