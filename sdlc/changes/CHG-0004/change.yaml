@@ -11,4 +11,6 @@ origin:
 record: null
 cycle: 1
 repro: null
-closed: null
+closed:
+  at: 2026-09-10T11:18:02Z
+  reason: fix merged to main as PR #55 (plan as PR #62) ahead of its build artifact; nothing left to do

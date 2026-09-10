@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { addWorktree, blobSha, CodeHostError, commitWritePlan, currentBranch, diffFiles, fetchRemote, git, gitRaw, headSha, hostName, listWorktrees, mergeRemoteBranch, newUlid, prNoun, pushBranch, removeWorktree, type GitIdentity, type HostedCodeHost } from "@sdlc/adapter-git";
+import { addWorktree, blobSha, CodeHostError, commitWritePlan, currentBranch, diffFiles, fastForwardBranch, fetchRemote, git, gitRaw, headSha, hostName, listWorktrees, mergeRemoteBranch, newUlid, prNoun, pushBranch, removeWorktree, type GitIdentity, type HostedCodeHost } from "@sdlc/adapter-git";
 import { accept, ARTIFACT_INDEX_FOR_GATE, deriveChange, identityForHostLogin, logPath, recordArtifactPr, sendBack, stageDef, validateWritePlan, type ArtifactIndex, type ChangeView, type Repo, type TransitionContext, type TransitionResult, type WritePlan } from "@sdlc/core";
 import type { GateNumber } from "@sdlc/schemas";
 import { ActionError, StateStore } from "../store.js";
@@ -78,10 +78,39 @@ function viewFor(repo: Repo, id: string): ChangeView {
   return deriveChange(repo, files);
 }
 
-function requireOnBase(root: string, base: string): Promise<void> {
-  return currentBranch(root).then((current) => {
-    if (current !== base) throw new ActionError(409, `hosted mode merges into ${base}; the working tree is on ${current}`);
-  });
+/**
+ * Bring `origin/<base>` into the local default branch after a merge done on the
+ * host. With the root working tree on `base`, a merge in place (fast-forward,
+ * else a merge commit under the acting identity). With the root elsewhere — a
+ * task branch checked out in the project root — the ref is fast-forwarded
+ * without a checkout; when git refuses that (local lifecycle commits origin
+ * lacks, or `base` checked out in another worktree) the merge runs in the
+ * worktree that has `base`, or a temporary one. Never a force-update: local
+ * commits are merged, not discarded.
+ */
+export async function syncBase(mode: HostedMode, root: string, base: string, message: string): Promise<string> {
+  const merge = (dir: string) => mergeRemoteBranch(dir, base, message, mode.identity, "origin", mode.committer);
+  if ((await currentBranch(root)) === base) return merge(root);
+  const ff = await fastForwardBranch(root, base);
+  if (!ff.refused) {
+    if (ff.moved) mode.log?.(`${base}: fast-forwarded to ${ff.head.slice(0, 7)}`);
+    return ff.head;
+  }
+  await assertCleanWorktreeOn(root, base);
+  return withBranchWorktree(root, base, merge);
+}
+
+/**
+ * A pre-existing worktree with `base` checked out is someone's working copy:
+ * the console merges or commits there only when it is clean. Nothing is
+ * stashed or reset; a dirty one is refused with its path. No worktree on
+ * `base` means `withBranchWorktree` makes a temporary one, which is always clean.
+ */
+async function assertCleanWorktreeOn(root: string, base: string): Promise<void> {
+  const existing = (await listWorktrees(root)).find((w) => w.branch === base);
+  if (!existing) return;
+  const status = (await git(existing.path, ["status", "--porcelain"])).trim();
+  if (status) throw new ActionError(409, `${base} is checked out at ${existing.path} with uncommitted changes; commit them or check out ${base} in the project root`);
 }
 
 export interface OpenedArtifactPr {
@@ -201,7 +230,6 @@ export async function acceptViaPr(mode: HostedMode, store: StateStore, id: strin
   const view = viewFor(repo, id);
   const target = artifactPrFor(view, gate, store.current?.branches);
   if (!target) throw new ActionError(409, `${id}: no open ${prNoun(mode.host.provider)} carries the artifact for gate ${gate}; the engine opens one for sdlc/${id}/<artifact> on its next pass (or run sdlc sync)`);
-  await requireOnBase(store.root, base);
   const result = accept(repo, view, gate, context(mode, mode.identity, { source: "pr.merge" }));
   if (!result.ok) throw refused(result);
   const report = validateWritePlan(repo, result.plan);
@@ -214,7 +242,7 @@ export async function acceptViaPr(mode: HostedMode, store: StateStore, id: strin
     const label = mode.host.label(target.pr.number);
     const merged = await mode.host.mergeHostedPr(store.root, target.pr.number, { sha: head, title: `sdlc(${id}): accept ${view.docs[target.index].name} (gate ${gate})` });
     if (!merged.merged) throw new CodeHostError(`${hostName(mode.host.provider)} did not merge ${label}: ${merged.message}`, true);
-    await mergeRemoteBranch(store.root, base, `sdlc(${id}): sync origin/${base} after ${label}`, mode.identity, "origin", mode.committer);
+    await syncBase(mode, store.root, base, `sdlc(${id}): sync origin/${base} after ${label}`);
     await store.refresh(true);
     return { commit, mergeSha: merged.sha, number: target.pr.number };
   } catch (e) {
@@ -261,9 +289,17 @@ export interface DetectedMerge {
  */
 export async function detectMergedPrs(mode: HostedMode, store: StateStore): Promise<DetectedMerge[]> {
   await store.refresh();
-  let repo = store.currentRepo;
+  const rootRepo = store.currentRepo;
+  if (!rootRepo) return [];
+  const base = rootRepo.config.defaultBranch;
+  // the decision a merge on the host records belongs on the default branch (decisions 1.7, 2.2), whichever branch the
+  // project root has checked out: with the root elsewhere the candidates, the view accepted against and the commit all
+  // come from `base`, while the console's own snapshot keeps following the root's HEAD (1.1)
+  const onBase = (await currentBranch(store.root)) === base;
+  const recorder = onBase ? store : store.at(base);
+  if (!onBase) await recorder.refresh();
+  let repo = recorder.currentRepo;
   if (!repo) return [];
-  const base = repo.config.defaultBranch;
   const candidates: { id: string; gate: GateNumber; number: number; mergeSha?: string }[] = [];
   for (const files of repo.changes.values()) {
     const view = deriveChange(repo, files);
@@ -286,11 +322,10 @@ export async function detectMergedPrs(mode: HostedMode, store: StateStore): Prom
     }
     if (!pull.merged) continue;
     if (!synced) {
-      await requireOnBase(store.root, base);
-      await mergeRemoteBranch(store.root, base, `sdlc: sync origin/${base}`, mode.identity, "origin", mode.committer);
+      await syncBase(mode, store.root, base, `sdlc: sync origin/${base}`);
       synced = true;
-      await store.refresh(true);
-      repo = store.currentRepo;
+      await recorder.refresh(true);
+      repo = recorder.currentRepo;
       if (!repo) return out;
     }
     const view = viewFor(repo, c.id);
@@ -312,9 +347,14 @@ export async function detectMergedPrs(mode: HostedMode, store: StateStore): Prom
       out.push({ changeId: c.id, gate: c.gate, number: c.number, mergedBy: login, recorded: false, reason: report.diagnostics.filter((d) => d.blocking).map((d) => d.message).join("; ") });
       continue;
     }
-    await commitWritePlan(store.root, result.plan, { identity: actor, ...(mode.committer ? { committer: mode.committer } : {}) });
-    await store.refresh(true);
-    repo = store.currentRepo ?? repo;
+    if (onBase) await commitWritePlan(store.root, result.plan, { identity: actor, ...(mode.committer ? { committer: mode.committer } : {}) });
+    else {
+      // on `base`, never on the root's task branch: outside the records PR a decision would be deletable with the branch
+      await assertCleanWorktreeOn(store.root, base);
+      await commitOnBranch(store.root, base, result.plan, actor, mode.committer);
+    }
+    await recorder.refresh(true);
+    repo = recorder.currentRepo ?? repo;
     out.push({ changeId: c.id, gate: c.gate, number: c.number, mergedBy: login, recorded: true });
     mode.log?.(`${c.id}: gate ${c.gate} recorded from ${label} merged by ${login}`);
   }
@@ -345,8 +385,7 @@ export async function syncRecords(mode: HostedMode, store: StateStore): Promise<
     const behind = await gitRaw(store.root, ["rev-list", "--count", `${base}..origin/${base}`]);
     if (behind.code === 0 && Number(behind.stdout.trim()) > 0) {
       // origin moved (a merged records PR, a merge done on the host): take it before pushing
-      await requireOnBase(store.root, base);
-      await mergeRemoteBranch(store.root, base, `sdlc: sync origin/${base}`, mode.identity, "origin", mode.committer);
+      await syncBase(mode, store.root, base, `sdlc: sync origin/${base}`);
       await store.refresh(true);
     }
     const count = await gitRaw(store.root, ["rev-list", "--count", `origin/${base}..${base}`]);
