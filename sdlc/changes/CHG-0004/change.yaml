@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0004
+title: Root eslint ignores .sdlc-state session worktrees
+kind: fix
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-10T09:10:35Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null
