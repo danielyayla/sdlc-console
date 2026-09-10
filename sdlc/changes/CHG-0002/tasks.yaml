@@ -1,0 +1,13 @@
+schema: 1
+changeId: CHG-0002
+cycle: 1
+tasks:
+  - id: packages-hooks-test
+    title: Work in packages/hooks/test
+    files:
+      - packages/hooks/test/hooks.test.ts
+    sequential: false
+    target: From one commit, `SDLC_CHANGE=CHG-0001 SDLC_SESSION=sess-launcher pnpm test` and `env -u SDLC_CHANGE -u SDLC_SESSION pnpm test` both exit 0; packages/hooks/test/hooks.test.ts has 10 passing `it`s (9 unchanged + 1 new) and exactly 1 `runHook(` occurrence; `git diff main --stat` lists that file only.
+    worktree: CHG-0002/packages-hooks-test
+    branch: CHG-0002/packages-hooks-test
+    state: confirmed

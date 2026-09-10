@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "n": 1,
+  "ts": "2026-09-09T18:48:02Z",
+  "results": [
+    {
+      "name": "pnpm build",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "> sdlc-console@ build\n> tsc -b && pnpm --filter @sdlc/web run build\n\ncomputing gzip size...\ndist/index.html                   0.39 kB │ gzip:  0.26 kB\ndist/assets/index-DFFh7CAL.css   19.21 kB │ gzip:  4.17 kB\ndist/assets/index-CQN-aces.js   262.87 kB │ gzip: 80.78 kB\n\n[INEFFECTIVE_DYNAMIC_IMPORT] src/api.ts is dynamically imported by src/app.tsx but also statically imported by src/app.tsx, src/views/ChangeDetail.tsx, dynamic import will not move module into another chunk.\n\n✓ built in 112ms\nexit=0"
+    },
+    {
+      "name": "pnpm test",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "SDLC_CHANGE=CHG-0001 SDLC_SESSION=sess-launcher pnpm test\n\n Test Files  81 passed (81)\n      Tests  553 passed (553)\n   Start at  21:44:40\n   Duration  80.22s (transform 8.70s, setup 0ms, import 134.70s, tests 504.90s, environment 8ms)\n\nlauncher exit=0"
+    },
+    {
+      "name": "pnpm test (env -u SDLC_CHANGE -u SDLC_SESSION)",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "env -u SDLC_CHANGE -u SDLC_SESSION pnpm test\n\n Test Files  81 passed (81)\n      Tests  553 passed (553)\n   Start at  21:46:01\n   Duration  87.12s (transform 8.41s, setup 0ms, import 151.45s, tests 557.01s, environment 11ms)\n\nunset exit=0"
+    },
+    {
+      "name": "pnpm lint",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": "> sdlc-console@ lint /Users/danielkapper/Projects/sdlc-console/.sdlc-state/worktrees/CHG-0002__packages-hooks-test\n> eslint . --max-warnings 0\n\nexit=0"
+    },
+    {
+      "name": "pnpm vitest run packages/hooks/test/hooks.test.ts (session env SDLC_CHANGE=CHG-0002)",
+      "pass": true,
+      "exitCode": 0,
+      "outputExcerpt": " Test Files  1 passed (1)\n      Tests  10 passed (10)\n   Start at  21:44:26\n   Duration  5.52s (transform 301ms, setup 0ms, import 812ms, tests 4.63s, environment 0ms)\n\nexit=0\ngrep -c \"runHook(\" packages/hooks/test/hooks.test.ts -> 1"
+    }
+  ]
+}
