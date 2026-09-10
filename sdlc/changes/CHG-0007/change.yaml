@@ -1,0 +1,14 @@
+schema: 1
+id: CHG-0007
+title: Session worktrees start without dependencies — the launcher installs them
+kind: fix
+risk: routine
+created:
+  by: dkapper01@gmail.com
+  at: 2026-09-10T10:26:21Z
+origin:
+  type: idea
+record: null
+cycle: 1
+repro: null
+closed: null
