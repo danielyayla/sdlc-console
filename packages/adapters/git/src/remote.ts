@@ -16,6 +16,18 @@ export async function fetchRemote(dir: string, remote = "origin", ref?: string):
 }
 
 /**
+ * Fast-forward local `branch` to `remote`'s without a checkout: `git fetch
+ * <remote> <branch>:<branch>`. Git refuses a non-fast-forward (never `+`, so
+ * local commits are never discarded) and a branch checked out in any
+ * worktree; both come back as `{ ok: false }` for the caller to merge instead.
+ */
+export async function fastForwardBranch(dir: string, branch: string, remote = "origin"): Promise<{ ok: true; head: string } | { ok: false; reason: string }> {
+  const r = await gitRaw(dir, ["fetch", "--quiet", remote, `refs/heads/${branch}:refs/heads/${branch}`]);
+  if (r.code !== 0) return { ok: false, reason: r.stderr.trim() || `fetch ${remote} ${branch}:${branch} failed (${r.code})` };
+  return { ok: true, head: (await git(dir, ["rev-parse", `refs/heads/${branch}`])).trim() };
+}
+
+/**
  * Bring `origin/<branch>` into the checked-out branch after a merge performed
  * on the code host. Fast-forwards when possible; otherwise a merge commit
  * under `who` joins the console's local lifecycle commits with the remote.

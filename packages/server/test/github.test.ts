@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { CodeHostError, git, initRepo, isAncestor, readTree } from "@sdlc/adapter-git";
+import { CodeHostError, git, initRepo, isAncestor, listWorktrees, readTree } from "@sdlc/adapter-git";
 import { deriveChange, loadRepo } from "@sdlc/core";
 import { PO, realizeSeedRepro, writeSeed } from "@sdlc/fixtures";
 import { appendFinding } from "@sdlc/mcp";
@@ -605,3 +605,77 @@ async function gitRawShow(dir: string, spec: string): Promise<string | null> {
     return null;
   }
 }
+
+describe("hosted-mode sync with the project root on a task branch (CHG-0008)", () => {
+  /** A second clone that moves origin's `main`, the way a merge done on the host does. */
+  async function advanceOrigin(dir: string, gh: FakeGitHub, file: string): Promise<string> {
+    const other = join(dirname(dir), `other-${file}`);
+    await git(dirname(dir), ["clone", "-q", gh.bare, other]);
+    await git(other, ["config", "user.name", "Someone Else"]);
+    await git(other, ["config", "user.email", "else@veri.example"]);
+    await git(other, ["config", "commit.gpgsign", "false"]);
+    writeFileSync(join(other, file), `${file}\n`);
+    await git(other, ["add", file]);
+    await git(other, ["commit", "-q", "-m", `feat: ${file}`]);
+    await git(other, ["push", "-q", "origin", "main"]);
+    return (await git(other, ["rev-parse", "HEAD"])).trim();
+  }
+  const rev = async (dir: string, ref: string) => (await git(dir, ["rev-parse", ref])).trim();
+  const branchOf = async (dir: string) => (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+
+  it("fast-forwards main with `fetch origin main:main`: no checkout, no merge commit, the root stays on its branch", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const { engine } = harness(dir, env);
+    await engine.sync(); // drain the first poll
+    await git(dir, ["checkout", "-q", "-b", "CHG-0018/elsewhere"]);
+    const before = await rev(dir, "main");
+    const remote = await advanceOrigin(dir, gh, "a.txt");
+    const sync = await engine.sync();
+    expect(sync?.errors).toEqual([]);
+    expect(sync?.records.error).toBeUndefined();
+    expect(await rev(dir, "main")).toBe(remote);
+    expect(await branchOf(dir)).toBe("CHG-0018/elsewhere");
+    expect((await git(dir, ["log", "--merges", "--format=%H", `${before}..main`])).trim()).toBe("");
+    expect((await git(dir, ["status", "--porcelain", "--untracked-files=no"])).trim()).toBe("");
+    expect((await listWorktrees(dir)).map((w) => w.branch)).toEqual(["CHG-0018/elsewhere"]);
+  }, 40_000);
+
+  it("when main carries local lifecycle commits origin lacks, the merge runs in a temporary worktree on main and the root is untouched", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const { engine } = harness(dir, env);
+    await engine.sync();
+    writeFileSync(join(dir, "README.md"), "# widgets\n\nlocal record\n");
+    await git(dir, ["add", "README.md"]);
+    await git(dir, ["commit", "-q", "-m", "sdlc(CHG-0018): a local lifecycle record"]);
+    const local = await rev(dir, "main");
+    await git(dir, ["checkout", "-q", "-b", "CHG-0018/elsewhere"]);
+    const remote = await advanceOrigin(dir, gh, "b.txt");
+    const sync = await engine.sync();
+    expect(sync?.errors).toEqual([]);
+    expect(sync?.records).toMatchObject({ pushed: true }); // main is ahead of origin again: the records PR carries the local commit
+    const head = await rev(dir, "main");
+    expect((await git(dir, ["log", "-1", "--format=%s", head])).trim()).toBe("sdlc: sync origin/main");
+    expect(await isAncestor(dir, local, head)).toBe(true);
+    expect(await isAncestor(dir, remote, head)).toBe(true);
+    expect((await git(dir, ["show", "-s", "--format=%an <%ae>", head])).trim()).toBe("Eli Ng <eng@veri.example>");
+    expect(await branchOf(dir)).toBe("CHG-0018/elsewhere");
+    expect((await git(dir, ["status", "--porcelain", "--untracked-files=no"])).trim()).toBe("");
+    expect((await listWorktrees(dir)).map((w) => w.branch)).toEqual(["CHG-0018/elsewhere"]); // the temporary worktree is gone
+  }, 40_000);
+
+  it("when main is checked out in another worktree, the merge runs there and that worktree's files move with it", async () => {
+    const { dir, gh, env } = await githubSeed();
+    const { engine } = harness(dir, env);
+    await engine.sync();
+    await git(dir, ["checkout", "-q", "-b", "CHG-0018/elsewhere"]);
+    const mainWt = join(dirname(dir), "main-wt");
+    await git(dir, ["worktree", "add", "-q", mainWt, "main"]);
+    const remote = await advanceOrigin(dir, gh, "c.txt");
+    const sync = await engine.sync();
+    expect(sync?.errors).toEqual([]);
+    expect(await rev(dir, "main")).toBe(remote);
+    expect(await rev(mainWt, "HEAD")).toBe(remote);
+    expect(existsSync(join(mainWt, "c.txt"))).toBe(true);
+    expect(await branchOf(dir)).toBe("CHG-0018/elsewhere");
+  }, 40_000);
+});
