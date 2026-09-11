@@ -1,12 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, initRepo, readTree } from "@sdlc/adapter-git";
-import { deriveChange, loadRepo } from "@sdlc/core";
+import { deriveChange, eventsNamed, loadRepo } from "@sdlc/core";
 import { PO, writeSeed } from "@sdlc/fixtures";
-import { SessionRegistry, enrich, launchSession, startServer, worktreePathFor, type Snapshot } from "../src/index.js";
+import { ActionError, INSTALL_COMMANDS, SessionRegistry, enrich, launchSession, startServer, worktreePathFor, type Exec, type Snapshot } from "../src/index.js";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.sh", import.meta.url));
 const cleanups: (() => Promise<void> | void)[] = [];
@@ -33,9 +33,30 @@ async function seeded(): Promise<string> {
   return dir;
 }
 
-function deps(dir: string, registry: SessionRegistry, env: Record<string, string> = {}) {
-  return { root: dir, registry, sdlcBin: "/opt/sdlc/bin.js", identity: { id: "eng@veri.example", name: "Eli Ng" }, claudeBin: FAKE, env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "", ...env } };
+function deps(dir: string, registry: SessionRegistry, env: Record<string, string> = {}, exec?: Exec) {
+  return { root: dir, registry, sdlcBin: "/opt/sdlc/bin.js", identity: { id: "eng@veri.example", name: "Eli Ng" }, claudeBin: FAKE, env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "", ...env }, ...(exec ? { exec } : {}) };
 }
+
+/** A pnpm lockfile committed on main, so every worktree cut from it names pnpm as the install manager (CHG-0007). */
+async function withLockfile(dir: string): Promise<void> {
+  writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+  await git(dir, ["add", "pnpm-lock.yaml"]);
+  await git(dir, ["commit", "-q", "-m", "chore: lockfile"]);
+}
+
+/** A fake package manager: records every `[cmd, cwd]`, returns one fixed result. */
+function fakeInstall(exitCode: number, output: string): Exec & { calls: [string, string][] } {
+  const calls: [string, string][] = [];
+  const exec = ((cmd: string, cwd: string) => {
+    calls.push([cmd, cwd]);
+    return Promise.resolve({ exitCode, output });
+  }) as Exec & { calls: [string, string][] };
+  exec.calls = calls;
+  return exec;
+}
+
+const PNPM_OK = "Lockfile is up to date, resolution step is skipped\nAlready up to date\nDone in 0.3s\n";
+const PNPM_OUTDATED = "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\" because pnpm-lock.yaml is not up to date with package.json\n";
 
 async function viewOn(worktree: string, id: string) {
   const repo = loadRepo(await readTree(worktree, "HEAD"));
@@ -55,6 +76,8 @@ describe("launchSession", () => {
     expect(r.session.kind).toBe("design");
     expect(r.session.mode).toBe("HEADLESS");
     expect(r.session.branch).toBe("sdlc/CHG-0021/spec");
+    // the seed has no lockfile: no install step, and the record says so
+    expect(r.session.install).toBeNull();
     const wt = worktreePathFor(dir, "sdlc/CHG-0021/spec");
     expect(existsSync(join(wt, "CLAUDE.md"))).toBe(true);
     const mcp = JSON.parse(readFileSync(join(wt, ".sdlc-state/sessions", r.session.id, "mcp.json"), "utf8")) as { mcpServers: { sdlc: { args: string[]; env: Record<string, string> } } };
@@ -112,6 +135,60 @@ describe("launchSession", () => {
     // CHG-0017 is at stage 5 → not a build stage; make a stage-4 change without acceptance line by editing the seed's plan is heavy; use CHG-0018 with an empty explicit target
     await expect(launchSession({ changeId: "CHG-0018", target: "   ", mode: "SUPERVISED" }, deps(dir, registry))).rejects.toThrow(/define done/);
   });
+
+  it("a lockfile: the fixed pnpm command runs once in the checkout before the harness; the record, install.log and session.started carry it; SUPERVISED is prepared the same way", async () => {
+    const dir = await seeded();
+    await withLockfile(dir);
+    const registry = new SessionRegistry(dir);
+    cleanups.push(() => registry.close());
+    const install = fakeInstall(0, PNPM_OK);
+    const r = await launchSession({ changeId: "CHG-0021" }, deps(dir, registry, {}, install));
+    const wt = worktreePathFor(dir, "sdlc/CHG-0021/spec");
+    expect(install.calls).toEqual([[INSTALL_COMMANDS.pnpm, wt]]);
+    expect(r.session.install).toMatchObject({ manager: "pnpm", command: INSTALL_COMMANDS.pnpm, exitCode: 0, output: PNPM_OK });
+    expect(r.session.install?.durationMs).toBeGreaterThanOrEqual(0);
+    expect(readFileSync(join(wt, ".sdlc-state/sessions", r.session.id, "install.log"), "utf8")).toBe(PNPM_OK);
+    expect(await r.finished).toBe(0);
+    expect(registry.get(r.session.id)).toMatchObject({ status: "done", install: { manager: "pnpm", exitCode: 0 } });
+    const files = loadRepo(await readTree(wt, "HEAD")).changes.get("CHG-0021");
+    const started = eventsNamed(files?.events ?? [], "session.started").find((e) => e.data.session === r.session.id);
+    expect(started?.data.install).toEqual({ manager: "pnpm", command: INSTALL_COMMANDS.pnpm, exitCode: 0, outputExcerpt: PNPM_OK.trim() });
+
+    // R8: a SUPERVISED launch installs before it hands the command over
+    const build = await launchSession({ changeId: "CHG-0018", mode: "SUPERVISED" }, deps(dir, registry, {}, install));
+    expect(build.session).toMatchObject({ status: "awaiting_engineer", install: { manager: "pnpm", exitCode: 0 } });
+    expect(build.session.command).toContain("--permission-mode acceptEdits");
+    expect(install.calls).toHaveLength(2);
+    expect(install.calls[1]).toEqual([INSTALL_COMMANDS.pnpm, worktreePathFor(dir, "CHG-0018/export-fix")]);
+  }, 30_000);
+
+  it("a failed install refuses the launch with the output: 502 retryable, no record, no ledger line, the worktree kept for the retry", async () => {
+    const dir = await seeded();
+    await withLockfile(dir);
+    const registry = new SessionRegistry(dir);
+    cleanups.push(() => registry.close());
+    const wt = worktreePathFor(dir, "sdlc/CHG-0021/spec");
+    const failing = fakeInstall(1, PNPM_OUTDATED);
+    const launch = launchSession({ changeId: "CHG-0021" }, deps(dir, registry, {}, failing));
+    await expect(launch).rejects.toMatchObject({ status: 502, retryable: true });
+    const err = await launch.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ActionError);
+    expect((err as ActionError).message).toBe(`dependency install failed in ${wt}: ${INSTALL_COMMANDS.pnpm} exited 1`);
+    expect((err as ActionError).diagnostics).toEqual([{ path: wt, severity: "error", message: PNPM_OUTDATED, rule: "session.install-failed" }]);
+    expect(registry.list()).toEqual([]);
+    expect(existsSync(wt)).toBe(true);
+    expect(existsSync(join(wt, ".sdlc-state", "sessions"))).toBe(false);
+    const files = loadRepo(await readTree(wt, "HEAD")).changes.get("CHG-0021");
+    expect(eventsNamed(files?.events ?? [], "session.started")).toEqual([]);
+
+    // the retry: the same checkout, no second worktree, and the launch goes through
+    const passing = fakeInstall(0, PNPM_OK);
+    const r = await launchSession({ changeId: "CHG-0021" }, deps(dir, registry, {}, passing));
+    expect(passing.calls).toEqual([[INSTALL_COMMANDS.pnpm, wt]]);
+    expect(r.session.install).toMatchObject({ manager: "pnpm", exitCode: 0 });
+    expect(await r.finished).toBe(0);
+    expect(registry.list().map((s) => s.id)).toEqual([r.session.id]);
+  }, 30_000);
 
   it("enrich merges rounds, waiting and test-edit attempts; the server snapshot lists sessions and the routes work", async () => {
     const dir = await seeded();

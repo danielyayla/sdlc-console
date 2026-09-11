@@ -104,6 +104,10 @@ export const events = {
           degraded: z.array(z.strictObject({ guarantee: nonEmpty, reason: nonEmpty })),
         })
         .optional(),
+      /** The dependency install that prepared the worktree (CHG-0007): the manager the lockfile named, the fixed command, its exit code and the verbatim tail of its output; absent when the repository has no lockfile. */
+      install: z
+        .strictObject({ manager: z.enum(["pnpm", "npm", "yarn"]), command: nonEmpty, exitCode: z.number().int(), outputExcerpt: z.string() })
+        .optional(),
     }),
     actor,
   ),

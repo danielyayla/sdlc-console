@@ -1,13 +1,15 @@
 import type { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { addWorktree, currentBranch, gitRaw, newUlid, showPrefix, type GitIdentity } from "@sdlc/adapter-git";
+import { newUlid, showPrefix, type GitIdentity } from "@sdlc/adapter-git";
 import { breachEvidence, routesOf, type BandStatus } from "@sdlc/core";
 import type { ControlBand, MetricSnapshot } from "@sdlc/schemas";
+import type { Exec } from "../engine/runner.js";
 import { noopTracer, type Tracer } from "../otel.js";
 import { observe } from "../sessions/observer.js";
 import { claudeCodeHarness, type Harness, type HarnessJob } from "../sessions/harness.js";
+import { installFailure, prepareWorktree } from "../sessions/install.js";
 import { standInForStop, worktreePathFor } from "../sessions/launcher.js";
 import type { SessionRegistry, StoredSession } from "../sessions/registry.js";
 
@@ -38,6 +40,8 @@ export interface BandLaunchDeps {
   defaultBranch: string;
   /** The harness for the session's kind (3.8); Claude Code when not given. */
   harness?: Harness;
+  /** Runs the dependency install (tests only); production callers leave it unset and `sh -c` runs the manager. */
+  exec?: Exec;
 }
 
 /** Branch a band session works on: the propose route's pull request comes from here; a diagnose session reads here. */
@@ -99,17 +103,15 @@ export async function launchBandSession(input: BandLaunchInput, deps: BandLaunch
   const prefix = await showPrefix(deps.root);
   const checkout = worktreePathFor(deps.root, branch);
   const worktree = prefix === "" ? checkout : join(checkout, prefix.replace(/\/$/, ""));
-  if (!existsSync(checkout)) {
-    mkdirSync(join(deps.root, ".sdlc-state", "worktrees"), { recursive: true });
-    await gitRaw(deps.root, ["worktree", "prune"]);
-    const onBase = (await currentBranch(deps.root)) === deps.defaultBranch ? "HEAD" : deps.defaultBranch;
-    await addWorktree(deps.root, checkout, branch, onBase);
-  }
+  // the worktree, then its dependencies (CHG-0007): a failed install refuses the launch before any record or process; the checkout stays for the retry
+  const prepared = await prepareWorktree(deps.root, branch, { checkout, defaultBranch: deps.defaultBranch, env, ...(deps.exec ? { exec: deps.exec } : {}), ...(deps.now ? { now: deps.now } : {}) });
+  if (prepared.install && prepared.install.exitCode !== 0) throw installFailure(checkout, prepared.install);
   const homeEnv = prefix === "" ? {} : { SDLC_HOME: prefix.replace(/\/$/, "") };
   const id = `sess-${newUlid().slice(-10).toLowerCase()}`;
   const harnessSessionId = randomUUID();
   const stateDir = join(worktree, ".sdlc-state", "sessions", id);
   mkdirSync(stateDir, { recursive: true });
+  if (prepared.install) writeFileSync(join(stateDir, "install.log"), prepared.install.output);
   const bandEnv = { SDLC_BAND: input.band.metric, SDLC_BAND_TIER: String(input.tier), SDLC_TRIAGE: input.triageId };
   const mcpConfig = join(stateDir, "mcp.json");
   writeFileSync(mcpConfig, `${JSON.stringify({ mcpServers: { sdlc: { command: "node", args: [deps.sdlcBin, "mcp"], env: { SDLC_SESSION: id, SDLC_ACTOR_TYPE: "agent", ...bandEnv, ...homeEnv } } } }, null, 2)}\n`);
@@ -122,7 +124,8 @@ export async function launchBandSession(input: BandLaunchInput, deps: BandLaunch
   const job: HarnessJob = { sessionId: id, harnessSessionId, kind, mode: "HEADLESS", changeId: "", prompt, promptFile: join(stateDir, "prompt.md"), mcpConfig, allowedTools, permissionMode: input.tier === 3 && routesOf(input.band).pr ? "acceptEdits" : "default", resume: false, worktree };
   const transcriptPath = join(stateDir, harness.capabilities.transcript ? "stream.jsonl" : "output.log");
   const tracer = deps.tracer ?? noopTracer;
-  const span = tracer.startSpan("sdlc.session", { attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": "HEADLESS", "sdlc.band": input.band.metric, "sdlc.band.tier": input.tier, "sdlc.triage": input.triageId, "sdlc.job.key": input.job, "sdlc.branch": branch, "sdlc.session.harness_id": harnessSessionId, "sdlc.session.harness": harness.id, "sdlc.session.degraded": harness.degraded.map((d) => d.guarantee).join(",") }, parent: null });
+  const span = tracer.startSpan("sdlc.session", { attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": "HEADLESS", "sdlc.band": input.band.metric, "sdlc.band.tier": input.tier, "sdlc.triage": input.triageId, "sdlc.job.key": input.job, "sdlc.branch": branch, "sdlc.session.harness_id": harnessSessionId, "sdlc.session.harness": harness.id, "sdlc.session.degraded": harness.degraded.map((d) => d.guarantee).join(","), "sdlc.install.manager": prepared.install?.manager ?? null, "sdlc.install.exit_code": prepared.install?.exitCode ?? null, "sdlc.install.duration_ms": prepared.install?.durationMs ?? null }, parent: null });
+  if (prepared.install) span.addEvent("sdlc.install", { "sdlc.install.manager": prepared.install.manager, "sdlc.install.command": prepared.install.command, "sdlc.install.exit_code": prepared.install.exitCode, "sdlc.install.duration_ms": prepared.install.durationMs }, Date.parse(prepared.install.startedAt) || undefined);
   const record: StoredSession = {
     id,
     kind,
@@ -152,6 +155,7 @@ export async function launchBandSession(input: BandLaunchInput, deps: BandLaunch
     harnessSessionId,
     harness: { id: harness.id, degraded: harness.degraded },
     standIn: null,
+    install: prepared.install,
     pid: null,
     exitCode: null,
     command: "",

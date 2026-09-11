@@ -7,6 +7,7 @@ import { eventsNamed } from "@sdlc/core";
 import { loopState, readReproDraft, readRounds, type ReproDraft, type StoredRound } from "@sdlc/mcp";
 import type { RoundResult } from "@sdlc/schemas";
 import type { SessionRecord } from "../snapshot.js";
+import type { InstallRecord } from "./install.js";
 
 export type SessionKind = "intent" | "design" | "plan" | "build" | "review" | "diagnose" | "propose";
 /** `done-unverified` (3.8): a harness without a Stop hook exited "done" but the last recorded round was not green; no run follows. */
@@ -55,6 +56,8 @@ export interface StoredSession extends SessionRecord {
   harness?: { id: string; degraded: { guarantee: string; reason: string }[] } | null;
   /** A server-side check that stood in for a hook the harness lacks (3.8): verify-before-done at exit, with the verdict verbatim. */
   standIn?: { guarantee: string; allowed: boolean; reason: string; rounds: number } | null;
+  /** The dependency install that prepared the worktree (CHG-0007); null when the repository has no lockfile; absent on records from before this field. */
+  install?: InstallRecord | null;
 }
 
 interface Row {

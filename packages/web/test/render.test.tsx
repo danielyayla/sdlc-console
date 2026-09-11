@@ -251,6 +251,21 @@ describe("Sessions (spec §4)", () => {
     expect(html).toContain(">Stop</button>");
     expect(html).toContain(">Take over</button>");
   });
+  it("shows the dependency install as one row and its output verbatim in the evidence element; nothing without a lockfile (CHG-0007)", () => {
+    const withInstall = (install: { exitCode: number; output: string } | null) =>
+      buildSnapshot(repo, { id: PO, name: "Priya Owens", roles: ["po", "eng"] }, seedSessions().map((s, i) => ({ ...s, install: i === 0 && install ? { manager: "pnpm", command: "pnpm install --frozen-lockfile --prefer-offline", exitCode: install.exitCode, startedAt: "2026-09-03T11:59:00Z", durationMs: 1200, output: install.output } : null })) as never, 1, now);
+    const at = (snap: ReturnType<typeof buildSnapshot>) => renderToString(<App snapshot={snap} initial={{ ...initialState("eng"), view: "sessions", session: "sess-0018-repro" }} now={now} live={false} />).replace(/<!-- -->/g, "");
+    const ok = at(withInstall({ exitCode: 0, output: "Lockfile is up to date\nDone in 1.2s" }));
+    expect(ok).toContain(">install</span>");
+    expect(ok).toContain('<span class="green-text">pnpm · exit 0 · 1.2 s</span>');
+    expect(ok).toContain('<div class="edetail" title="pnpm install --frozen-lockfile --prefer-offline"><pre>Lockfile is up to date\nDone in 1.2s</pre></div>');
+    const none = at(withInstall(null));
+    expect(none).not.toContain(">install</span>");
+    expect(none).not.toContain('class="edetail"');
+    const failed = at(withInstall({ exitCode: 1, output: "ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with \"frozen-lockfile\"" }));
+    expect(failed).toContain('<span class="red-text">pnpm · exit 1 · 1.2 s</span>');
+    expect(failed).toContain("ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with &quot;frozen-lockfile&quot;</pre>");
+  });
 });
 
 describe("Config (spec §4)", () => {

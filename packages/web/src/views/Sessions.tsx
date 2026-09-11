@@ -38,6 +38,8 @@ interface SessionCard {
   harness?: { id: string; degraded: { guarantee: string; reason: string }[] } | null;
   /** The server-side stand-in for a hook the harness lacks (3.8): its verdict, verbatim. */
   standIn?: { guarantee: string; allowed: boolean; reason: string; rounds: number } | null;
+  /** The dependency install that prepared the worktree (CHG-0007), verbatim from the record; null without a lockfile. */
+  install?: { manager: string; command: string; exitCode: number; durationMs: number; output: string } | null;
 }
 
 /** The harness and each unmet guarantee as words (rule 6): the name, then the first clause of the reason; the full reason is the title. */
@@ -171,6 +173,7 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, selected: sele
           if (s.verifier) details.push({ k: "verifier", v: `ran ${s.verifier.ran ? "✓" : "✗"} · saw ${s.verifier.saw ? "✓" : "✗"} · mismatch ${s.verifier.mismatch ? "✗" : "—"}` });
           if (s.subagents && s.subagents.length > 0) details.push({ k: "subagents", v: s.subagents.map((a) => `${a.name} · ${a.state}`).join(" · ") });
           if (s.autoRationale && s.autoRationale.terms.length > 0) details.push({ k: `${MODE_WORD[s.mode] ?? s.mode.toLowerCase()} because`, v: s.autoRationale.terms.join(" · "), cls: "green-text" });
+          if (s.install) details.push({ k: "install", v: `${s.install.manager} · exit ${s.install.exitCode} · ${(s.install.durationMs / 1000).toFixed(1)} s`, cls: s.install.exitCode === 0 ? "green-text" : "red-text" });
           if (shots.length > 0)
             details.push({
               k: "visual",
@@ -213,6 +216,7 @@ export function Sessions({ snapshot, onStart, onAction, onSelect, selected: sele
                     <span className={d.cls ?? "muted"}>{d.v}</span>
                   </div>
                 ))}
+                {s.install ? <div className="edetail" title={s.install.command}><pre>{s.install.output}</pre></div> : null}
                 {showing ? (
                   <div className="compare">
                     <div className="compare-head">
