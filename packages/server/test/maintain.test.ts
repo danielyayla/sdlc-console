@@ -4,11 +4,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { git, initRepo, readTree } from "@sdlc/adapter-git";
-import { loadRepo } from "@sdlc/core";
+import { loadRepo, type BandStatus } from "@sdlc/core";
 import { readSnapshots } from "@sdlc/detect";
 import { PO, writeSeed } from "@sdlc/fixtures";
+import type { MetricSnapshot } from "@sdlc/schemas";
 import { appendRunbookRun, writeDiagnosisDraft } from "@sdlc/mcp";
-import { Engine, JobStore, SessionRegistry, StateStore, bandTools, startServer, type Exec } from "../src/index.js";
+import { Engine, JobStore, SessionRegistry, StateStore, bandTools, launchBandSession, startServer, worktreePathFor, type Exec } from "../src/index.js";
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-claude.sh", import.meta.url));
 const ENG = { id: "eng@veri.example", name: "Eli Ng" };
@@ -283,4 +284,32 @@ describe("Maintain automation (3.4): a bands.yaml breach raises a triage item an
     cleanups.push(() => bare.close());
     expect((await fetch(`${bare.url}/api/detect`, { method: "POST" })).status).toBe(409);
   }, 30_000);
+
+  it("a band session with a lockfile installs before the harness (CHG-0007): the record carries install and the band worktree has install.log", async () => {
+    const dir = await seeded();
+    writeFileSync(join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    await git(dir, ["add", "pnpm-lock.yaml"]);
+    await git(dir, ["commit", "-q", "-m", "chore: lockfile"]);
+    const registry = new SessionRegistry(dir);
+    cleanups.push(() => registry.close());
+    const band = (await repoAt(dir)).bands?.metrics.find((b) => b.metric === "error_rate_pct");
+    if (!band?.source) throw new Error("the seed's 2σ band is missing");
+    const ts = "2026-09-08T10:00:00Z";
+    const snapshot: MetricSnapshot = { schema: 1, metric: band.metric, ts, baseline: band.baseline, current: 0.62, sigma: band.sigma ?? null, tier: 2, breached: true, source: { command: band.source, exitCode: 0, output: "0.62" } };
+    const job = `band:${band.metric}:2σ:${ts}`;
+    const status: BandStatus = { metric: band.metric, baseline: band.baseline, unit: band.unit ?? null, source: band.source, current: 0.62, sigma: band.sigma ?? null, tier: 2, breached: true, action: "diagnose", ts, samples: 0, status: "", triage: ["TRI-0042"], job };
+    const calls: [string, string][] = [];
+    const exec: Exec = (cmd, cwd) => {
+      calls.push([cmd, cwd]);
+      return Promise.resolve({ exitCode: 0, output: "Done in 0.2s\n" });
+    };
+    // the engine does not take an exec for sessions (production runs the real manager): the launcher is called directly
+    const r = await launchBandSession({ band, snapshot, tier: 2, triageId: "TRI-0042", job, status, history: [] }, { root: dir, registry, sdlcBin: "/opt/sdlc/bin.js", identity: ENG, claudeBin: FAKE, defaultBranch: "main", env: { PATH: process.env["PATH"] ?? "", HOME: process.env["HOME"] ?? "" }, exec });
+    const wt = worktreePathFor(dir, "sdlc/maintain/error_rate_pct");
+    expect(calls).toEqual([["pnpm install --frozen-lockfile --prefer-offline", wt]]);
+    expect(r.session.install).toMatchObject({ manager: "pnpm", exitCode: 0, output: "Done in 0.2s\n" });
+    expect(readFileSync(join(wt, ".sdlc-state", "sessions", r.session.id, "install.log"), "utf8")).toBe("Done in 0.2s\n");
+    await r.finished;
+    expect(registry.get(r.session.id)).toMatchObject({ install: { manager: "pnpm", exitCode: 0 } });
+  }, 20_000);
 });

@@ -20,6 +20,7 @@ packages/server/src/maintain/session.ts
 packages/server/src/sessions/registry.ts
 packages/schemas/src/event.ts
 packages/schemas/json/event.schema.json
+packages/schemas/json/change-export.schema.json
 packages/cli/src/commands/init.ts
 packages/cli/src/commands/session.ts
 packages/web/src/views/Sessions.tsx
@@ -71,7 +72,7 @@ Every step ends with the named test files green (`pnpm vitest run <paths>`); the
      .strictObject({ manager: z.enum(["pnpm", "npm", "yarn"]), command: nonEmpty, exitCode: z.number().int(), outputExcerpt: z.string() })
      .optional(),
    ```
-   Regenerate, never hand-edit: `pnpm build` (the generator reads `dist/`), then `pnpm --filter @sdlc/schemas generate`; commit the rewritten `json/event.schema.json`. `pnpm vitest run packages/schemas` green (R11 test 8, the drift test in `test/json-sync.test.ts`). Seed fixtures and every existing ledger stay valid because the field is optional (C2).
+   Regenerate, never hand-edit: `pnpm build` (the generator reads `dist/`), then `pnpm --filter @sdlc/schemas generate`; commit the rewritten `json/event.schema.json` and `json/change-export.schema.json` (the export schema embeds the event schema, so the generator rewrites both and the drift test checks both; found in build). `pnpm vitest run packages/schemas` green (R11 test 8, the drift test in `test/json-sync.test.ts`). Seed fixtures and every existing ledger stay valid because the field is optional (C2).
 
 4. **`packages/server/src/sessions/launcher.ts`, `packages/server/src/maintain/session.ts`, `packages/server/src/sessions/registry.ts`, `packages/server/test/sessions.test.ts`, `packages/server/test/maintain.test.ts`.** Commit `sdlc(server): launchers install dependencies before the harness`.
    `registry.ts`: `import type { InstallRecord } from "./install.js";` and on `StoredSession`, after `standIn`: `/** The dependency install that prepared the worktree (CHG-0007); null when the repository has no lockfile; absent on records from before this field. */ install?: InstallRecord | null;`. `enrich` leaves it alone; the snapshot's `SessionRecord` has an index signature, so the field reaches the web without any snapshot change.

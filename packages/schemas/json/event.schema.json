@@ -1335,6 +1335,38 @@
                 "degraded"
               ],
               "additionalProperties": false
+            },
+            "install": {
+              "type": "object",
+              "properties": {
+                "manager": {
+                  "type": "string",
+                  "enum": [
+                    "pnpm",
+                    "npm",
+                    "yarn"
+                  ]
+                },
+                "command": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "exitCode": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "outputExcerpt": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "manager",
+                "command",
+                "exitCode",
+                "outputExcerpt"
+              ],
+              "additionalProperties": false
             }
           },
           "required": [

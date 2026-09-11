@@ -2,14 +2,16 @@ import type { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { addWorktree, branchExists, commitWritePlan, currentBranch, gitRaw, newUlid, readTree, showPrefix, type GitIdentity } from "@sdlc/adapter-git";
+import { branchExists, commitWritePlan, newUlid, readTree, showPrefix, type GitIdentity } from "@sdlc/adapter-git";
 import { check, deriveChange, harnessFor, loadRepo, logPath, normalizeReason, repeatSignals, stageDef, type ChangeView, type Repo, type RepeatSignal, type WritePlan } from "@sdlc/core";
 import { claudeCodeHarness, harnessFromConfig, type Harness, type HarnessJob } from "./harness.js";
 import { PROPOSAL_JOB, buildContext, readRounds, type ContextBundle, type StoredRound } from "@sdlc/mcp";
+import type { Exec } from "../engine/runner.js";
 import { noopTracer, type Tracer } from "../otel.js";
 import type { Event } from "@sdlc/schemas";
 import { ActionError } from "../store.js";
 import { capacityOf } from "./capacity.js";
+import { installExcerpt, installFailure, prepareWorktree } from "./install.js";
 import { observe } from "./observer.js";
 import { promptFor } from "./prompts.js";
 import type { SessionKind, SessionRegistry, SessionStatus, StoredSession } from "./registry.js";
@@ -46,6 +48,8 @@ export interface LaunchDeps {
   tracer?: Tracer;
   /** Harness override (tests); otherwise `config.harness` per session kind, Claude Code by default (3.8). */
   harness?: Harness;
+  /** Runs the dependency install (tests only); production callers leave it unset and `sh -c` runs the manager. */
+  exec?: Exec;
 }
 
 export interface LaunchResult {
@@ -160,14 +164,9 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   const worktree = prefix === "" ? checkout : join(checkout, prefix.replace(/\/$/, ""));
   // a review session's own ledger lines are lifecycle records: they commit on the default branch, not on the PR branch
   const ledgerDir = kind === "review" || kind === "propose" ? deps.root : worktree;
-  if (!existsSync(checkout)) {
-    mkdirSync(join(deps.root, ".sdlc-state", "worktrees"), { recursive: true });
-    // the cache directory is disposable: a checkout deleted with it is pruned so its branch can be checked out again
-    await gitRaw(deps.root, ["worktree", "prune"]);
-    const base = repo.config.defaultBranch;
-    const onBase = (await currentBranch(deps.root)) === base ? "HEAD" : base;
-    await addWorktree(deps.root, checkout, branch, onBase);
-  }
+  // the worktree, then its dependencies (CHG-0007): a failed install refuses the launch before any record, ledger line or process; the checkout stays for the retry
+  const prepared = await prepareWorktree(deps.root, branch, { checkout, defaultBranch: repo.config.defaultBranch, env, ...(deps.exec ? { exec: deps.exec } : {}), ...(deps.now ? { now: deps.now } : {}) });
+  if (prepared.install && prepared.install.exitCode !== 0) throw installFailure(checkout, prepared.install);
   const homeEnv = prefix === "" ? {} : { SDLC_HOME: prefix.replace(/\/$/, "") };
 
   const resuming = input.resume ?? null;
@@ -176,6 +175,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   const harnessSessionId = existing?.harnessSessionId ?? randomUUID();
   const stateDir = join(worktree, ".sdlc-state", "sessions", id);
   mkdirSync(stateDir, { recursive: true });
+  if (prepared.install) writeFileSync(join(stateDir, "install.log"), prepared.install.output);
   const mcpConfig = join(stateDir, "mcp.json");
   writeFileSync(mcpConfig, `${JSON.stringify({ mcpServers: { sdlc: { command: "node", args: [deps.sdlcBin, "mcp"], env: { SDLC_SESSION: id, SDLC_CHANGE: view.id, SDLC_ACTOR_TYPE: "agent", ...homeEnv } } } }, null, 2)}\n`);
   const bundle: ContextBundle = buildContext(repo, view, kind === "propose" ? PROPOSAL_JOB : undefined);
@@ -193,9 +193,10 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   const tracer = deps.tracer ?? noopTracer;
   const parent = existing?.traceId && existing.spanId ? { traceId: existing.traceId, spanId: existing.spanId } : null;
   const span = tracer.startSpan(resuming ? "sdlc.session.resume" : "sdlc.session", {
-    attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": mode, "sdlc.change": view.id, "sdlc.cycle": view.cycle, "sdlc.stage": view.stage, "sdlc.task": taskId, "sdlc.branch": branch, "sdlc.session.engineer": input.engineer ?? deps.identity.id, "sdlc.session.resume_count": resuming ? (existing?.resumeCount ?? 0) + 1 : 0, "sdlc.session.harness_id": harnessSessionId, "sdlc.session.harness": harness.id, "sdlc.session.degraded": harness.degraded.map((d) => d.guarantee).join(",") },
+    attributes: { "sdlc.session.id": id, "sdlc.session.kind": kind, "sdlc.session.mode": mode, "sdlc.change": view.id, "sdlc.cycle": view.cycle, "sdlc.stage": view.stage, "sdlc.task": taskId, "sdlc.branch": branch, "sdlc.session.engineer": input.engineer ?? deps.identity.id, "sdlc.session.resume_count": resuming ? (existing?.resumeCount ?? 0) + 1 : 0, "sdlc.session.harness_id": harnessSessionId, "sdlc.session.harness": harness.id, "sdlc.session.degraded": harness.degraded.map((d) => d.guarantee).join(","), "sdlc.install.manager": prepared.install?.manager ?? null, "sdlc.install.exit_code": prepared.install?.exitCode ?? null, "sdlc.install.duration_ms": prepared.install?.durationMs ?? null },
     parent,
   });
+  if (prepared.install) span.addEvent("sdlc.install", { "sdlc.install.manager": prepared.install.manager, "sdlc.install.command": prepared.install.command, "sdlc.install.exit_code": prepared.install.exitCode, "sdlc.install.duration_ms": prepared.install.durationMs }, Date.parse(prepared.install.startedAt) || undefined);
 
   const record: StoredSession = {
     ...(existing ?? {}),
@@ -227,6 +228,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
     harnessSessionId,
     harness: { id: harness.id, degraded: harness.degraded },
     standIn: null,
+    install: prepared.install,
     pid: null,
     exitCode: null,
     command,
@@ -242,7 +244,7 @@ export async function launchSession(input: LaunchInput, deps: LaunchDeps): Promi
   deps.registry.upsert(record);
 
   if (!resuming) {
-    const started: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(repo, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.started", data: { session: id, mode, ...(taskId ? { task: taskId } : {}), worktree: branch, ...(target ? { target } : {}), harness: { id: harness.id, degraded: harness.degraded } } } as Event;
+    const started: Event = { schema: 1, id: newUlid(), ts: now(), seq: nextSeq(repo, view.id, ledgerDir), cycle: view.cycle, actor: { type: "system", id: SYSTEM.id }, event: "session.started", data: { session: id, mode, ...(taskId ? { task: taskId } : {}), worktree: branch, ...(target ? { target } : {}), harness: { id: harness.id, degraded: harness.degraded }, ...(prepared.install ? { install: { manager: prepared.install.manager, command: prepared.install.command, exitCode: prepared.install.exitCode, outputExcerpt: installExcerpt(prepared.install.output) } } : {}) } } as Event;
     const sha = await systemEventCommit(ledgerDir, view.id, started, `sdlc(${view.id}): session ${id} started (${mode})`, SYSTEM);
     span.addEvent("sdlc.ledger.session.started", { "sdlc.event.id": started.id, "sdlc.commit": sha });
   }
