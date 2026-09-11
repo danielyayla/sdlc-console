@@ -44,3 +44,4 @@
 {"schema":1,"id":"01M27PT98588920KRBF3MMSEH6","ts":"2026-09-11T07:44:49Z","seq":40,"cycle":1,"actor":{"type":"human","id":"dkapper01@gmail.com","role":"eng"},"event":"gate.accepted","data":{"gate":5,"artifactSha":"661f9f86b1c8a39d9cc6c4cb1505d842efdc6c64","source":"pr.merge"}}
 {"schema":1,"id":"01M27PT9860T34S40EA6H7CFE7","ts":"2026-09-11T07:44:49Z","seq":41,"cycle":1,"actor":{"type":"human","id":"dkapper01@gmail.com","role":"eng"},"event":"pr.merged","data":{"number":77,"mergeSha":"3f3be2e65221ff95b8a2623d383891e4fc59f241"}}
 {"schema":1,"id":"01M27PT986W5F2X0RZ4AX24E4Y","ts":"2026-09-11T07:44:49Z","seq":42,"cycle":1,"actor":{"type":"system","id":"sdlc-bot"},"event":"stage.entered","data":{"stage":6}}
+{"schema":1,"id":"01M27QBQ4CVRT2VE9K4BGKDV2B","ts":"2026-09-11T07:54:21Z","seq":43,"cycle":1,"actor":{"type":"system","id":"sdlc-bot@sdlc.local"},"event":"session.stopped","data":{"session":"sess-9gm7crk0c2","reason":"done"}}
