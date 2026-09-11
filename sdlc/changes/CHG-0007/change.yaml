@@ -11,4 +11,6 @@ origin:
 record: null
 cycle: 1
 repro: null
-closed: null
+closed:
+  at: 2026-09-11T07:51:06Z
+  reason: "fix merged to main as PR #77 with per-change run 2 green; no environments declared, nothing left to do"
