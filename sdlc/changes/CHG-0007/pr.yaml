@@ -14,6 +14,17 @@ checks:
   - name: evals
     verdict: pass
     summary: per-change run 2 · no eval cases intersect the diff
+  - name: findings
+    verdict: pass
 planMatches: false
 mergedAt: 2026-09-11T07:44:49Z
 mergeSha: 3f3be2e65221ff95b8a2623d383891e4fc59f241
+findings:
+  high: 0
+  medium: 2
+  low: 2
+review:
+  session: sess-9gm7crk0c2
+  headSha: f300b75ec623a17f7fae246653ca05a212ce2511
+  at: 2026-09-11T07:54:21Z
+  afterMerge: true
